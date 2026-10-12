@@ -2,15 +2,12 @@
 
 **Trust what your agents know.**
 
-This is the monorepo behind [rrsrch.com](https://rrsrch.com) — two products that
-attack the same problem from opposite ends: agents act on things they cannot
-verify. **Backpack** verifies what they *know*; **Atlas** verifies what they
-*run on*.
+This is the monorepo behind [rrsrch.com](https://rrsrch.com). Agents act on
+things they cannot verify; **Backpack** verifies what they *know*.
 
 | | | |
 |---|---|---|
 | **Backpack** | Shared, verified memory for your agents | Self-host today |
-| **Atlas** | A verified map of your system, with evidence | Pilot |
 
 ---
 
@@ -77,61 +74,14 @@ numbers: **[`rrsrch/README.md`](rrsrch/README.md)**. Design rationale:
 
 ---
 
-## Atlas — a verified map of your system
-
-*Directory: [`atlas-probe/`](atlas-probe/) · Python · MCP + CLI*
-
-Architecture diagrams describe what someone *believed* was true. Atlas builds a
-system graph from independent evidence classes — declared (config, IaC,
-manifests) and observed (live, read-only shell evidence) — and reconciles them
-deterministically. Every edge lands in one of four states:
-
-| State | Meaning |
-|---|---|
-| `confirmed` | declared **and** independently observed |
-| `phantom` | declared, an observer looked, and it is **not** there |
-| `shadow` | observed running, never declared |
-| `undecidable` | declared, but no connected source *can* observe it — an evidence gap, stated honestly |
-
-Phantom and shadow edges are the findings an audit cares about: documented but
-absent, or running in production and documented nowhere. `undecidable` is the
-discipline that keeps the rest credible — Atlas never guesses to fill a gap.
-
-Nothing is hardcoded. The probe discovers your stack at runtime from the repo's
-own files (`package.json`, `pyproject`/`requirements`, `docker-compose`, the
-Vercel link, env variable *names*) and from live read-only evidence (`docker
-ps`, port checks, a curl against the production domain, the Vercel CLI). Env
-**values** are never read except to extract a host from `*_URL`-style names —
-credentials are stripped, secrets are never touched.
-
-```bash
-pip install ./atlas-probe
-cd ~/code/your-project && atlas-probe    # → ~/.atlas/targets/<name>/atlas_graph.json
-```
-
-Then give an agent read-only access to the attestation:
-
-```bash
-claude mcp add atlas --scope user \
-    --env ATLAS_GRAPH=/path/to/atlas_graph.json \
-    -- atlas-mcp
-```
-
-The MCP server is thin and read-only — every tool answers from the exported
-graph. No probing, no LLM, no writes. Publish an attestation to your rrsrch.com
-account and the Atlas tab renders it.
-
----
-
 ## The site
 
 `rrsrch.com` — a React SPA plus an Express API, deployed on Vercel.
 
 ```
-rrsrch-react/     the SPA: product pages, the account dashboard, the Atlas
-                  attestation viewer (src/AtlasView.js)
+rrsrch-react/     the SPA: product pages and the account dashboard
 server.js         the Express app: accounts, projects, Google OAuth, device
-                  pairing for CLI clients, Atlas publish/read/delete
+                  pairing for CLI clients
 api/index.js      the Vercel serverless entry point — re-exports server.js
 vercel.json       build config: SPA build + /api/* → the Express app
 ```
@@ -154,7 +104,6 @@ project — `.env` is never committed.
 ```
 rrsrch/           the Backpack engine (Python) — corpus, matcher, confidence,
                   bandit, MCP server, eval harness, measurement reports
-atlas-probe/      the Atlas probe + read-only MCP server (pip-installable)
 rrsrch-react/     the rrsrch.com SPA
 server.js         the rrsrch.com API (Express)
 api/              Vercel serverless entry point

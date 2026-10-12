@@ -3,7 +3,6 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { MessageCircle, X, Twitter, ArrowRight, Search, Github, Database, Zap, Shield, Terminal as TerminalIcon, Clock, ChevronDown } from 'lucide-react';
-import AtlasAttestation from './AtlasView';
 
 // Product / deploy config
 const REPO_URL = 'https://github.com/darko-ops/RRSRCH';
@@ -740,117 +739,6 @@ $ pip install .      # puts the rrsrch-mcp server on your PATH`}</CodeBlock>
   );
 }
 
-// --- Atlas (verified system graph + data-flow attestation) ---
-
-const ATLAS_ACCENT = '#7aa7e0';
-
-function AtlasExplainer({ isMobile }) {
-  const heading = {
-    fontSize: isMobile ? '26px' : 'clamp(28px, 3.4vw, 40px)',
-    color: '#fff', fontWeight: 800, lineHeight: 1.1, margin: '0 0 20px 0',
-    letterSpacing: '-0.02em', fontFamily: theme.fonts.main
-  };
-  const body = {
-    color: '#8a8a8a', fontSize: isMobile ? '15px' : '17px', lineHeight: 1.7,
-    maxWidth: '640px', margin: 0, fontFamily: theme.fonts.main
-  };
-  const card = {
-    background: 'rgba(0,0,0,0.3)', border: '1px solid #222',
-    borderRadius: '14px', padding: '24px'
-  };
-  const sectionGap = isMobile ? '64px' : '96px';
-  const mono = { fontFamily: theme.fonts.mono };
-
-  // the five provenance classes — same definitions as the attestation artifact
-  const classes = [
-    ['confirmed', '#5da862', 'declared in config AND observed in runtime evidence'],
-    ['phantom', '#e07070', 'declared, observable, and absent — documented but not real (drift)'],
-    ['shadow', '#dd9159', 'observed at runtime but declared nowhere — real but undocumented (drift)'],
-    ['undecidable', ATLAS_ACCENT, 'declared, but no connected source can observe it — evidence gap, not drift'],
-    ['hypothesis', '#84847e', 'inferred from code only'],
-  ];
-
-  return (
-    <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-      <section style={{ marginBottom: sectionGap }}>
-        <div style={{ fontSize: '12px', color: ATLAS_ACCENT, letterSpacing: '2px', textTransform: 'uppercase', ...mono, marginBottom: '18px', opacity: 0.9 }}>Atlas — what it is</div>
-        <h2 style={{ ...heading, fontSize: isMobile ? '30px' : 'clamp(32px, 4.2vw, 52px)', maxWidth: '820px' }}>
-          A verified map of your system — every data flow reconciled against what config declares, code implies, and runtime proves.
-        </h2>
-        <p style={{ ...body, maxWidth: '680px' }}>
-          Atlas builds a system graph from three independent evidence classes — declared (config/IaC),
-          inferred (static analysis), observed (genuine runtime signal) — and reconciles them
-          deterministically. The output is a data-flow attestation: every edge on the map traces to a
-          source you can check.
-        </p>
-      </section>
-
-      <section style={{ marginBottom: sectionGap }}>
-        <div style={{ fontSize: '12px', color: ATLAS_ACCENT, letterSpacing: '2px', textTransform: 'uppercase', ...mono, marginBottom: '18px', opacity: 0.9 }}>The drift value</div>
-        <h2 style={heading}>Where documented ≠ real, Atlas shows you — with the evidence.</h2>
-        <p style={{ ...body, marginBottom: '28px' }}>
-          A <strong style={{ color: '#e07070' }}>phantom</strong> edge is declared but absent at runtime
-          despite an observing source. A <strong style={{ color: '#dd9159' }}>shadow</strong> edge is
-          running in production but documented nowhere. Both are the findings an audit cares about —
-          and an honest map refuses to call anything drift that is merely unobservable.
-        </p>
-        <div style={{ ...card, padding: isMobile ? '18px' : '24px' }}>
-          {classes.map(([name, color, def]) => (
-            <div key={name} style={{ display: 'flex', gap: '14px', alignItems: 'baseline', padding: '7px 0', borderBottom: '1px solid #1c1c1c', fontSize: '13.5px' }}>
-              <span style={{ ...mono, color, minWidth: '105px', fontWeight: 700 }}>{name}</span>
-              <span style={{ color: '#9a9a9a', lineHeight: 1.5 }}>{def}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section style={{ marginBottom: sectionGap }}>
-        <div style={{ fontSize: '12px', color: ATLAS_ACCENT, letterSpacing: '2px', textTransform: 'uppercase', ...mono, marginBottom: '18px', opacity: 0.9 }}>Proven on our own stack</div>
-        <h2 style={heading}>First attestation: our production app, real evidence, one real drift.</h2>
-        <p style={{ ...body, marginBottom: '28px' }}>
-          We ran the reconciliation probe against our own production stack (Vercel + Supabase + Stripe):
-          15 components resolved 1:1, 16 edges, every one source-backed. Result: 13 confirmed,
-          1 phantom — a declared migration path that never ran — and 2 honestly marked undecidable
-          pending provider-log connectors. That artifact, drift finding and evidence appendix included,
-          is the deliverable.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '14px' }}>
-          {[['13', 'confirmed edges', '#5da862'], ['1', 'phantom (real drift)', '#e07070'],
-            ['2', 'undecidable (honest)', ATLAS_ACCENT], ['16/16', 'edges source-backed', '#ccc']]
-            .map(([v, l, c]) => (
-            <div key={l} style={{ ...card, textAlign: 'center', padding: '20px 12px' }}>
-              <div style={{ fontSize: '26px', fontWeight: 800, color: c }}>{v}</div>
-              <div style={{ fontSize: '12px', color: '#7a7a7a', marginTop: '4px' }}>{l}</div>
-            </div>
-          ))}
-        </div>
-        <p style={{ ...body, fontSize: '13px', color: '#666', marginTop: '18px' }}>
-          Numbers above are from that single validation probe on our own infrastructure — one stack,
-          measured, not extrapolated. Want the same attestation of your stack? That&rsquo;s the pilot.
-        </p>
-      </section>
-
-      <section>
-        <div style={{ fontSize: '12px', color: ATLAS_ACCENT, letterSpacing: '2px', textTransform: 'uppercase', ...mono, marginBottom: '18px', opacity: 0.9 }}>Status</div>
-        <h2 style={heading}>Early. Validated probe, pilot next.</h2>
-        <p style={{ ...body, marginBottom: '24px' }}>
-          The reconciliation engine and the attestation artifact exist and passed their validation gates
-          on a real stack. Connectors beyond Vercel/Supabase/Stripe (provider request logs — the thing
-          that turns &ldquo;undecidable&rdquo; into an answer) are the v1 build. If you want your
-          infra mapped with evidence, get in touch.
-        </p>
-        <a href={`mailto:${WAITLIST_EMAIL}?subject=${encodeURIComponent('Atlas pilot')}`} style={{
-          display: 'inline-flex', alignItems: 'center', gap: '8px', background: ATLAS_ACCENT,
-          color: '#000', textDecoration: 'none', padding: '12px 22px', borderRadius: '8px',
-          fontSize: '14px', fontWeight: 700
-        }}>
-          Ask about the pilot <ArrowRight size={15} />
-        </a>
-      </section>
-    </div>
-  );
-}
-
 // --- Account: sign in / create account + the dashboard ---
 
 const TOKEN_KEY = 'rrsrch_token';
@@ -913,35 +801,6 @@ function ConnectionDocs({ isMobile }) {
           without per-user setup. Point RRSRCH_DATABASE_URL at the org&rsquo;s shared Postgres.
         </p>
       </div>
-      <div style={card}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-          <Shield size={18} color={ATLAS_ACCENT} />
-          <span style={{ color: '#fff', fontSize: '16px', fontWeight: 700 }}>atlas-mcp — the Atlas server</span>
-          <span style={{ fontFamily: theme.fonts.mono, fontSize: '11px', color: ATLAS_ACCENT, border: `1px solid ${ATLAS_ACCENT}55`, borderRadius: '100px', padding: '3px 10px' }}>SHIPS WITH THE PILOT</span>
-        </div>
-        <p style={{ color: '#7a7a7a', fontSize: '14px', lineHeight: 1.6, margin: '0 0 14px 0' }}>
-          Attest a system with the probe (one repo from its own directory, or several repos as one
-          system) — it publishes to your account and the Atlas tab here reads it. Nothing hosted,
-          nothing local in the dashboard.
-        </p>
-        <CodeBlock>{`# one repo — run from inside it
-$ cd ~/code/your-app && atlas-probe
-
-# several repos, one system (e.g. a Vercel site + a dockerized service)
-$ atlas-probe --name your-system ~/code/your-web ~/code/your-worker`}</CodeBlock>
-        <p style={{ color: '#7a7a7a', fontSize: '14px', lineHeight: 1.6, margin: '14px 0' }}>
-          The MCP server exposes the reconciled graph to agents: summary, edges with their evidence,
-          deterministic blast radius, and the honest gaps. Ships with the pilot.
-        </p>
-        <CodeBlock>{`{
-  "mcpServers": {
-    "atlas": {
-      "command": "atlas-mcp",
-      "env": { "ATLAS_GRAPH": "/path/to/atlas_graph.json" }
-    }
-  }
-}`}</CodeBlock>
-      </div>
     </>
   );
 }
@@ -1001,7 +860,7 @@ function NotConnected({ what, endpoint, hint }) {
 const OUTCOME_STYLE = {
   hit: ['#00ff88', 'reused'], stale: ['#fab219', 'stale'], miss: ['#888', 'miss'],
   agreed: ['#00ff88', 'corroborated'], disagreed: ['#e07070', 'corrected'],
-  explore: [ATLAS_ACCENT, 'spot-check'],
+  explore: ['#7aa7e0', 'spot-check'],
 };
 
 function BackpackPanel({ isMobile, accountEmail, endpoint, setEndpoint }) {
@@ -1100,91 +959,6 @@ function BackpackPanel({ isMobile, accountEmail, endpoint, setEndpoint }) {
   );
 }
 
-function AtlasPanel({ isMobile, projectName }) {
-  const [graph, setGraph] = useState(null);
-  const [status, setStatus] = useState('loading'); // loading | none | ok
-  const [published, setPublished] = useState([]);  // slugs already on the account
-  // same slug rule as probe.py + the server: kebab-cased target name
-  const slug = (projectName || 'your-project').toLowerCase()
-    .replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '');
-  const probeRecipe = `# one-time on the machine with the code — pair it to this account
-$ rrsrch-login
-
-# attest the project FROM ITS OWN REPO (read-only; discovers the stack)
-$ cd ~/code/${slug} && atlas-probe
-
-# it publishes to this dashboard automatically — nothing to host, nothing local`;
-
-  useEffect(() => {
-    let alive = true;
-    // project switch: drop the previous project's graph immediately — rendering
-    // it under a new slug leaves stale node/edge selections pointing nowhere
-    setStatus('loading'); setGraph(null); setPublished([]);
-    const auth = { Authorization: `Bearer ${localStorage.getItem(TOKEN_KEY)}` };
-    const poll = async () => {
-      try {
-        const r = await fetch(`/api/account/atlas/${slug}`, { headers: auth });
-        if (!alive) return;
-        if (r.ok) { setGraph(await r.json()); setStatus('ok'); return; }
-        setStatus('none');
-        const l = await fetch('/api/account/atlas', { headers: auth });
-        if (alive && l.ok) setPublished(Object.keys((await l.json()).targets || {}).sort());
-      } catch {
-        if (alive) setStatus('none');
-      }
-    };
-    poll();
-    const id = setInterval(poll, 15000);
-    return () => { alive = false; clearInterval(id); };
-  }, [slug]);
-
-  if (status === 'loading') {
-    return <div style={{ color: '#666', fontSize: '13px', padding: '24px 0' }}>Loading attestation…</div>;
-  }
-  if (status === 'none') {
-    return (
-      <div style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid #222', borderRadius: '12px', padding: '24px' }}>
-        <div style={{ color: '#fff', fontWeight: 700, marginBottom: '8px' }}>
-          No attestation published for &ldquo;{slug}&rdquo;
-        </div>
-        <div style={{ color: '#7a7a7a', fontSize: '13px', lineHeight: 1.7 }}>
-          Atlas attestations are produced by the probe and published to your account —
-          the dashboard reads them from here, not from your machine.
-        </div>
-        <CodeBlock>{probeRecipe}</CodeBlock>
-        {published.length > 0 && (
-          <div style={{ color: '#7a7a7a', fontSize: '12px', lineHeight: 1.7, marginTop: '12px' }}>
-            Published on this account:{' '}
-            {published.map((p) => (
-              <span key={p} style={{ fontFamily: theme.fonts.mono, color: '#ccc', marginRight: '8px' }}>{p}</span>
-            ))}
-            <br />The probe names a target from its package.json / directory — rename this
-            project to match, or probe the right repo.
-          </div>
-        )}
-      </div>
-    );
-  }
-  if ((graph?.edges || []).length === 0) {
-    return (
-      <div style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid #222', borderRadius: '12px', padding: '24px' }}>
-        <div style={{ color: '#fff', fontWeight: 700, marginBottom: '8px' }}>
-          Attestation is empty — the probe found no declared stack
-        </div>
-        <div style={{ color: '#7a7a7a', fontSize: '13px', lineHeight: 1.7 }}>
-          The probe attests whatever directory it runs from. An empty graph usually means it
-          ran somewhere without manifests (package.json, docker-compose, env files). Re-run it
-          from the project&rsquo;s real code repo:
-        </div>
-        <CodeBlock>{probeRecipe}</CodeBlock>
-      </div>
-    );
-  }
-  // key remounts the attestation per target: internal state (selection, blast
-  // target, camera) must never carry across graphs — stale ids crash lookups
-  return <AtlasAttestation key={slug} graph={graph} isMobile={isMobile} />;
-}
-
 function AccountPage({ isMobile }) {
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
@@ -1194,11 +968,11 @@ function AccountPage({ isMobile }) {
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState('atlas');
+  const [tab, setTab] = useState('backpack');
   const [devices, setDevices] = useState([]);
   const DEFAULT_PROJECT = {
     id: 'default', name: 'bouncr (local)',
-    backpack_url: 'http://localhost:8000', atlas_url: 'http://localhost:8100',
+    backpack_url: 'http://localhost:8000',
   };
   const [projects, setProjects] = useState([DEFAULT_PROJECT]);
   const [activeId, setActiveId] = useState('default');
@@ -1222,7 +996,7 @@ function AccountPage({ isMobile }) {
                     active.id);
   };
   const BLANK_NEW_PROJECT = {
-    name: '', backpack_url: 'http://localhost:8000', atlas_url: 'http://localhost:8100',
+    name: '', backpack_url: 'http://localhost:8000',
   };
   const [creating, setCreating] = useState(false);
   const [newProject, setNewProject] = useState(BLANK_NEW_PROJECT);
@@ -1230,8 +1004,7 @@ function AccountPage({ isMobile }) {
     const cleanName = newProject.name.trim();
     if (!cleanName) return;
     const pr = { id: `p-${Date.now().toString(36)}`, name: cleanName.slice(0, 60),
-                 backpack_url: newProject.backpack_url.trim(),
-                 atlas_url: newProject.atlas_url.trim() };
+                 backpack_url: newProject.backpack_url.trim() };
     persistProjects([...projects, pr], pr.id);
     setCreating(false);
     setNewProject(BLANK_NEW_PROJECT);
@@ -1441,7 +1214,7 @@ function AccountPage({ isMobile }) {
         </div>
 
         <div style={sideLabel}>Sections</div>
-        {[['atlas', 'Atlas', Shield], ['backpack', 'Backpack', Database], ['connect', 'Connect agents', TerminalIcon]].map(([t, label, Icon]) => (
+        {[['backpack', 'Backpack', Database], ['connect', 'Connect agents', TerminalIcon]].map(([t, label, Icon]) => (
           <button key={t} onClick={() => setTab(t)} style={{
             display: 'flex', alignItems: 'center', gap: '10px', width: '100%',
             textAlign: 'left', padding: '10px 14px', borderRadius: '10px', cursor: 'pointer',
@@ -1475,9 +1248,7 @@ function AccountPage({ isMobile }) {
           padding: isMobile ? '18px' : '24px', marginBottom: '20px' }}>
           <div style={{ color: '#fff', fontSize: '15px', fontWeight: 700, marginBottom: '4px' }}>New project</div>
           <p style={{ ...body, fontSize: '13px', maxWidth: '560px', margin: '0 0 16px 0' }}>
-            Name it after the repo the probe will attest (its package.json / directory name).
-            The Atlas tab reads attestations published to your account; the Backpack tab reads
-            your corpus API.
+            The Backpack tab reads your corpus API.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
             {[
@@ -1527,9 +1298,6 @@ function AccountPage({ isMobile }) {
           endpoint={active.backpack_url}
           setEndpoint={(v) => updateActive({ backpack_url: v })} />
       )}
-      {tab === 'atlas' && (
-        <AtlasPanel isMobile={isMobile} projectName={active.name} />
-      )}
       {tab === 'connect' && (
         <>
           <div style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid #222', borderRadius: '14px', padding: isMobile ? '20px' : '28px', marginBottom: '16px' }}>
@@ -1576,28 +1344,21 @@ Waiting for approval... ✓`}</CodeBlock>
 const TAGLINES = {
   home: ['TRUST WHAT YOUR AGENTS KNOW.', 'RESEARCH, REGENERATED.'],
   backpack: ['BACKPACK — SHARED, VERIFIED MEMORY.', 'SEARCH ONCE. REUSE FOREVER.'],
-  atlas: ['ATLAS — A VERIFIED MAP OF YOUR SYSTEM.', 'DOCUMENTED VS REAL, WITH EVIDENCE.'],
   account: ['YOUR ACCOUNT & CONNECTIONS.', 'SIGN IN AND POINT YOUR AGENTS.'],
 };
 
-// --- Home: hero product cards — appear on the right after 2s; picking one ---
-// --- expands it and collapses the other (still clickable to swap) ---
+// --- Home: hero product card — appears on the right after 2s; picking it ---
+// --- expands it ---
 
 function HeroProductCards({ isMobile, navigate }) {
-  const [visible, setVisible] = useState([false, false]);
-  const [pick, setPick] = useState(null);   // 'backpack' | 'atlas' | null
+  const [visible, setVisible] = useState([false]);
+  const [pick, setPick] = useState(null);   // 'backpack' | null
   useEffect(() => {
-    const t1 = setTimeout(() => setVisible([true, false]), 2000);
-    const t2 = setTimeout(() => setVisible([true, true]), 2200);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    const t = setTimeout(() => setVisible([true]), 2000);
+    return () => clearTimeout(t);
   }, []);
 
   const products = [
-    {
-      route: 'atlas', name: 'Atlas', accent: ATLAS_ACCENT, icon: Shield,
-      liner: 'A verified map of your system, with evidence.',
-      more: 'A probe attests what your stack actually does: declared vs observed, reconciled deterministically. Drift surfaces with evidence; unknowns stay honest. Pilot.'
-    },
     {
       route: 'backpack', name: 'Backpack', accent: '#00ff88', icon: Database,
       liner: 'Shared, verified memory for your agents.',
@@ -1680,10 +1441,10 @@ function App() {
   const scrollRef = useRef(0);
   const scrollContainerRef = useRef(null);
 
-  // hash routing — #/backpack, #/atlas, #/account; anything else is home
+  // hash routing — #/backpack, #/account; anything else is home
   const routeFromHash = () => {
     const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
-    return ['backpack', 'atlas', 'account'].includes(h) ? h : 'home';
+    return ['backpack', 'account'].includes(h) ? h : 'home';
   };
   const [route, setRoute] = useState(routeFromHash());
   const contentRef = useRef(null);
@@ -1830,11 +1591,10 @@ function App() {
           }}>RRSRCH</button>
 
           <NavDropdown
-            label={route === 'backpack' ? 'Backpack' : route === 'atlas' ? 'Atlas' : 'Products'}
-            active={route === 'backpack' || route === 'atlas'}
-            selectedLabel={route === 'backpack' ? 'Backpack' : route === 'atlas' ? 'Atlas' : null}
+            label={route === 'backpack' ? 'Backpack' : 'Products'}
+            active={route === 'backpack'}
+            selectedLabel={route === 'backpack' ? 'Backpack' : null}
             items={[
-              { label: 'Atlas', icon: Shield, accent: '#7aa7e0', onClick: () => navigate('atlas') },
               { label: 'Backpack', icon: Database, accent: '#00ff88', onClick: () => navigate('backpack') },
             ]} />
           <NavButton onClick={() => navigate('account')} icon={TerminalIcon} label="Agents"
@@ -1920,7 +1680,6 @@ function App() {
         }}>
 
           {route === 'backpack' && <ProductExplainer isMobile={isMobile} />}
-          {route === 'atlas' && <AtlasExplainer isMobile={isMobile} />}
           {route === 'account' && <AccountPage isMobile={isMobile} />}
 
           {/* Footer */}
