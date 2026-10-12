@@ -239,8 +239,139 @@ const secHead = { fontSize: '11px', color: C.ink2, textTransform: 'uppercase',
 const cardStyle = { background: 'rgba(0,0,0,0.3)', border: `1px solid ${C.hairline}`,
   borderRadius: '12px', padding: '14px 16px' };
 
-export default function AtlasAttestation({ graph, endpoint, isMobile }) {
+// ---- PDF export: a self-contained printable document with EVERY detail in ----
+// ---- the graph (nodes+attributes, per-edge sources & compliance, drift,   ----
+// ---- gaps), stamped with when it was attested/exported and who provided it ----
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// print-safe (white paper) versions of the state colors
+const P = { confirmed: '#2e7d32', phantom: '#c62828', shadow: '#b45f1d',
+  undecidable: '#3a5fa0', hypothesis: '#6a6a64' };
+
+function attestationDocHtml(graph, providedBy) {
+  const byId = Object.fromEntries(graph.nodes.map((n) => [n.id, n]));
+  const lbl = (id) => esc(byId[id]?.label || id);
+  const edgeName = (e) => `${lbl(e.src)} -[${esc(e.kind)}]&rarr; ${lbl(e.dst)}`;
+  const counts = { confirmed: 0, phantom: 0, shadow: 0, undecidable: 0, hypothesis: 0 };
+  graph.edges.forEach((e) => { counts[e.state] = (counts[e.state] || 0) + 1; });
+  const stBadge = (st) => `<span class="badge" style="color:${P[st] || '#666'};border-color:${P[st] || '#666'}">${esc(st)}</span>`;
+  const drift = graph.edges.filter((e) => e.state === 'phantom' || e.state === 'shadow');
+  const provider = providedBy
+    ? `${esc(providedBy.name || '')}${providedBy.email ? ` &lt;${esc(providedBy.email)}&gt;` : ''}`
+    : 'unknown (not signed in)';
+
+  const meta = [
+    ['Provided by', `${provider} — the paired account this attestation was published to`],
+    ['Attested (graph as_of)', esc(graph.as_of)],
+    ['Probe exported at', esc(graph.exported_at || graph.as_of)],
+    ['Document generated', new Date().toISOString()],
+    ['Evidence window', esc(graph.evidence_window || '—')],
+    ['Connectors', esc((graph.connectors || []).join(', ') || '—')],
+    ['Reproduce', `<code>${esc(graph.rerun || 'atlas-probe')}</code>`],
+  ].map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('');
+
+  const summary = Object.entries(STYLE).map(([st, s]) =>
+    `<tr><td>${stBadge(st)}</td><td class="num">${counts[st] || 0}</td><td class="muted">${esc(s.def)}</td></tr>`
+  ).join('');
+
+  const driftHtml = drift.length === 0
+    ? '<p class="muted">No phantom or shadow edges — nothing documented-but-absent, nothing real-but-undocumented.</p>'
+    : drift.map((e) => `
+      <div class="block" style="border-left:3px solid ${P[e.state]}">
+        <div><strong>${edgeName(e)}</strong> ${stBadge(e.state)}</div>
+        ${e.implication ? `<div>${esc(e.implication)}</div>` : ''}
+        <div class="muted">as_of ${esc(e.as_of)}${e.observable_via ? ` · observable via ${esc(e.observable_via)}` : ''}</div>
+      </div>`).join('');
+
+  const gapsHtml = (graph.could_not_determine || []).length === 0
+    ? '<p class="muted">None.</p>'
+    : graph.could_not_determine.map((u) => `
+      <div class="block" style="border-left:3px solid ${P.undecidable}">
+        <div><strong>${esc(u.edge)}</strong></div>
+        <div>${esc(u.why)}</div>
+        <div class="muted">connector to install: ${esc(u.connector_to_install)}</div>
+      </div>`).join('');
+
+  const nodesHtml = graph.nodes.map((n) => `
+    <tr><td><strong>${esc(n.label)}</strong><br /><span class="muted mono">${esc(n.id)}</span></td>
+      <td>${esc(n.kind)}</td>
+      <td>${Object.entries(n.attributes || {}).map(([k, v]) =>
+        `<div><span class="muted">${esc(k)}:</span> ${esc(v)}</div>`).join('') || '<span class="muted">—</span>'}</td>
+    </tr>`).join('');
+
+  const edgesHtml = graph.edges.map((e, i) => `
+    <div class="block edge">
+      <div><span class="muted mono">edge-${i}</span> <strong>${edgeName(e)}</strong> ${stBadge(e.state)}
+        <span class="muted">· as_of ${esc(e.as_of)}</span></div>
+      ${e.note ? `<div class="muted">${esc(e.note)}</div>` : ''}
+      ${e.implication ? `<div>${esc(e.implication)}</div>` : ''}
+      ${e.why_unobserved ? `<div class="muted">why unobserved: ${esc(e.why_unobserved)}</div>` : ''}
+      ${e.missing_connector ? `<div class="muted">connector to install: ${esc(e.missing_connector)}</div>` : ''}
+      ${e.observable_via ? `<div class="muted">observable via: ${esc(e.observable_via)}</div>` : ''}
+      <div class="sub">sources (${(e.sources || []).length})</div>
+      ${(e.sources || []).map((s) => `
+        <div class="src">[${esc(s.class)}] ${esc(s.ref)}
+          <span class="muted">— ${esc(s.connector)}, fetched_at ${esc(s.fetched_at)}</span></div>`).join('')}
+      <div class="sub">compliance slots</div>
+      ${Object.entries(e.compliance || {}).map(([k, v]) =>
+        `<div class="src"><span class="muted">${esc(k)}:</span> ${v === null ? '<span class="muted">not evaluated</span>' : esc(v)}</div>`)
+        .join('') || '<div class="src muted">—</div>'}
+    </div>`).join('');
+
+  return `<!doctype html><html><head><meta charset="utf-8" />
+<title>${esc(graph.title)} — attestation</title>
+<style>
+  @page { margin: 18mm 15mm; }
+  body { font: 12px/1.55 -apple-system, "Helvetica Neue", Arial, sans-serif;
+         color: #1a1a1a; margin: 24px auto; max-width: 820px; padding: 0 16px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px;
+       margin: 26px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; vertical-align: top; padding: 5px 10px 5px 0;
+           border-top: 1px solid #e4e4e4; font-size: 11.5px; }
+  th { color: #666; font-weight: 600; white-space: nowrap; width: 170px; }
+  .num { font-weight: 800; font-size: 14px; }
+  .muted { color: #777; }
+  .mono, code { font-family: "JetBrains Mono", Menlo, monospace; font-size: 10.5px; }
+  .badge { font-size: 9px; font-weight: 700; padding: 0 6px; border-radius: 999px;
+           border: 1px solid; text-transform: uppercase; font-family: Menlo, monospace; }
+  .block { border: 1px solid #e0e0e0; border-radius: 6px; padding: 8px 12px;
+           margin: 8px 0; page-break-inside: avoid; }
+  .sub { font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+         color: #888; margin-top: 7px; }
+  .src { font-size: 11px; margin: 2px 0; overflow-wrap: anywhere; }
+  .foot { color: #999; font-size: 10.5px; margin-top: 28px; border-top: 1px solid #ddd;
+          padding-top: 8px; }
+  .pdfbtn { position: fixed; top: 14px; right: 14px; padding: 8px 16px; font-weight: 700;
+            border: 1px solid #1a1a1a; background: #1a1a1a; color: #fff; border-radius: 8px;
+            cursor: pointer; }
+  @media print { .noprint { display: none; } body { margin: 0; } }
+</style></head><body>
+<button class="pdfbtn noprint" onclick="window.print()">Save as PDF</button>
+<h1>${esc(graph.title)}</h1>
+<div class="muted">Verified data-flow attestation — deterministic projection of atlas_graph.json; no LLM in this document.</div>
+<h2>Provenance</h2>
+<table>${meta}</table>
+<h2>Summary — edge states</h2>
+<table>${summary}</table>
+<h2>Drift findings — documented &ne; real</h2>
+${driftHtml}
+<h2>Could not determine — evidence gaps, not drift</h2>
+${gapsHtml}
+<h2>Nodes (${graph.nodes.length})</h2>
+<table><tr><th style="width:auto">node</th><th style="width:auto">kind</th><th style="width:auto">attributes</th></tr>${nodesHtml}</table>
+<h2>Evidence appendix — every edge, every source (${graph.edges.length})</h2>
+${edgesHtml}
+<div class="foot">Generated by rrsrch.com Atlas · attested ${esc(graph.as_of)} · document produced ${new Date().toISOString()} · provided by ${provider}</div>
+<script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 250); });</script>
+</body></html>`;
+}
+
+export default function AtlasAttestation({ graph, endpoint, isMobile, providedBy }) {
   const [sel, setSel] = useState(null);           // {type:'node'|'edge', key}
+  const [copiedCmd, setCopiedCmd] = useState(false);
   const [blastTarget, setBlastTarget] = useState(
     graph.nodes.find((n) => n.kind === 'datastore')?.id ?? graph.nodes[0].id);
   // a re-published graph can arrive with different ids while this component is
@@ -436,16 +567,53 @@ export default function AtlasAttestation({ graph, endpoint, isMobile }) {
     ['hypothesis', 'inferred only'],
   ];
 
+  // copies graph.rerun — the exact probe command that reproduces this attestation
+  const copyRerun = () => {
+    navigator.clipboard.writeText(graph.rerun || 'atlas-probe').then(() => {
+      setCopiedCmd(true);
+      setTimeout(() => setCopiedCmd(false), 1600);
+    }).catch(() => {});
+  };
+  // opens the full attestation document in a new tab; its onload calls print()
+  // so the browser's "Save as PDF" is one click away
+  const exportPdf = () => {
+    const blob = new Blob([attestationDocHtml(graph, providedBy)], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    if (window.open(url, '_blank')) setTimeout(() => URL.revokeObjectURL(url), 60000);
+  };
+  const actBtn = {
+    background: 'rgba(0,0,0,0.45)', border: `1px solid ${C.hairline}`,
+    borderRadius: '8px', color: C.ink2, fontSize: '11px', padding: '6px 12px',
+    cursor: 'pointer', fontFamily: MONO, letterSpacing: '0.5px', whiteSpace: 'nowrap',
+  };
+
   return (
     <div>
-      {/* header + legend */}
-      <div style={{ color: C.ink2, fontSize: '12.5px', lineHeight: 1.6, marginBottom: '6px' }}>
-        {graph.title} · graph as_of <strong style={{ color: C.ink }}>{graph.as_of}</strong>{' '}
-        ({ago(graph.as_of)})
-        {endpoint && <>{' '}· <a href={`${endpoint}/atlas`} target="_blank" rel="noreferrer"
-          style={{ color: C.sel }}>print/PDF version →</a></>}
-        <div style={{ color: C.muted, fontSize: '11px', marginTop: '2px' }}>
-          {graph.evidence_window} · deterministic projection of atlas_graph.json — no LLM in this render</div>
+      {/* header + actions + legend */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+        gap: '12px', flexWrap: 'wrap', marginBottom: '6px' }}>
+        <div style={{ color: C.ink2, fontSize: '12.5px', lineHeight: 1.6, minWidth: 0 }}>
+          {graph.title} · graph as_of <strong style={{ color: C.ink }}>{graph.as_of}</strong>{' '}
+          ({ago(graph.as_of)})
+          {endpoint && <>{' '}· <a href={`${endpoint}/atlas`} target="_blank" rel="noreferrer"
+            style={{ color: C.sel }}>print/PDF version →</a></>}
+          <div style={{ color: C.muted, fontSize: '11px', marginTop: '2px' }}>
+            {graph.evidence_window} · deterministic projection of atlas_graph.json — no LLM in this render</div>
+        </div>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button onClick={copyRerun} style={{ ...actBtn, color: copiedCmd ? C.confirmed : C.ink2 }}
+            title={`Copy the probe command that reproduces this attestation:\n${graph.rerun || 'atlas-probe'}`}
+            onMouseEnter={(e) => { if (!copiedCmd) e.currentTarget.style.color = C.ink; }}
+            onMouseLeave={(e) => { if (!copiedCmd) e.currentTarget.style.color = C.ink2; }}>
+            {copiedCmd ? '✓ copied' : '↻ rerun'}
+          </button>
+          <button onClick={exportPdf} style={actBtn}
+            title="Export the full attestation — every node, edge, source, and compliance slot — as a PDF, stamped with when it was attested and who provided it"
+            onMouseEnter={(e) => { e.currentTarget.style.color = C.ink; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = C.ink2; }}>
+            ⭳ export pdf
+          </button>
+        </div>
       </div>
       <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', margin: '10px 0 14px' }}>
         {Object.entries(STYLE).map(([k, s]) => (

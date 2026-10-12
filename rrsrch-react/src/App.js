@@ -1100,7 +1100,7 @@ function BackpackPanel({ isMobile, accountEmail, endpoint, setEndpoint }) {
   );
 }
 
-function AtlasPanel({ isMobile, projectName }) {
+function AtlasPanel({ isMobile, projectName, user }) {
   const [graph, setGraph] = useState(null);
   const [status, setStatus] = useState('loading'); // loading | none | ok
   const [published, setPublished] = useState([]);  // slugs already on the account
@@ -1182,7 +1182,8 @@ $ cd ~/code/${slug} && atlas-probe
   }
   // key remounts the attestation per target: internal state (selection, blast
   // target, camera) must never carry across graphs — stale ids crash lookups
-  return <AtlasAttestation key={slug} graph={graph} isMobile={isMobile} />;
+  return <AtlasAttestation key={slug} graph={graph} isMobile={isMobile}
+    providedBy={user ? { name: user.name, email: user.email } : null} />;
 }
 
 function AccountPage({ isMobile }) {
@@ -1528,7 +1529,7 @@ function AccountPage({ isMobile }) {
           setEndpoint={(v) => updateActive({ backpack_url: v })} />
       )}
       {tab === 'atlas' && (
-        <AtlasPanel isMobile={isMobile} projectName={active.name} />
+        <AtlasPanel isMobile={isMobile} projectName={active.name} user={user} />
       )}
       {tab === 'connect' && (
         <>
