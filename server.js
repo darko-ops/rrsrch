@@ -169,6 +169,129 @@ app.get('/api/engine/health', async (_req, res) => {
   }
 });
 
+// Open-web search (Comet-like layer). Prefer Brave, then Serper. Not the evidence ledger.
+async function searchBrave(q, count) {
+  const key = process.env.BRAVE_SEARCH_API_KEY;
+  if (!key) return null;
+  const params = new URLSearchParams({ q, count: String(count) });
+  const upstream = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
+    headers: { Accept: 'application/json', 'X-Subscription-Token': key },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!upstream.ok) throw new Error(`Brave search HTTP ${upstream.status}`);
+  const data = await upstream.json();
+  const results = (data.web?.results || []).map((r) => ({
+    title: r.title || 'Untitled',
+    url: r.url || null,
+    snippet: r.description || '',
+    source: (() => { try { return new URL(r.url).hostname.replace(/^www\./, ''); } catch { return null; } })(),
+  }));
+  return { provider: 'brave', results };
+}
+
+async function searchSerper(q, count) {
+  const key = process.env.SERPER_API_KEY;
+  if (!key) return null;
+  const upstream = await fetch('https://google.serper.dev/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-KEY': key },
+    body: JSON.stringify({ q, num: count }),
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!upstream.ok) throw new Error(`Serper HTTP ${upstream.status}`);
+  const data = await upstream.json();
+  const results = (data.organic || []).map((r) => ({
+    title: r.title || 'Untitled',
+    url: r.link || null,
+    snippet: r.snippet || '',
+    source: (() => { try { return new URL(r.link).hostname.replace(/^www\./, ''); } catch { return null; } })(),
+  }));
+  return { provider: 'serper', results };
+}
+
+/** Zero-config fallback when Brave/Serper keys are absent. */
+async function searchDuckDuckGo(q, count) {
+  const params = new URLSearchParams({ q });
+  const upstream = await fetch(`https://html.duckduckgo.com/html/?${params}`, {
+    headers: {
+      Accept: 'text/html',
+      'User-Agent': 'rrsrch-web-search/1.0 (+https://rrsrch.com)',
+    },
+    signal: AbortSignal.timeout(20000),
+    redirect: 'follow',
+  });
+  if (!upstream.ok) throw new Error(`DuckDuckGo HTTP ${upstream.status}`);
+  const html = await upstream.text();
+  const results = [];
+  // result__a links; uddg= is the real destination when present
+  const linkRe = /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  const snippetRe = /class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|td|div)>/gi;
+  const snippets = [];
+  let sm;
+  while ((sm = snippetRe.exec(html)) !== null) {
+    snippets.push(sm[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+  }
+  let m;
+  let i = 0;
+  while ((m = linkRe.exec(html)) !== null && results.length < count) {
+    let href = m[1].replace(/&amp;/g, '&');
+    try {
+      const u = new URL(href, 'https://duckduckgo.com');
+      if (u.searchParams.get('uddg')) href = u.searchParams.get('uddg');
+    } catch { /* keep href */ }
+    if (!href || href.startsWith('/') || href.includes('duckduckgo.com')) continue;
+    const title = m[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() || 'Untitled';
+    let source = null;
+    try { source = new URL(href).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
+    results.push({
+      title,
+      url: href,
+      snippet: snippets[i] || '',
+      source,
+    });
+    i += 1;
+  }
+  return { provider: 'duckduckgo', results };
+}
+
+app.get('/api/web/search', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.status(400).json({ error: 'query required' });
+  if (q.length > 500) return res.status(400).json({ error: 'query too long (500 characters max)' });
+  const count = Math.min(Math.max(parseInt(req.query.limit, 10) || 8, 1), 20);
+  try {
+    let packed = null;
+    let lastErr = null;
+    for (const fn of [searchBrave, searchSerper, searchDuckDuckGo]) {
+      try {
+        packed = await fn(q, count);
+        if (packed) break;
+      } catch (err) {
+        lastErr = err;
+        console.error('web search provider failed', err.message || err);
+      }
+    }
+    if (!packed) {
+      return res.status(503).json({
+        error: 'open web search unavailable',
+        detail: lastErr
+          ? String(lastErr.message || lastErr)
+          : 'Set BRAVE_SEARCH_API_KEY or SERPER_API_KEY for reliable results.',
+        configured: !!(process.env.BRAVE_SEARCH_API_KEY || process.env.SERPER_API_KEY),
+      });
+    }
+    return res.json({
+      query: q,
+      provider: packed.provider,
+      results: packed.results,
+      note: 'Open web — not gated ledger evidence. Research tool only, not medical advice.',
+    });
+  } catch (err) {
+    console.error('web search failed', err);
+    return res.status(500).json({ error: 'search failed' });
+  }
+});
+
 // Literature search for the landing page (Europe PMC — same source as the evidence engine).
 app.get('/api/literature/search', async (req, res) => {
   const q = String(req.query.q || '').trim();
