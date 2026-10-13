@@ -25,6 +25,7 @@ import psycopg
 
 from ..check import fields as fieldmod
 from ..check import gate
+from ..knowledge import store
 from . import spans
 from .llm import LLM
 
@@ -157,13 +158,18 @@ def read_document(conn: psycopg.Connection, llm: LLM, doc: dict, context: dict, 
                     _reject(conn, doc["id"], doc["sha256"], quote, claim, f"gate:{v.rule}", v.detail,
                             extractor, rep)
                     continue
-                conn.execute(
+                # passed the reader's rules against its own passage: structurally valid, not yet reviewed
+                claim_id = conn.execute(
                     "INSERT INTO claims (document_id, doc_sha256, span_start, span_end, text, fields, "
-                    "scope, extractor, self_check) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "scope, extractor, self_check, repository_id, type, state, agent_id) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                    "(SELECT id FROM repositories WHERE slug = %s), 'empirical', 'structurally_valid', "
+                    "(SELECT id FROM agents WHERE handle = %s)) RETURNING id",
                     (doc["id"], doc["sha256"], span[0], span[1], claim, json.dumps(cf.to_json()),
                      json.dumps({g: sorted(cf.scope.get(g) or context.get(g, ())) for g in
                                  ("species", "joint", "condition")}),
-                     extractor, json.dumps(v.to_json())))
+                     extractor, json.dumps(v.to_json()), store.PILOT_REPO, store.READER_AGENT)).fetchone()[0]
+                store.record_claim(conn, claim_id)
                 n += 1
             conn.execute("INSERT INTO read_chunks (document_id, chunk_sha, extractor, span_start, span_end, "
                          "n_claims, n_items) VALUES (%s, %s, %s, %s, %s, %s, %s)",

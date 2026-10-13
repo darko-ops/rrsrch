@@ -1,3 +1,4 @@
+import hashlib
 import json
 import uuid
 
@@ -74,8 +75,8 @@ def conn():
     db.migrate(c)
     c.execute("INSERT INTO sources (id, title, has_full_text, snapshot_sha256) VALUES "
               "('MED:1', 'Bone marrow MSCs versus hyaluronic acid for knee osteoarthritis', false, 'x')")
-    c.execute("INSERT INTO documents (source_id, part, text, sha256) VALUES ('MED:1', 'abstract', %s, 'h')",
-              (ABSTRACT,))
+    c.execute("INSERT INTO documents (source_id, part, text, sha256) VALUES ('MED:1', 'abstract', %s, %s)",
+              (ABSTRACT, hashlib.sha256(ABSTRACT.encode()).hexdigest()))
     c.commit()
     try:
         yield c
@@ -106,6 +107,10 @@ def test_reader_keeps_checked_claims_and_records_every_rejection(conn):
         assert ABSTRACT[a:b] == quote
         assert scope == {"species": ["human"], "joint": ["knee"], "condition": ["osteoarthritis"]}
         assert check["passed"] is True
+    # each kept claim is recorded: a hashed first revision, one shared passage, a passing run
+    assert conn.execute("SELECT count(*), bool_and(v.passed) FROM claim_revisions r "
+                        "JOIN verification_runs v ON v.claim_revision_id = r.id").fetchone() == (2, True)
+    assert conn.execute("SELECT count(*) FROM evidence").fetchone()[0] == 1
     # rerunning reads nothing new
     rep2 = extract.read_corpus(conn, llm, progress=lambda *_: None)
     assert (rep2.chunks_read, rep2.chunks_skipped, rep2.claims) == (0, 1, 0)

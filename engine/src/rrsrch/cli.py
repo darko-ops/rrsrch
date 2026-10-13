@@ -4,7 +4,7 @@
   rrsrch corpus fetch [--refresh]          snapshot every source and trial locally
   rrsrch corpus verify                     prove local snapshots match the lockfile
   rrsrch corpus status                     what the corpus holds, and what needs review
-  rrsrch ledger load                       migrate Postgres and load the corpus
+  rrsrch ledger load                       migrate Postgres, load the corpus, record claim revisions
   rrsrch read plan                         what the reader would send the model (no model needed)
   rrsrch read run [--source ID] [--limit N] extract claims with the model in RRSRCH_LLM_URL
   rrsrch read stats                        claims, rejections by rule, coverage
@@ -170,12 +170,16 @@ def cmd_status(args) -> int:
 
 
 def cmd_ledger_load(args) -> int:
+    from .knowledge import store
     from .ledger import db
     with db.connect() as conn:
         applied = db.migrate(conn)
         if applied:
             print(f"migrations applied: {', '.join(applied)}")
         rep = db.load_corpus(conn, manifest.load())
+        recorded = store.sync(conn, snapshot.Lock().entries)
+    if recorded:
+        print(f"recorded revisions and evidence for {recorded} claim(s)")
     print(f"loaded {rep.sources} sources, documents {rep.documents}, "
           f"{rep.trials} trials, {rep.links} trial links")
     for m in rep.missing_snapshots:
