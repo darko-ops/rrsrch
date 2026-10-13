@@ -2,11 +2,10 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
-import { MessageCircle, X, Twitter, ArrowRight, Search, Github, Database, Zap, Shield, Terminal as TerminalIcon, Clock, ExternalLink, Loader2 } from 'lucide-react';
+import { MessageCircle, X, Twitter, Search, Database, Terminal as TerminalIcon, ExternalLink, Loader2 } from 'lucide-react';
 
 // Product / deploy config
 const REPO_URL = 'https://github.com/darko-ops/RRSRCH';
-const WAITLIST_EMAIL = 'demetri@rrsrch.com';
 
 // Theme Configuration
 const theme = {
@@ -306,8 +305,6 @@ function NavButton({ onClick, icon: Icon, label, active }) {
   );
 }
 
-// --- Product Explainer (the backpack) ---
-
 function Eyebrow({ children }) {
   return (
     <div style={{
@@ -365,264 +362,34 @@ function CodeBlock({ children }) {
   );
 }
 
-function ProductExplainer({ isMobile }) {
-  const [email, setEmail] = useState('');
-
-  const sectionGap = isMobile ? '64px' : '96px';
-  const heading = {
-    fontSize: isMobile ? '26px' : 'clamp(28px, 3.4vw, 40px)',
-    color: '#fff',
-    fontWeight: 800,
-    lineHeight: 1.1,
-    margin: '0 0 20px 0',
-    letterSpacing: '-0.02em',
-    fontFamily: theme.fonts.main
-  };
-  const body = {
-    color: '#8a8a8a',
-    fontSize: isMobile ? '15px' : '17px',
-    lineHeight: 1.7,
-    maxWidth: '640px',
-    margin: 0,
-    fontFamily: theme.fonts.main
-  };
-  const card = {
-    background: 'rgba(0,0,0,0.3)',
-    border: '1px solid #222',
-    borderRadius: '14px',
-    padding: '24px'
-  };
-
-  const joinWaitlist = () => {
-    const subject = encodeURIComponent('Backpack — hosted waitlist');
-    const bodyText = encodeURIComponent(`Add me to the hosted backpack waitlist.\n\nEmail: ${email || '(your email)'}\n`);
-    window.location.href = `mailto:${WAITLIST_EMAIL}?subject=${subject}&body=${bodyText}`;
-  };
-
-  const steps = [
-    {
-      icon: Search,
-      verb: 'search()',
-      title: 'Ask before you research',
-      text: 'Query the backpack first. If the answer is already known, your agent gets it back in a fraction of the tokens — no re-derivation.'
-    },
-    {
-      icon: Database,
-      verb: 'deposit()',
-      title: 'Write back what you learned',
-      text: 'Findings go into the shared memory with their source attached, so the next agent — yours or a teammate’s — never starts cold.'
-    },
-    {
-      icon: Shield,
-      verb: 'confidence',
-      title: 'Trust what you retrieve',
-      text: 'Every entry carries a confidence and freshness signal, so agents know what to rely on and what to re-verify.'
-    }
-  ];
-
+function SiteFooter({ onDisclaimer, isMobile }) {
   return (
-    <div style={{ maxWidth: '900px', margin: '0 auto' }}>
-
-      {/* 1 — What it is */}
-      <section style={{ marginBottom: sectionGap }}>
-        <Eyebrow>What it is</Eyebrow>
-        <h2 style={{ ...heading, fontSize: isMobile ? '30px' : 'clamp(32px, 4.2vw, 52px)', maxWidth: '820px' }}>
-          A shared, verified memory so AI agents search once and reuse forever, instead of re-deriving the same knowledge from scratch.
-        </h2>
-        <p style={{ ...body, maxWidth: '680px' }}>
-          The backpack is a context-pack engine: a search-and-deposit memory your agents read from
-          before they work and write back to when they&rsquo;re done. One corpus, many agents, no cold starts.
-        </p>
-      </section>
-
-      {/* 2 — The problem */}
-      <section style={{ marginBottom: sectionGap }}>
-        <Eyebrow>The problem</Eyebrow>
-        <h2 style={heading}>Every agent starts cold, re-deriving what your team already knows.</h2>
-        <p style={body}>
-          Every agent starts cold. There&rsquo;s no shared, trustworthy memory between runs, between tools,
-          or between teammates — so the same research gets done again and again, and you pay for it every time.
-          The knowledge exists; it just isn&rsquo;t anywhere the next agent can reach.
-        </p>
-      </section>
-
-      {/* 3 — How it works */}
-      <section style={{ marginBottom: sectionGap }}>
-        <Eyebrow>How it works</Eyebrow>
-        <h2 style={heading}>Two verbs, one shared memory.</h2>
-        <p style={{ ...body, marginBottom: '36px' }}>
-          Agents <strong style={{ color: '#ccc', fontWeight: 600 }}>search</strong> the backpack before
-          researching and <strong style={{ color: '#ccc', fontWeight: 600 }}>deposit</strong> what they
-          learn after. Confidence and freshness ride along so retrieval stays trustworthy.
-        </p>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
-          gap: '16px',
-          marginBottom: '28px'
-        }}>
-          {steps.map(({ icon: Icon, verb, title, text }) => (
-            <div key={verb} style={card}>
-              <Icon size={20} color="#00ff88" style={{ marginBottom: '16px' }} />
-              <div style={{ fontFamily: theme.fonts.mono, fontSize: '13px', color: '#00ff88', marginBottom: '10px' }}>{verb}</div>
-              <div style={{ color: '#fff', fontSize: '15px', fontWeight: 600, marginBottom: '10px' }}>{title}</div>
-              <div style={{ color: '#7a7a7a', fontSize: '13px', lineHeight: 1.6 }}>{text}</div>
-            </div>
-          ))}
-        </div>
-        <CodeBlock>{`search("H100 vs MI300X inference throughput")
-  → hit · confidence 0.91 · fresh 3d · 1.2k tokens
-
-deposit(finding, source, confidence)
-  → stored · now warm for the next agent`}</CodeBlock>
-      </section>
-
-      {/* 4 — Why it's useful */}
-      <section style={{ marginBottom: sectionGap }}>
-        <Eyebrow>Why it&rsquo;s useful</Eyebrow>
-        <h2 style={heading}>One verified answer, reused — instead of a fresh guess each run.</h2>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
-          gap: '16px',
-          marginBottom: '20px'
-        }}>
-          <div style={{ ...card, padding: '32px' }}>
-            <div style={{ color: '#fff', fontSize: '16px', fontWeight: 700, marginBottom: '10px' }}>Consistent, cited answers</div>
-            <div style={{ color: '#7a7a7a', fontSize: '14px', lineHeight: 1.6 }}>
-              Agents retrieve the same verified, sourced answer every time — not a new derivation that
-              drifts or contradicts the last one.
-            </div>
-          </div>
-          <div style={{ ...card, padding: '32px' }}>
-            <div style={{ color: '#fff', fontSize: '16px', fontWeight: 700, marginBottom: '10px' }}>Provenance you can audit</div>
-            <div style={{ color: '#7a7a7a', fontSize: '14px', lineHeight: 1.6 }}>
-              Every entry carries its source, confidence, and freshness — so answers are traceable and
-              governable, not black-box.
-            </div>
-          </div>
-        </div>
-        <p style={{ ...body, fontSize: '14px', color: '#666' }}>
-          In early tests, reusing an answer costs a fraction of re-deriving it — roughly ~90% cheaper per
-          reused answer. We hold aggregate savings claims until a pilot on real traffic earns them.
-        </p>
-      </section>
-
-      {/* 5 — How to connect */}
-      <section style={{ marginBottom: sectionGap }}>
-        <Eyebrow>How to connect</Eyebrow>
-        <h2 style={heading}>It&rsquo;s an MCP server. Point your agents at it.</h2>
-        <p style={{ ...body, marginBottom: '36px' }}>
-          The backpack speaks the Model Context Protocol, so any MCP-capable agent — Claude Code,
-          Claude Desktop, your own runner — gets <code style={{ fontFamily: theme.fonts.mono, color: '#00ff88', fontSize: '0.9em' }}>search</code> and <code style={{ fontFamily: theme.fonts.mono, color: '#00ff88', fontSize: '0.9em' }}>deposit</code> as tools.
-          The engine ships as <code style={{ fontFamily: theme.fonts.mono, color: '#00ff88', fontSize: '0.9em' }}>rrsrch</code> — that&rsquo;s the server name and CLI you&rsquo;ll see below.
-        </p>
-
-        {/* Self-host (today) */}
-        <div style={{ ...card, marginBottom: '16px', padding: isMobile ? '20px' : '28px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-            <TerminalIcon size={18} color="#00ff88" />
-            <span style={{ color: '#fff', fontSize: '16px', fontWeight: 700 }}>Run it yourself</span>
-            <span style={{ fontFamily: theme.fonts.mono, fontSize: '11px', color: '#00ff88', border: '1px solid rgba(0,255,136,0.3)', borderRadius: '100px', padding: '3px 10px' }}>AVAILABLE TODAY</span>
-          </div>
-          <p style={{ color: '#7a7a7a', fontSize: '14px', lineHeight: 1.6, margin: '0 0 20px 0' }}>
-            Self-host the corpus and point your own agents at it. Cheap, private, and generating your own memory from day one.
-          </p>
-          <div style={{ display: 'grid', gap: '14px' }}>
-            <CodeBlock>{`$ git clone ${REPO_URL}.git
-$ cd RRSRCH/rrsrch
-$ make up            # Postgres + pgvector + API on :8000
-$ pip install .      # puts the rrsrch-mcp server on your PATH`}</CodeBlock>
-            <CodeBlock>{`// claude_desktop_config.json
-{
-  "mcpServers": {
-    "rrsrch": {
-      "command": "rrsrch-mcp",
-      "env": {
-        "RRSRCH_STORE": "postgres",
-        "RRSRCH_EMBEDDER": "local",
-        "RRSRCH_DATABASE_URL": "postgresql+asyncpg://rrsrch:rrsrch@localhost:5432/rrsrch"
-      }
-    }
-  }
-}`}</CodeBlock>
-          </div>
-          <div style={{ display: 'flex', gap: '12px', marginTop: '22px', flexWrap: 'wrap' }}>
-            <a href={REPO_URL} target="_blank" rel="noreferrer" style={{
-              display: 'inline-flex', alignItems: 'center', gap: '8px',
-              background: '#fff', color: '#000', textDecoration: 'none',
-              padding: '11px 20px', borderRadius: '8px', fontSize: '14px', fontWeight: 700
-            }}>
-              <Github size={16} /> Clone the repo
-            </a>
-            <a href={`${REPO_URL}#readme`} target="_blank" rel="noreferrer" style={{
-              display: 'inline-flex', alignItems: 'center', gap: '8px',
-              background: 'transparent', color: '#ccc', textDecoration: 'none',
-              padding: '11px 20px', borderRadius: '8px', fontSize: '14px', fontWeight: 600,
-              border: '1px solid #333'
-            }}>
-              Read the docs <ArrowRight size={15} />
-            </a>
-          </div>
-        </div>
-
-        {/* Hosted (waitlist) */}
-        <div style={{ ...card, padding: isMobile ? '20px' : '28px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-            <Clock size={18} color="#888" />
-            <span style={{ color: '#fff', fontSize: '16px', fontWeight: 700 }}>Hosted corpus</span>
-            <span style={{ fontFamily: theme.fonts.mono, fontSize: '11px', color: '#888', border: '1px solid #333', borderRadius: '100px', padding: '3px 10px' }}>COMING SOON</span>
-          </div>
-          <p style={{ color: '#7a7a7a', fontSize: '14px', lineHeight: 1.6, margin: '0 0 20px 0' }}>
-            A shared, multi-tenant corpus with attestation — so you can trust memory your own agents didn&rsquo;t write. Join the waitlist and we&rsquo;ll reach out.
-          </p>
-          <div style={{ display: 'flex', gap: '10px', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@company.com"
-              onKeyDown={(e) => { if (e.key === 'Enter') joinWaitlist(); }}
-              style={{
-                flex: 1, minWidth: isMobile ? '100%' : '220px',
-                background: '#0a0a0a', border: '1px solid #333', borderRadius: '8px',
-                padding: '12px 14px', color: '#fff', fontSize: '14px', outline: 'none',
-                fontFamily: theme.fonts.mono
-              }}
-            />
-            <button onClick={joinWaitlist} style={{
-              background: 'transparent', color: '#00ff88', border: '1px solid rgba(0,255,136,0.4)',
-              borderRadius: '8px', padding: '12px 22px', fontSize: '14px', fontWeight: 700,
-              cursor: 'pointer', whiteSpace: 'nowrap', width: isMobile ? '100%' : 'auto'
-            }}>
-              Notify me
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* 6 — Who it's for / trust */}
-      <section>
-        <Eyebrow>Who it&rsquo;s for</Eyebrow>
-        <h2 style={heading}>Built for agents — and the developers who point them.</h2>
-        <p style={{ ...body, marginBottom: '28px' }}>
-          The users here aren&rsquo;t people browsing; they&rsquo;re agents and their operators. That changes
-          what &ldquo;trustworthy&rdquo; has to mean — memory you didn&rsquo;t write yourself still has to be safe to act on.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '16px' }}>
-          <div style={card}>
-            <Zap size={20} color="#00ff88" style={{ marginBottom: '14px' }} />
-            <div style={{ color: '#fff', fontSize: '15px', fontWeight: 600, marginBottom: '8px' }}>Freshness, not just recall</div>
-            <div style={{ color: '#7a7a7a', fontSize: '13px', lineHeight: 1.6 }}>Entries are timestamped and freshness-scored, so agents re-verify stale facts instead of trusting them blindly.</div>
-          </div>
-          <div style={card}>
-            <Shield size={20} color="#00ff88" style={{ marginBottom: '14px' }} />
-            <div style={{ color: '#fff', fontSize: '15px', fontWeight: 600, marginBottom: '8px' }}>Attestation on the hosted corpus</div>
-            <div style={{ color: '#7a7a7a', fontSize: '13px', lineHeight: 1.6 }}>Shared memory carries provenance you can check — the difference between a cache and a corpus you can rely on.</div>
-          </div>
-        </div>
-      </section>
-
+    <div style={{
+      textAlign: 'center',
+      padding: isMobile ? '32px 20px 48px' : '40px 24px 56px',
+      fontSize: '12px',
+      color: '#666',
+    }}>
+      <button
+        type="button"
+        onClick={onDisclaimer}
+        style={{
+          background: 'none',
+          border: 'none',
+          color: '#666',
+          fontSize: '12px',
+          cursor: 'pointer',
+          textDecoration: 'underline',
+          fontFamily: theme.fonts.main,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = '#aaa'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = '#666'; }}
+      >
+        Disclaimer
+      </button>
+      <div style={{ marginTop: '10px', fontSize: '11px' }}>
+        © {new Date().getFullYear()} RRSRCH.com · research tool, not medical advice
+      </div>
     </div>
   );
 }
@@ -1538,7 +1305,7 @@ function App() {
   // anything else is home
   const routeFromHash = () => {
     const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
-    return ['backpack', 'account'].includes(h) ? h : 'home';
+    return h === 'account' ? 'account' : 'home';
   };
   const [route, setRoute] = useState(routeFromHash());
   const [literature, setLiterature] = useState(null);
@@ -1580,16 +1347,11 @@ function App() {
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
-  // #/backpack keeps the hero and scrolls the reader down to the explainer
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
     const t = setTimeout(() => {
-      // home and account both start at the top (account has no hero at all)
-      if (route === 'home' || route === 'account') el.scrollTo({ top: 0, behavior: 'smooth' });
-      else if (contentRef.current) {
-        el.scrollTo({ top: contentRef.current.offsetTop - 24, behavior: 'smooth' });
-      }
+      el.scrollTo({ top: 0, behavior: 'smooth' });
     }, 60);
     return () => clearTimeout(t);
   }, [route]);
@@ -1797,59 +1559,33 @@ function App() {
           </div>
         )}
 
-        {/* Spacer: below the hero on the product page; just clears the fixed nav on account */}
-        <div style={{ height: route === 'account' ? (isMobile ? '72px' : '96px') : literature ? '4vh' : '13vh' }}></div>
-
-        {/* Main Content Layout with Background Panel */}
-        <div ref={contentRef} style={{
-          maxWidth: '1200px',
-          width: '100%',
-          margin: '0 auto',
-          padding: isMobile ? '40px 20px' : '60px 40px',
-          minHeight: '100vh',
-          position: 'relative',
-          zIndex: 5,
-          background: 'rgba(22, 22, 22, 0.85)',
-          borderRadius: isMobile ? '16px' : '24px',
-          backdropFilter: 'blur(20px)',
-          border: '1px solid rgba(255, 255, 255, 0.05)',
-          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)'
-        }}>
-
-          {route === 'account' ? <AccountPage isMobile={isMobile} /> : <ProductExplainer isMobile={isMobile} />}
-
-          {/* Footer */}
-          <div style={{
-            marginTop: '60px',
-            paddingTop: '30px',
-            borderTop: '1px solid #222',
-            textAlign: 'center',
-            fontSize: '12px',
-            color: '#666'
-          }}>
-            <button
-              onClick={() => setActiveModal('disclaimer')}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#666',
-                fontSize: '12px',
-                cursor: 'pointer',
-                textDecoration: 'underline',
-                fontFamily: theme.fonts.main
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.color = '#aaa'}
-              onMouseLeave={(e) => e.currentTarget.style.color = '#666'}
-            >
-              Disclaimer
-            </button>
-            <div style={{ marginTop: '10px', fontSize: '11px' }}>
-              © {new Date().getFullYear()} RRSRCH.com
+        {route === 'account' && (
+          <>
+            <div style={{ height: isMobile ? '72px' : '96px' }} />
+            <div ref={contentRef} style={{
+              maxWidth: '1200px',
+              width: '100%',
+              margin: '0 auto',
+              padding: isMobile ? '40px 20px' : '60px 40px',
+              minHeight: '100vh',
+              position: 'relative',
+              zIndex: 5,
+              background: 'rgba(22, 22, 22, 0.85)',
+              borderRadius: isMobile ? '16px' : '24px',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+            }}>
+              <AccountPage isMobile={isMobile} />
+              <SiteFooter isMobile={isMobile} onDisclaimer={() => setActiveModal('disclaimer')} />
             </div>
-          </div>
-        </div>
+            <div style={{ height: '100px' }} />
+          </>
+        )}
 
-        <div style={{ height: '100px' }}></div>
+        {route !== 'account' && (
+          <SiteFooter isMobile={isMobile} onDisclaimer={() => setActiveModal('disclaimer')} />
+        )}
       </div>
 
       {/* Modal Layer */}
