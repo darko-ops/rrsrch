@@ -3,7 +3,7 @@
  * Landing keeps the parent's 3D planet behind it. Results use a solid black column.
  */
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { Search, History, Loader2, ExternalLink } from 'lucide-react';
+import { Search, History, Loader2, ExternalLink, X } from 'lucide-react';
 
 const fonts = {
   main: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
@@ -78,7 +78,8 @@ const ASK_NEXT = [
 
 const DEMO_REPORT = {
   kicker: 'Answer from 31 findings in 14 studies',
-  headline: "Mixed: pain improves, function mostly doesn't.",
+  headline: "Pain improves. Function mostly doesn't.",
+  verdict: 'mixed',
   refused: 2,
   sentences: [
     {
@@ -94,6 +95,56 @@ const DEMO_REPORT = {
       cites: ['44', '47'],
     },
   ],
+  citations: {
+    '12': {
+      text: 'VAS pain at 12 months was lower with MSCs than with hyaluronic acid.',
+      src: 'Randomized control trial of mesenchymal stem cells versus hyaluronic acid in patients with knee osteoarthritis',
+      verdict: 'benefit',
+      url: null,
+    },
+    '15': {
+      text: 'Allogeneic BM-MSCs reduced VAS pain at 12 months compared with hyaluronic acid.',
+      src: 'Treatment of Knee Osteoarthritis With Allogeneic Bone Marrow Mesenchymal Stem Cells: A Randomized Controlled Trial',
+      verdict: 'benefit',
+      url: null,
+    },
+    '21': {
+      text: 'Pain VAS improved more in the AD-MSC group than in controls at 6 and 12 months.',
+      src: 'Adipose-derived mesenchymal stem cell therapy in the treatment of knee osteoarthritis: a randomized controlled trial',
+      verdict: 'benefit',
+      url: null,
+    },
+    '27': {
+      text: 'Pain at 12 months was lower with MSCs than with control.',
+      src: 'Intra-Articular Injection of Autologous Adipose Tissue-Derived Mesenchymal Stem Cells for the Treatment of Knee Osteoarthritis: A Phase IIb Trial',
+      verdict: 'benefit',
+      url: null,
+    },
+    '33': {
+      text: 'WOMAC function at 12 months did not differ significantly between MSC and placebo groups.',
+      src: 'Efficacy and Safety of Stempeucel in Osteoarthritis of the Knee: A Phase 3 Randomized, Double-Blind, Placebo-Controlled Trial',
+      verdict: 'no_difference',
+      url: null,
+    },
+    '38': {
+      text: 'IKDC scores did not differ significantly from control at 12 months.',
+      src: 'Intra-Articular Injection of Autologous Adipose Tissue-Derived Mesenchymal Stem Cells for the Treatment of Knee Osteoarthritis: A Phase IIb Trial',
+      verdict: 'no_difference',
+      url: null,
+    },
+    '44': {
+      text: 'Total WOMAC improved more with MSCs than with control at 12 months.',
+      src: 'Adipose-derived mesenchymal stem cell therapy in the treatment of knee osteoarthritis: a randomized controlled trial',
+      verdict: 'contested',
+      url: null,
+    },
+    '47': {
+      text: 'Total WOMAC at 12 months did not differ from placebo.',
+      src: 'Efficacy and Safety of Stempeucel in Osteoarthritis of the Knee: A Phase 3 Randomized, Double-Blind, Placebo-Controlled Trial',
+      verdict: 'contested',
+      url: null,
+    },
+  },
   groups: [
     {
       key: 'benefit',
@@ -458,7 +509,6 @@ function SectionTabs({ tab, onTab, counts, isMobile }) {
       display: 'flex',
       gap: isMobile ? 4 : 8,
       borderBottom: '1px solid rgba(255,255,255,0.1)',
-      marginTop: 28,
       overflowX: 'auto',
     }}>
       {items.map((item) => {
@@ -501,226 +551,550 @@ function SectionTabs({ tab, onTab, counts, isMobile }) {
   );
 }
 
-function EvidenceGroups({ isMobile, scrollParentRef, report }) {
-  const [expanded, setExpanded] = useState({});
-  const sectionRefs = useRef({});
-  const groups = report?.groups || [];
-  if (!groups.length) return null;
+function hexToRgba(hex, alpha) {
+  const h = String(hex || '').replace('#', '');
+  if (h.length !== 6) return `rgba(122,167,224,${alpha})`;
+  const n = parseInt(h, 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
 
-  const scrollTo = (key) => {
-    const el = scrollParentRef?.current;
-    const target = sectionRefs.current[key];
-    if (el && target) el.scrollTo({ top: target.offsetTop - 120, behavior: 'smooth' });
+function resolveReportVerdict(report) {
+  if (report?.verdict && VERDICT[report.verdict]) return report.verdict;
+  const h = String(report?.headline || '').toLowerCase();
+  if (h.startsWith('mixed')) return 'mixed';
+  if (h.startsWith('benefit') || h.startsWith('yes')) return 'benefit';
+  if (h.includes('no difference')) return 'no_difference';
+  if (h.includes('contest')) return 'contested';
+  if (h.includes('uncertain') || h.includes('unclear')) return 'uncertain';
+  if (h.includes('harm')) return 'harm';
+  return 'mixed';
+}
+
+function displayHeadline(report) {
+  const h = String(report?.headline || '').trim();
+  return h.replace(/^(Mixed|Benefit|Contested|Uncertain|Harm|No difference)\s*:\s*/i, '');
+}
+
+function orderedCiteIds(report) {
+  const ids = [];
+  const seen = new Set();
+  for (const s of report?.sentences || []) {
+    for (const id of s.cites || []) {
+      const key = String(id);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      ids.push(key);
+    }
+  }
+  return ids;
+}
+
+function getCitation(report, id) {
+  const key = String(id);
+  const fromMap = report?.citations?.[key];
+  if (fromMap) return { id: key, ...fromMap };
+  // Fallback: use first matching group row text
+  for (const g of report?.groups || []) {
+    for (const r of g.rows || []) {
+      if (r.id === key || r.cite === key) {
+        return { id: key, text: r.text, src: r.src, url: r.url || null, verdict: g.key };
+      }
+    }
+  }
+  return {
+    id: key,
+    text: `Finding ${key}`,
+    src: 'Source details unavailable for this citation.',
+    url: null,
+    verdict: 'uncertain',
   };
+}
+
+function CitationPanel({ report, citeId, onClose, onStep }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowLeft') onStep(-1);
+      if (e.key === 'ArrowRight') onStep(1);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose, onStep]);
+
+  if (!citeId) return null;
+  const cite = getCitation(report, citeId);
+  const v = VERDICT[cite.verdict] || VERDICT.uncertain;
 
   return (
     <>
-      <div style={{
-        marginTop: 40,
-        display: 'grid',
-        gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(groups.length, 3)}, minmax(0, 1fr))`,
-        borderTop: '1px solid rgba(255,255,255,0.14)',
-        borderBottom: '1px solid rgba(255,255,255,0.14)',
-      }}>
-        {groups.map((g, i) => (
-          <button
-            key={g.key}
-            type="button"
-            onClick={() => scrollTo(g.key)}
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              gap: 16,
-              padding: isMobile ? '22px 0' : '28px 28px 28px 0',
-              borderRight: !isMobile && i < groups.length - 1
-                ? '1px solid rgba(255,255,255,0.14)' : 'none',
-              borderBottom: isMobile && i < groups.length - 1
-                ? '1px solid rgba(255,255,255,0.08)' : 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              textAlign: 'left',
-              fontFamily: fonts.main,
-            }}
-          >
-            <span style={{
-              color: '#fff', fontSize: isMobile ? 40 : 56, fontWeight: 800,
-              letterSpacing: '-0.04em', lineHeight: 1,
-            }}>
-              {g.big}
+      <div
+        role="presentation"
+        onClick={onClose}
+        style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 40,
+        }}
+      />
+      <aside
+        role="dialog"
+        aria-label={`Finding ${cite.id}`}
+        style={{
+          position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(440px, 100vw)',
+          background: '#111', borderLeft: '1px solid rgba(255,255,255,0.12)',
+          boxShadow: '-24px 0 48px rgba(0,0,0,0.5)', zIndex: 41,
+          overflowY: 'auto',
+        }}
+      >
+        <div style={{
+          padding: '28px 32px', display: 'flex', flexDirection: 'column', gap: 18,
+          fontFamily: fonts.main,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontFamily: fonts.mono, fontSize: 12, color: '#00ff88' }}>
+              Finding {cite.id}
             </span>
-            <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <VerdictDot color={g.color} label={g.label} size={15} />
-              <span style={{ color: '#888', fontSize: 14 }}>{g.studiesPlain}</span>
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {groups.map((g, i) => {
-        const showAll = expanded[g.key];
-        const rows = showAll && g.extra ? [...(g.rows || []), ...g.extra] : (g.rows || []);
-        return (
-          <div
-            key={g.key}
-            ref={(el) => { sectionRefs.current[g.key] = el; }}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: isMobile ? '1fr' : '300px minmax(0, 1fr)',
-              gap: isMobile ? 28 : 56,
-              padding: isMobile ? '48px 0 40px' : '64px 0 56px',
-              borderBottom: '1px solid rgba(255,255,255,0.14)',
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <VerdictDot
-                color={g.color}
-                label={`${g.numPad || String(i + 1).padStart(2, '0')} · ${g.label}`}
-              />
-              <h3 style={{
-                margin: 0, color: '#fff', fontSize: isMobile ? 28 : 36,
-                fontWeight: 800, letterSpacing: '-0.025em', lineHeight: 1.1,
-              }}>
-                {g.label}
-              </h3>
-              <span style={{ color: '#888', fontSize: 15, lineHeight: 1.5 }}>{g.countPlain}</span>
-              <p style={{ margin: '8px 0 0', color: '#aaa', fontSize: 16, lineHeight: 1.6 }}>{g.blurb}</p>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {rows.map((r, ri) => (
-                <div
-                  key={ri}
-                  style={{
-                    padding: '0 0 28px',
-                    marginBottom: 28,
-                    borderBottom: '1px solid rgba(255,255,255,0.06)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 10,
-                  }}
-                >
-                  <span style={{ color: '#eee', fontSize: isMobile ? 17 : 19, lineHeight: 1.6 }}>{r.text}</span>
-                  {r.b && (
-                    <>
-                      <span style={{
-                        display: 'flex', alignItems: 'center', gap: 12,
-                        color: '#888', fontSize: 13, fontWeight: 600,
-                        letterSpacing: '0.06em', textTransform: 'uppercase',
-                      }}>
-                        <span style={{ width: 24, height: 1, background: '#555' }} />
-                        but another study found
-                      </span>
-                      <span style={{ color: '#eee', fontSize: isMobile ? 17 : 19, lineHeight: 1.6 }}>{r.b}</span>
-                    </>
-                  )}
-                  <span style={{ color: '#777', fontSize: 14, lineHeight: 1.5 }}>{r.src}</span>
-                </div>
-              ))}
-              {(g.hidden > 0 || (g.extra && g.extra.length)) && !showAll && g.morePlain && (
-                <button
-                  type="button"
-                  onClick={() => setExpanded((s) => ({ ...s, [g.key]: true }))}
-                  style={{
-                    background: 'none', border: 'none', padding: 0,
-                    color: '#ccc', fontSize: 15, fontWeight: 500,
-                    cursor: 'pointer', textAlign: 'left', fontFamily: fonts.main,
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = '#ccc'; }}
-                >
-                  {g.morePlain} →
-                </button>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              style={{
+                background: 'none', border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 20, color: '#aaa', width: 32, height: 32, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = '#aaa'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
+            >
+              <X size={14} />
+            </button>
           </div>
-        );
-      })}
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            fontSize: 13, fontWeight: 600, color: v.color,
+          }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: v.color }} />
+            {v.label}
+          </span>
+          <p style={{ margin: 0, color: '#fff', fontSize: 21, lineHeight: 1.5, fontWeight: 500 }}>
+            {cite.text}
+          </p>
+          <div style={{ height: 1, background: 'rgba(255,255,255,0.08)' }} />
+          <div style={{ fontSize: 12, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            Source
+          </div>
+          <p style={{ margin: 0, color: '#ccc', fontSize: 15, lineHeight: 1.55 }}>{cite.src}</p>
+          {cite.url && (
+            <a
+              href={cite.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                color: '#00ff88', fontSize: 14, fontWeight: 500, textDecoration: 'none',
+              }}
+            >
+              Open study <ExternalLink size={14} />
+            </a>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button
+              type="button"
+              onClick={() => onStep(-1)}
+              style={{
+                flex: 1, background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10,
+                color: '#ccc', padding: 10, fontFamily: fonts.main, fontSize: 13, cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = '#ccc'; }}
+            >
+              ← Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => onStep(1)}
+              style={{
+                flex: 1, background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10,
+                color: '#ccc', padding: 10, fontFamily: fonts.main, fontSize: 13, cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = '#ccc'; }}
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      </aside>
     </>
   );
 }
 
-function FollowUpList({ isMobile, followups, onPick, searching }) {
+function VerdictHero({ isMobile, report, engineLive }) {
+  const verdictKey = resolveReportVerdict(report);
+  const v = VERDICT[verdictKey] || VERDICT.mixed;
+  const groups = report.groups || [];
+
+  return (
+    <div style={{
+      padding: isMobile ? '40px 0 36px' : '56px 0 48px',
+      borderBottom: '1px solid rgba(255,255,255,0.14)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <span style={{
+          width: 14, height: 14, borderRadius: '50%', background: v.color,
+          boxShadow: `0 0 0 6px ${hexToRgba(v.color, 0.15)}`, flexShrink: 0,
+        }} />
+        <span style={{
+          color: v.color, fontSize: 13, fontWeight: 700,
+          letterSpacing: '0.12em', textTransform: 'uppercase',
+        }}>
+          Verdict · {v.label}
+        </span>
+        {engineLive && (
+          <span style={{
+            marginLeft: 'auto', color: '#00ff88', fontSize: 12, fontFamily: fonts.mono,
+          }}>
+            Gated claim ledger
+          </span>
+        )}
+      </div>
+      <h1 style={{
+        margin: '22px 0 0', color: '#fff',
+        fontSize: isMobile ? 32 : 48, fontWeight: 800,
+        letterSpacing: '-0.035em', lineHeight: 1.08,
+        maxWidth: 940, textWrap: 'balance',
+      }}>
+        {displayHeadline(report)}
+      </h1>
+      {report.kicker && (
+        <p style={{ margin: '16px 0 0', color: '#888', fontSize: 15 }}>{report.kicker}</p>
+      )}
+      {groups.length > 0 && (
+        <>
+          <div style={{ marginTop: 36, display: 'flex', gap: 3, height: 12 }}>
+            {groups.map((g) => (
+              <div
+                key={g.key}
+                style={{
+                  flex: Number(g.big) || 1,
+                  background: g.color,
+                  borderRadius: 2,
+                }}
+              />
+            ))}
+          </div>
+          <div style={{
+            marginTop: 16, display: 'flex', gap: isMobile ? 20 : 40, flexWrap: 'wrap',
+          }}>
+            {groups.map((g) => (
+              <div key={g.key} style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                <span style={{
+                  color: '#fff', fontSize: isMobile ? 24 : 28, fontWeight: 800,
+                  letterSpacing: '-0.03em',
+                }}>
+                  {g.big}
+                </span>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                  fontSize: 14, fontWeight: 600, color: g.color,
+                }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: g.color }} />
+                  {g.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AskNextRail({ isMobile, followups, onPick, searching }) {
   if (!followups?.length) return null;
   return (
-    <div style={{ marginTop: 56 }}>
-      <div style={{ fontSize: 15, color: '#ccc', fontWeight: 600, marginBottom: 8 }}>
-        Suggested next searches
+    <div style={{
+      position: isMobile ? 'static' : 'sticky',
+      top: isMobile ? undefined : 126,
+      alignSelf: 'start',
+    }}>
+      <div style={{
+        fontSize: 12, color: '#00ff88', letterSpacing: '0.08em',
+        textTransform: 'uppercase', fontWeight: 600, marginBottom: 6,
+      }}>
+        Ask next
       </div>
-      <p style={{ margin: '0 0 20px', color: '#666', fontSize: 14, maxWidth: 640, lineHeight: 1.5 }}>
-        Higher-leverage questions from this topic — conflicts, gaps, and comparisons worth opening next.
+      <p style={{ margin: '0 0 16px', color: '#777', fontSize: 13, lineHeight: 1.5 }}>
+        Each one already has a verdict in the ledger.
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {followups.map((item) => (
-          <button
-            key={item.id || item.q}
-            type="button"
-            disabled={searching}
-            onClick={() => onPick(item.q)}
-            style={{
-              textAlign: 'left',
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 12,
-              padding: isMobile ? '14px 16px' : '16px 20px',
-              cursor: searching ? 'wait' : 'pointer',
-              fontFamily: fonts.main,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(0,255,136,0.35)';
-              e.currentTarget.style.background = 'rgba(0,255,136,0.04)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
-              e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
-            }}
-          >
-            <span style={{ color: '#fff', fontSize: isMobile ? 15 : 16, fontWeight: 600, lineHeight: 1.4 }}>
-              {item.q}
-            </span>
-            {item.why && (
-              <span style={{ color: '#777', fontSize: 13 }}>
-                {item.why}
+        {followups.slice(0, 4).map((item) => {
+          const v = item.v && VERDICT[item.v] ? VERDICT[item.v] : null;
+          return (
+            <button
+              key={item.id || item.q}
+              type="button"
+              disabled={searching}
+              onClick={() => onPick(item.q)}
+              style={{
+                display: 'flex', flexDirection: 'column', gap: 8,
+                padding: '16px 18px',
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 12,
+                cursor: searching ? 'wait' : 'pointer',
+                textAlign: 'left',
+                fontFamily: fonts.main,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(0,255,136,0.35)';
+                e.currentTarget.style.background = 'rgba(0,255,136,0.04)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+                e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+              }}
+            >
+              {v ? (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                  fontSize: 12, fontWeight: 600, color: v.color,
+                }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: v.color }} />
+                  {v.label}{item.claims != null ? ` · ${item.claims} findings` : ''}
+                </span>
+              ) : item.why ? (
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#888' }}>{item.why}</span>
+              ) : null}
+              <span style={{ color: '#fff', fontSize: 15, fontWeight: 600, lineHeight: 1.4 }}>
+                {item.q}
               </span>
-            )}
-          </button>
-        ))}
+              {(item.answer || (!v && item.why)) && (
+                <span style={{ color: '#888', fontSize: 13, lineHeight: 1.5 }}>
+                  {item.answer || item.why}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function MainAnswer({ isMobile, scrollParentRef, report, engineLive, query, web, literature, onTab }) {
+function EvidenceGroups({ isMobile, report }) {
+  const [expanded, setExpanded] = useState({});
+  const groups = report?.groups || [];
+  if (!groups.length) return null;
+
+  return (
+    <div style={{
+      marginTop: 64,
+      display: 'grid',
+      gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(groups.length, 3)}, minmax(0, 1fr))`,
+      gap: 16,
+    }}>
+      {groups.map((g) => {
+        const showAll = expanded[g.key];
+        const base = g.rows || [];
+        const extra = g.extra || [];
+        const visible = showAll ? [...base, ...extra] : base.slice(0, 2);
+        const canExpand = !showAll && (
+          base.length > 2 || extra.length > 0 || (g.hidden > 0 && g.morePlain)
+        );
+        return (
+          <div
+            key={g.key}
+            style={{
+              display: 'flex', flexDirection: 'column',
+              borderTop: `2px solid ${g.color}`,
+              paddingTop: 20,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+              <span style={{
+                color: '#fff', fontSize: 40, fontWeight: 800,
+                letterSpacing: '-0.04em', lineHeight: 1,
+              }}>
+                {g.big}
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 15, fontWeight: 600, color: g.color }}>{g.label}</span>
+                <span style={{ color: '#888', fontSize: 13 }}>{g.studiesPlain}</span>
+              </span>
+            </div>
+            <p style={{ margin: '14px 0 20px', color: '#aaa', fontSize: 14, lineHeight: 1.6 }}>
+              {g.blurb}
+            </p>
+            {visible.map((r, ri) => (
+              <div
+                key={ri}
+                style={{
+                  padding: '16px 0',
+                  borderTop: '1px solid rgba(255,255,255,0.06)',
+                  display: 'flex', flexDirection: 'column', gap: 6,
+                }}
+              >
+                <span style={{ color: '#eee', fontSize: 15, lineHeight: 1.55 }}>{r.text}</span>
+                {r.b && (
+                  <span style={{ color: '#aaa', fontSize: 14, lineHeight: 1.5 }}>
+                    But: {r.b}
+                  </span>
+                )}
+                <span style={{ color: '#666', fontSize: 12, lineHeight: 1.5 }}>{r.src}</span>
+              </div>
+            ))}
+            {canExpand && g.morePlain && (
+              <button
+                type="button"
+                onClick={() => setExpanded((s) => ({ ...s, [g.key]: true }))}
+                style={{
+                  paddingTop: 12, background: 'none', border: 'none',
+                  color: '#ccc', fontSize: 14, fontWeight: 500,
+                  cursor: 'pointer', textAlign: 'left', fontFamily: fonts.main,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = '#ccc'; }}
+              >
+                {g.morePlain} →
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MainAnswer({
+  isMobile, report, engineLive, query, web, literature, onTab,
+  followups, onAskNext, searching,
+}) {
+  const [citeId, setCiteId] = useState(null);
+  const citeOrder = useMemo(() => orderedCiteIds(report), [report]);
+
+  const stepCite = (delta) => {
+    if (!citeOrder.length) return;
+    const i = citeOrder.indexOf(String(citeId));
+    const next = citeOrder[(i + delta + citeOrder.length) % citeOrder.length];
+    setCiteId(next);
+  };
+
   if (report) {
     return (
       <div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 880 }}>
-          {(report.sentences || []).map((s, i) => (
-            <p key={i} style={{ margin: 0, color: '#d8d8d8', fontSize: isMobile ? 17 : 20, lineHeight: 1.7 }}>
-              {s.text}
-              {(s.cites || []).map((id) => (
-                <sup key={id} style={{ color: '#00ff88', fontSize: 12, marginLeft: 2 }}>{id}</sup>
+        <VerdictHero isMobile={isMobile} report={report} engineLive={engineLive} />
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) 340px',
+          gap: isMobile ? 40 : 64,
+          paddingTop: 48,
+        }}>
+          <div>
+            <div style={{
+              fontSize: 12, color: '#666', letterSpacing: '0.08em',
+              textTransform: 'uppercase', fontWeight: 600, marginBottom: 18,
+            }}>
+              The answer
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              {(report.sentences || []).map((s, i) => (
+                <p key={i} style={{
+                  margin: 0, color: '#d8d8d8',
+                  fontSize: isMobile ? 17 : 20, lineHeight: 1.7,
+                }}>
+                  {s.text}
+                  {(s.cites || []).length > 0 && (
+                    <span style={{
+                      display: 'inline-flex', gap: 4, marginLeft: 8, verticalAlign: 3,
+                    }}>
+                      {(s.cites || []).map((id) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setCiteId(String(id))}
+                          style={{
+                            fontFamily: fonts.mono, fontSize: 11, color: '#00ff88',
+                            background: 'rgba(0,255,136,0.08)',
+                            border: '1px solid rgba(0,255,136,0.3)',
+                            borderRadius: 4, padding: '1px 5px', cursor: 'pointer',
+                            lineHeight: 1.4,
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,255,136,0.2)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,255,136,0.08)'; }}
+                        >
+                          {id}
+                        </button>
+                      ))}
+                    </span>
+                  )}
+                </p>
               ))}
-            </p>
-          ))}
+            </div>
+
+            <div style={{
+              marginTop: 32,
+              display: 'grid',
+              gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+              gap: 16,
+            }}>
+              {report.gaps && (
+                <div style={{
+                  padding: '18px 20px',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 12,
+                }}>
+                  <div style={{
+                    fontSize: 12, color: '#888', letterSpacing: '0.06em',
+                    textTransform: 'uppercase', marginBottom: 8,
+                  }}>
+                    Not covered
+                  </div>
+                  <p style={{ margin: 0, color: '#aaa', fontSize: 14, lineHeight: 1.6 }}>
+                    {report.gaps}
+                  </p>
+                </div>
+              )}
+              {(report.refused || 0) > 0 && (
+                <div style={{
+                  padding: '18px 20px',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 12,
+                }}>
+                  <div style={{
+                    fontSize: 12, color: '#888', letterSpacing: '0.06em',
+                    textTransform: 'uppercase', marginBottom: 8,
+                  }}>
+                    Left out
+                  </div>
+                  <p style={{ margin: 0, color: '#aaa', fontSize: 14, lineHeight: 1.6 }}>
+                    {report.refused} drafted sentence{report.refused === 1 ? '' : 's'} dropped because the sources didn&rsquo;t support them.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <AskNextRail
+            isMobile={isMobile}
+            followups={followups}
+            onPick={onAskNext}
+            searching={searching}
+          />
         </div>
-        {(report.refused || 0) > 0 && (
-          <p style={{ margin: '20px 0 0', fontSize: 14, color: '#777' }}>
-            {report.refused} more sentence{report.refused === 1 ? '' : 's'} were drafted but left out because the sources didn&rsquo;t support them.
-          </p>
-        )}
-        {report.gaps && (
-          <p style={{ margin: '24px 0 0', color: '#888', fontSize: 15, lineHeight: 1.6, maxWidth: 800 }}>
-            <span style={{ color: '#ccc' }}>Not covered:</span> {report.gaps}
-          </p>
-        )}
-        {engineLive && (
-          <p style={{ margin: '12px 0 0', fontSize: 12, color: '#00ff88', fontFamily: fonts.mono }}>
-            Gated claim ledger
-          </p>
-        )}
-        <EvidenceGroups isMobile={isMobile} scrollParentRef={scrollParentRef} report={report} />
+
+        <EvidenceGroups isMobile={isMobile} report={report} />
+
+        <CitationPanel
+          report={report}
+          citeId={citeId}
+          onClose={() => setCiteId(null)}
+          onStep={stepCite}
+        />
       </div>
     );
   }
@@ -730,71 +1104,91 @@ function MainAnswer({ isMobile, scrollParentRef, report, engineLive, query, web,
   const loading = web?.loading || literature?.loading;
 
   if (loading) {
-    return <p style={{ color: '#888', fontSize: 15 }}>Building a holistic answer from web + literature…</p>;
+    return <p style={{ color: '#888', fontSize: 15, marginTop: 32 }}>Building a holistic answer from web + literature…</p>;
   }
 
   return (
-    <div style={{ maxWidth: 880 }}>
-      <p style={{ margin: 0, color: '#d8d8d8', fontSize: isMobile ? 17 : 20, lineHeight: 1.7 }}>
-        Here&rsquo;s a working overview for <span style={{ color: '#fff' }}>“{query}”</span> drawn from
-        open web and research literature. This is not a citation-gated ledger answer — switch to{' '}
-        <button
-          type="button"
-          onClick={() => onTab('literature')}
-          style={{
-            background: 'none', border: 'none', color: '#00ff88', cursor: 'pointer',
-            fontFamily: fonts.main, fontSize: 'inherit', padding: 0, textDecoration: 'underline',
-          }}
-        >
-          Literature
-        </button>
-        {' '}or{' '}
-        <button
-          type="button"
-          onClick={() => onTab('web')}
-          style={{
-            background: 'none', border: 'none', color: '#00ff88', cursor: 'pointer',
-            fontFamily: fonts.main, fontSize: 'inherit', padding: 0, textDecoration: 'underline',
-          }}
-        >
-          Web
-        </button>
-        {' '}for the underlying sources.
-      </p>
-
-      {webHits[0] && (
-        <div style={{ marginTop: 28 }}>
-          <div style={{ fontSize: 12, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>
-            From the open web
-          </div>
-          {(webHits.slice(0, 3)).map((r) => (
-            <p key={r.url || r.title} style={{ margin: '0 0 14px', color: '#bbb', fontSize: 15, lineHeight: 1.6 }}>
-              <strong style={{ color: '#eee' }}>{r.title}</strong>
-              {r.snippet ? ` — ${r.snippet}` : ''}
-            </p>
-          ))}
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) 340px',
+      gap: isMobile ? 40 : 64,
+      paddingTop: 40,
+    }}>
+      <div style={{ maxWidth: 880 }}>
+        <div style={{
+          fontSize: 12, color: '#666', letterSpacing: '0.08em',
+          textTransform: 'uppercase', fontWeight: 600, marginBottom: 18,
+        }}>
+          The answer
         </div>
-      )}
+        <p style={{ margin: 0, color: '#d8d8d8', fontSize: isMobile ? 17 : 20, lineHeight: 1.7 }}>
+          Here&rsquo;s a working overview for <span style={{ color: '#fff' }}>“{query}”</span> drawn from
+          open web and research literature. This is not a citation-gated ledger answer — switch to{' '}
+          <button
+            type="button"
+            onClick={() => onTab('literature')}
+            style={{
+              background: 'none', border: 'none', color: '#00ff88', cursor: 'pointer',
+              fontFamily: fonts.main, fontSize: 'inherit', padding: 0, textDecoration: 'underline',
+            }}
+          >
+            Literature
+          </button>
+          {' '}or{' '}
+          <button
+            type="button"
+            onClick={() => onTab('web')}
+            style={{
+              background: 'none', border: 'none', color: '#00ff88', cursor: 'pointer',
+              fontFamily: fonts.main, fontSize: 'inherit', padding: 0, textDecoration: 'underline',
+            }}
+          >
+            Web
+          </button>
+          {' '}for the underlying sources.
+        </p>
 
-      {litHits[0] && (
-        <div style={{ marginTop: 28 }}>
-          <div style={{ fontSize: 12, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>
-            From the literature
+        {webHits[0] && (
+          <div style={{ marginTop: 28 }}>
+            <div style={{ fontSize: 12, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>
+              From the open web
+            </div>
+            {(webHits.slice(0, 3)).map((r) => (
+              <p key={r.url || r.title} style={{ margin: '0 0 14px', color: '#bbb', fontSize: 15, lineHeight: 1.6 }}>
+                <strong style={{ color: '#eee' }}>{r.title}</strong>
+                {r.snippet ? ` — ${r.snippet}` : ''}
+              </p>
+            ))}
           </div>
-          {(litHits.slice(0, 3)).map((p) => (
-            <p key={p.pmid || p.title} style={{ margin: '0 0 14px', color: '#bbb', fontSize: 15, lineHeight: 1.6 }}>
-              <strong style={{ color: '#eee' }}>{p.title}</strong>
-              {[p.journal, p.year].filter(Boolean).length
-                ? ` — ${[p.journal, p.year].filter(Boolean).join(', ')}`
-                : ''}
-            </p>
-          ))}
-        </div>
-      )}
+        )}
 
-      {!webHits.length && !litHits.length && (
-        <p style={{ marginTop: 24, color: '#666', fontSize: 15 }}>No sources yet for this query.</p>
-      )}
+        {litHits[0] && (
+          <div style={{ marginTop: 28 }}>
+            <div style={{ fontSize: 12, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>
+              From the literature
+            </div>
+            {(litHits.slice(0, 3)).map((p) => (
+              <p key={p.pmid || p.title} style={{ margin: '0 0 14px', color: '#bbb', fontSize: 15, lineHeight: 1.6 }}>
+                <strong style={{ color: '#eee' }}>{p.title}</strong>
+                {[p.journal, p.year].filter(Boolean).length
+                  ? ` — ${[p.journal, p.year].filter(Boolean).join(', ')}`
+                  : ''}
+              </p>
+            ))}
+          </div>
+        )}
+
+        {!webHits.length && !litHits.length && (
+          <p style={{ marginTop: 24, color: '#666', fontSize: 15 }}>No sources yet for this query.</p>
+        )}
+      </div>
+
+      <AskNextRail
+        isMobile={isMobile}
+        followups={followups}
+        onPick={onAskNext}
+        searching={searching}
+      />
     </div>
   );
 }
@@ -884,50 +1278,12 @@ function LiteratureResultsPanel({ isMobile, literature }) {
   );
 }
 
-/** Answer-style header line — substance, not a mode label. */
-function deriveAnswerSubheading({ report, web, literature }) {
-  if (report?.headline) return report.headline;
-  const firstSentence = report?.sentences?.[0]?.text;
-  if (firstSentence) return firstSentence;
-
-  if (web?.loading || literature?.loading) return null;
-
-  const lit = (literature?.results || []).filter((p) => p.kind !== 'trial');
-  const trials = (literature?.results || []).filter((p) => p.kind === 'trial');
-  const webHits = web?.results || [];
-
-  // Prefer a short synthesis from what we actually found
-  if (lit[0]?.title && webHits[0]?.title) {
-    const nLit = literature?.hitCount || lit.length;
-    return `${lit[0].title.replace(/\.$/, '')} — with ${Number(nLit).toLocaleString()} papers and open-web coverage in view.`;
-  }
-  if (lit[0]?.title) return lit[0].title;
-  if (trials[0]?.title) return trials[0].title;
-  if (webHits[0]?.snippet) {
-    const s = webHits[0].snippet.replace(/\s+/g, ' ').trim();
-    return s.length > 180 ? `${s.slice(0, 180)}…` : s;
-  }
-  if (webHits[0]?.title) return webHits[0].title;
-  return null;
-}
-
 function SearchResultsPage({
-  isMobile, scrollParentRef, query, report, engineLive, web, literature,
+  isMobile, query, report, engineLive, web, literature,
   followups, onAskNext, searching, tab, onTab,
 }) {
   const webCount = web?.results?.length || 0;
   const litCount = literature?.results?.length || 0;
-
-  const topic = query;
-  const subheading = deriveAnswerSubheading({ report, web, literature });
-  const additional = [
-    report?.kicker,
-    engineLive ? 'Evidence engine live' : null,
-    webCount ? `${webCount} web` : (web?.loading ? 'web…' : null),
-    litCount || literature?.hitCount
-      ? `${(literature?.hitCount || litCount).toLocaleString()} papers`
-      : (literature?.loading ? 'literature…' : null),
-  ].filter(Boolean).join(' · ');
 
   return (
     <div style={{
@@ -937,36 +1293,6 @@ function SearchResultsPage({
       padding: isMobile ? '112px 20px 72px' : '136px 40px 96px',
       fontFamily: fonts.main,
     }}>
-      {/* Search header */}
-      <div style={{ maxWidth: 900 }}>
-        <div style={{
-          fontSize: 12, color: '#888', letterSpacing: '0.08em',
-          textTransform: 'uppercase', fontWeight: 600,
-        }}>
-          Topic
-        </div>
-        <h2 style={{
-          margin: '10px 0 0', color: '#fff',
-          fontSize: isMobile ? 26 : 40, fontWeight: 700,
-          lineHeight: 1.15, letterSpacing: '-0.025em',
-        }}>
-          {topic}
-        </h2>
-        {subheading && (
-          <p style={{
-            margin: '14px 0 0', color: '#ccc',
-            fontSize: isMobile ? 17 : 20, fontWeight: 500, lineHeight: 1.4,
-          }}>
-            {subheading}
-          </p>
-        )}
-        {additional && (
-          <p style={{ margin: '12px 0 0', color: '#777', fontSize: 14, lineHeight: 1.5 }}>
-            {additional}
-          </p>
-        )}
-      </div>
-
       <SectionTabs
         tab={tab}
         onTab={onTab}
@@ -974,36 +1300,31 @@ function SearchResultsPage({
         isMobile={isMobile}
       />
 
-      <div style={{ marginTop: 32 }}>
-        <div style={{
-          fontSize: 12, color: '#666', letterSpacing: '0.08em',
-          textTransform: 'uppercase', marginBottom: 18, fontWeight: 600,
-        }}>
-          Results
-        </div>
-
+      <div>
         {tab === 'main' && (
-          <>
-            <MainAnswer
-              isMobile={isMobile}
-              scrollParentRef={scrollParentRef}
-              report={report}
-              engineLive={engineLive}
-              query={query}
-              web={web}
-              literature={literature}
-              onTab={onTab}
-            />
-            <FollowUpList
-              isMobile={isMobile}
-              followups={followups}
-              onPick={onAskNext}
-              searching={searching}
-            />
-          </>
+          <MainAnswer
+            isMobile={isMobile}
+            report={report}
+            engineLive={engineLive}
+            query={query}
+            web={web}
+            literature={literature}
+            onTab={onTab}
+            followups={followups}
+            onAskNext={onAskNext}
+            searching={searching}
+          />
         )}
-        {tab === 'web' && <WebResultsPanel isMobile={isMobile} web={web} />}
-        {tab === 'literature' && <LiteratureResultsPanel isMobile={isMobile} literature={literature} />}
+        {tab === 'web' && (
+          <div style={{ marginTop: 32 }}>
+            <WebResultsPanel isMobile={isMobile} web={web} />
+          </div>
+        )}
+        {tab === 'literature' && (
+          <div style={{ marginTop: 32 }}>
+            <LiteratureResultsPanel isMobile={isMobile} literature={literature} />
+          </div>
+        )}
       </div>
 
       <p style={{ margin: '56px 0 0', fontSize: 13, color: '#666' }}>
@@ -1468,7 +1789,6 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
         <div ref={resultsTopRef} style={{ background: 'rgba(0,0,0,0.55)', minHeight: '100vh' }}>
           <SearchResultsPage
             isMobile={isMobile}
-            scrollParentRef={scrollContainerRef}
             query={query}
             report={report}
             engineLive={engineLive}
