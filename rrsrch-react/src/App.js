@@ -1230,9 +1230,92 @@ Waiting for approval... ✓`}</CodeBlock>
 
 // Hero taglines: the product page (home) and the account page
 const TAGLINES = {
-  home: ['TRUST WHAT YOUR AGENTS KNOW.', 'SEARCH ONCE. REUSE FOREVER.'],
+  home: ['WHAT THE LITERATURE ACTUALLY SHOWS.', 'EVERY SENTENCE TRACED TO ITS SOURCE.'],
   account: ['YOUR ACCOUNT & CONNECTIONS.', 'SIGN IN AND POINT YOUR AGENTS.'],
 };
+
+const HERO_PLACEHOLDER =
+  'Does MSC therapy improve cartilage repair in knee osteoarthritis?';
+
+/** Google-style question bar for the landing hero. Submit scrolls to the explainer. */
+function HeroSearch({ isMobile, onSearch }) {
+  const [q, setQ] = useState('');
+  const onSubmit = (e) => {
+    e.preventDefault();
+    const text = q.trim();
+    if (!text) return;
+    onSearch?.(text);
+  };
+  return (
+    <form onSubmit={onSubmit} style={{
+      width: '100%',
+      maxWidth: isMobile ? '100%' : '640px',
+      marginTop: '28px',
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        padding: isMobile ? '14px 16px' : '16px 22px',
+        background: 'rgba(255,255,255,0.06)',
+        border: '1px solid rgba(255,255,255,0.14)',
+        borderRadius: '28px',
+        backdropFilter: 'blur(12px)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
+        transition: 'border-color 0.2s ease, background 0.2s ease',
+      }}
+        onFocusCapture={(e) => {
+          e.currentTarget.style.borderColor = 'rgba(0,255,136,0.45)';
+          e.currentTarget.style.background = 'rgba(255,255,255,0.09)';
+        }}
+        onBlurCapture={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) {
+            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)';
+            e.currentTarget.style.background = 'rgba(255,255,255,0.06)';
+          }
+        }}
+      >
+        <Search size={18} color="#888" style={{ flexShrink: 0 }} />
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={HERO_PLACEHOLDER}
+          aria-label="Ask a research question"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            color: '#fff',
+            fontSize: isMobile ? '15px' : '17px',
+            fontFamily: theme.fonts.main,
+            lineHeight: 1.4,
+          }}
+        />
+        {q.trim() && (
+          <button type="submit" style={{
+            background: 'rgba(0,255,136,0.12)',
+            border: '1px solid rgba(0,255,136,0.4)',
+            borderRadius: '20px',
+            color: '#00ff88',
+            padding: '8px 14px',
+            cursor: 'pointer',
+            fontFamily: theme.fonts.main,
+            fontSize: '11px',
+            fontWeight: 700,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            flexShrink: 0,
+          }}>
+            Search
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
 
 function App() {
   const [activeModal, setActiveModal] = useState(null);
@@ -1388,11 +1471,6 @@ function App() {
             letterSpacing: '-0.05em', padding: '8px 6px'
           }}>RRSRCH</button>
 
-          <NavButton onClick={() => navigate('backpack')} icon={Database} label="Backpack"
-            active={route === 'backpack'} />
-          <NavButton onClick={() => navigate('account')} icon={TerminalIcon} label="Agents"
-            active={route === 'account'} />
-
           <div style={{ marginLeft: 'auto' }}>
             <NavButton onClick={() => window.open('https://x.com/rrsrch', '_blank')} icon={Twitter} label="X" />
           </div>
@@ -1405,11 +1483,10 @@ function App() {
           position: 'relative',
           display: 'flex',
           flexDirection: 'column',
-          justifyContent: 'flex-end', // Pushed to bottom
-          alignItems: 'flex-start',
-          paddingBottom: '15vh', // Spacing from bottom
-          paddingLeft: '60px',
-          textAlign: 'left'
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: isMobile ? '88px 20px 48px' : '96px 40px 64px',
+          textAlign: 'center'
         }}>
            <div style={{
             display: 'inline-flex',
@@ -1442,7 +1519,18 @@ function App() {
             </h1>
           </div>
 
-          <p style={{ color: '#666', marginTop: '18px', fontSize: '18px', maxWidth: '520px', lineHeight: '1.5', fontWeight: 'bold', fontFamily: theme.fonts.main }}>
+          <HeroSearch
+            isMobile={isMobile}
+            onSearch={() => {
+              const el = scrollContainerRef.current;
+              const target = contentRef.current;
+              if (el && target) {
+                el.scrollTo({ top: target.offsetTop - 24, behavior: 'smooth' });
+              }
+            }}
+          />
+
+          <p style={{ color: '#666', marginTop: '22px', fontSize: '18px', maxWidth: '520px', lineHeight: '1.5', fontWeight: 'bold', fontFamily: theme.fonts.main }}>
           {TAGLINES[route === 'account' ? 'account' : 'home'][0]} <br />
           {TAGLINES[route === 'account' ? 'account' : 'home'][1]}
           </p>
