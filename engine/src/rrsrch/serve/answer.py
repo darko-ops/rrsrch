@@ -108,14 +108,61 @@ def _groups(conn: psycopg.Connection, shown: list[Candidate]) -> list[dict]:
             "studiesPlain": f"findings · {len(studies)} stud{'y' if len(studies) == 1 else 'ies'}",
             "countPlain": f"{len(claims)} findings from {len(studies)} stud{'y' if len(studies) == 1 else 'ies'}",
             "blurb": f"Ledger claims whose direction is {GROUP_LABEL[key].lower()}.",
-            "rows": [{"text": c.text, "src": c.title or c.source_id, "b": None} for c in preview],
+            "rows": [
+                {
+                    "id": str(c.id),
+                    "text": c.text,
+                    "src": c.title or c.source_id,
+                    "b": None,
+                    "verdict": key,
+                    "url": _pubmed_url(c.source_id),
+                }
+                for c in preview
+            ],
             "morePlain": f"Show {len(rest)} more findings" if rest else None,
             "hidden": len(rest),
-            "extra": [{"text": c.text, "src": c.title or c.source_id, "b": None} for c in rest],
+            "extra": [
+                {
+                    "id": str(c.id),
+                    "text": c.text,
+                    "src": c.title or c.source_id,
+                    "b": None,
+                    "verdict": key,
+                    "url": _pubmed_url(c.source_id),
+                }
+                for c in rest
+            ],
         })
     # renumber for 4a left column
     for i, g in enumerate(out):
         g["numPad"] = f"{i + 1:02d}"
+    return out
+
+
+def _pubmed_url(source_id: str | None) -> str | None:
+    if not source_id:
+        return None
+    sid = str(source_id)
+    if sid.startswith("MED:"):
+        return f"https://pubmed.ncbi.nlm.nih.gov/{sid[4:]}/"
+    if sid.startswith("PMC:"):
+        return f"https://www.ncbi.nlm.nih.gov/pmc/articles/{sid[4:]}/"
+    if sid.isdigit():
+        return f"https://pubmed.ncbi.nlm.nih.gov/{sid}/"
+    return None
+
+
+def _citations_map(shown: list[Candidate]) -> dict[str, dict]:
+    """Site CitationPanel expects report.citations[id] = {text, src, verdict, url}."""
+    out: dict[str, dict] = {}
+    for c in shown:
+        effect = _claim_effect(c) or "uncertain"
+        out[str(c.id)] = {
+            "text": c.text,
+            "src": c.title or c.source_id,
+            "verdict": effect,
+            "url": _pubmed_url(c.source_id),
+        }
     return out
 
 
@@ -133,6 +180,7 @@ def answer(conn: psycopg.Connection, llm: LLM, question: str,
     kept = rep.kept
     refused = len(rep.sentences) - len(kept)
     groups = _groups(conn, rep.shown) if rep.shown else []
+    citations = _citations_map(rep.shown)
 
     if rep.bad_reply and not kept:
         headline = "No matching claims in the ledger yet."
@@ -158,10 +206,12 @@ def answer(conn: psycopg.Connection, llm: LLM, question: str,
             {"text": s.text, "cites": [str(i) for i in s.cites]}
             for s in kept
         ],
+        "citations": citations,
         "refused": refused,
         "groups": groups,
         "faithfulness": rep.faithfulness,
         "claims_shown": len(rep.shown),
         "gaps": None,
         "source": "ledger",
+        "engineLive": True,
     }
