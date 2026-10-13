@@ -1780,13 +1780,18 @@ function LitPaperCard({ paper, isMobile, open, onToggleAbstract }) {
         width: 48, height: 48, borderRadius: 8,
         border: '1px solid rgba(255,255,255,0.06)',
         background: '#161616', overflow: 'hidden',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 8, boxSizing: 'border-box',
       }}>
         {paper.image && imgOk ? (
           <img
             src={paper.image}
             alt=""
             onError={() => setImgOk(false)}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            style={{
+              width: '100%', height: '100%',
+              objectFit: 'contain', display: 'block',
+            }}
           />
         ) : null}
       </div>

@@ -750,18 +750,47 @@ function ledgerForPaper(pmid) {
   return { findings, byVerdict };
 }
 
+const LIT_SOURCE_HOST = {
+  'Europe PMC': 'europepmc.org',
+  OpenAlex: 'openalex.org',
+  'Semantic Scholar': 'semanticscholar.org',
+  'ClinicalTrials.gov': 'clinicaltrials.gov',
+};
+
+const LIT_REDIRECTOR_HOST = /^(doi\.org|dx\.doi\.org|europepmc\.org|ncbi\.nlm\.nih\.gov|pubmed\.ncbi\.nlm\.nih\.gov|semanticscholar\.org|openalex\.org|api\.semanticscholar\.org|clinicaltrials\.gov)$/i;
+
+function litLogoForHost(host) {
+  if (!host) return null;
+  const h = String(host).replace(/^www\./, '').toLowerCase();
+  if (!h) return null;
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(h)}&sz=128`;
+}
+
+function litSourceHost(sourceLabel) {
+  const label = String(sourceLabel || '').split('·')[0].trim();
+  return LIT_SOURCE_HOST[label] || null;
+}
+
 function enrichLiteraturePaper(r) {
   const studyType = r.studyType || classifyStudyType(r);
   const ledger = r.ledger != null ? r.ledger : ledgerForPaper(r.pmid);
   let image = r.image || null;
+  if (!image && r.publisherHost) {
+    image = litLogoForHost(r.publisherHost);
+  }
+  if (!image && r.publisherUrl) {
+    image = litLogoForHost(hostnameOf(r.publisherUrl));
+  }
   if (!image && r.url) {
-    try {
-      const host = new URL(r.url).hostname.replace(/^www\./, '');
-      // Prefer publisher/landing host; skip generic DOI / registry hosts
-      if (host && !/clinicaltrials\.gov|doi\.org|dx\.doi\.org|europepmc\.org|ncbi\.nlm\.nih\.gov|semanticscholar\.org|openalex\.org/.test(host)) {
-        image = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=128`;
-      }
-    } catch { /* ignore */ }
+    const host = hostnameOf(r.url);
+    if (host && !LIT_REDIRECTOR_HOST.test(host)) {
+      image = litLogoForHost(host);
+    }
+  }
+  // Always fall back to the literature source site logo (Europe PMC, OpenAlex, …)
+  if (!image) {
+    const primary = (r.sources && r.sources[0]) || String(r.source || '').split('·')[0].trim();
+    image = litLogoForHost(litSourceHost(primary));
   }
   return { ...r, studyType, ledger, image };
 }
@@ -843,6 +872,12 @@ async function searchOpenAlex(q, pageSize) {
       : '';
     const type = String(w.type || '').toLowerCase();
     const pubTypes = type ? [type.replace(/^https?:\/\/openalex\.org\//, '')] : [];
+    const publisherUrl = w.primary_location?.source?.homepage_url || null;
+    const landing = w.primary_location?.landing_page_url || null;
+    const publisherHost = hostnameOf(publisherUrl)
+      || (landing && !LIT_REDIRECTOR_HOST.test(hostnameOf(landing) || '')
+        ? hostnameOf(landing)
+        : null);
     return {
       source: 'OpenAlex',
       kind: 'paper',
@@ -855,11 +890,11 @@ async function searchOpenAlex(q, pageSize) {
       year: w.publication_year ? String(w.publication_year) : null,
       abstract: clipAbstract(abstract),
       openAccess: !!w.open_access?.is_oa,
-      url: w.primary_location?.landing_page_url
-        || (doi ? `https://doi.org/${doi}` : w.id)
-        || null,
+      url: landing || (doi ? `https://doi.org/${doi}` : w.id) || null,
       citations: typeof w.cited_by_count === 'number' ? w.cited_by_count : null,
       pubTypes,
+      publisherUrl,
+      publisherHost,
     };
   });
   return {
@@ -1003,6 +1038,8 @@ function mergeLiteratureResults(packs, limit) {
       } else if (existing.pubTypes && r.pubTypes?.length) {
         existing.pubTypes = [...new Set([...existing.pubTypes, ...r.pubTypes])];
       }
+      if (!existing.publisherHost && r.publisherHost) existing.publisherHost = r.publisherHost;
+      if (!existing.publisherUrl && r.publisherUrl) existing.publisherUrl = r.publisherUrl;
     }
   }
   const rankPaper = (a, b) => {
