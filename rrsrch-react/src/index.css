@@ -12,3 +12,22 @@ body {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+.literature-abstract b,
+.literature-abstract strong {
+  color: #bbb;
+  font-weight: 600;
+}
+
+.literature-abstract i,
+.literature-abstract em {
+  font-style: italic;
+}
+
+.literature-abstract p {
+  margin: 0 0 0.5em;
+}
+
+.literature-abstract p:last-child {
+  margin-bottom: 0;
+}
