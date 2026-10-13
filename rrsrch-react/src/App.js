@@ -1,11 +1,9 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
-import { MessageCircle, X, Twitter, Search, Database, Terminal as TerminalIcon, ExternalLink, Loader2 } from 'lucide-react';
-
-// Product / deploy config
-const REPO_URL = 'https://github.com/darko-ops/RRSRCH';
+import { MessageCircle, X, Twitter, Database, Terminal as TerminalIcon } from 'lucide-react';
+import SearchExperience from './SearchExperience';
 
 // Theme Configuration
 const theme = {
@@ -995,353 +993,19 @@ Waiting for approval... ✓`}</CodeBlock>
   );
 }
 
-// Hero taglines: the product page (home) and the account page
-const TAGLINES = {
-  home: ['know what the literature shows — and where it conflicts.',
-         'every sentence traced to its source.'],
-  account: ['YOUR ACCOUNT & CONNECTIONS.', 'SIGN IN AND POINT YOUR AGENTS.'],
-};
-
-const HERO_PLACEHOLDER =
-  'Does MSC therapy improve cartilage repair in knee osteoarthritis?';
-
-const SUGGESTED_QUESTIONS = [
-  'MSC-hydrogel composite knee cartilage defects safety and efficacy',
-  'mesenchymal stem cell knee osteoarthritis pain at 12 months',
-  'adipose derived MSC versus hyaluronic acid knee osteoarthritis',
-  'intra-articular mesenchymal stromal cell adverse events knee',
-  'bone marrow MSC knee osteoarthritis randomized controlled trial',
-];
-
-const ALLOWED_ABSTRACT_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'SUB', 'SUP', 'BR', 'P']);
-
-function sanitizeEuropePmcHtml(html) {
-  if (!html) return '';
-  try {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const walk = (node) => {
-      if (node.nodeType === Node.TEXT_NODE) return node.textContent;
-      if (node.nodeType !== Node.ELEMENT_NODE) return '';
-      const tag = node.tagName;
-      if (tag === 'SCRIPT' || tag === 'STYLE') return '';
-      const inner = Array.from(node.childNodes).map(walk).join('');
-      if (!ALLOWED_ABSTRACT_TAGS.has(tag)) return inner;
-      if (tag === 'BR') return '<br />';
-      return `<${tag.toLowerCase()}>${inner}</${tag.toLowerCase()}>`;
-    };
-    return Array.from(doc.body.childNodes).map(walk).join('').trim();
-  } catch {
-    return html.replace(/<[^>]+>/g, '');
-  }
-}
-
-function AbstractSnippet({ html }) {
-  const safe = useMemo(() => sanitizeEuropePmcHtml(html), [html]);
-  if (!safe) return null;
-  return (
-    <div
-      className="literature-abstract"
-      style={{ margin: '8px 0 0', color: '#999', fontSize: '13px', lineHeight: 1.55 }}
-      dangerouslySetInnerHTML={{ __html: safe }}
-    />
-  );
-}
-
-function SuggestedQuestions({ isMobile, onPick, searching, compact }) {
-  return (
-    <div style={{
-      width: '100%',
-      maxWidth: isMobile ? '100%' : '640px',
-      marginTop: compact ? 0 : '18px',
-      marginBottom: compact ? '16px' : 0,
-    }}>
-      {!compact && (
-        <p style={{
-          margin: '0 0 10px',
-          fontSize: '11px',
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          color: '#666',
-          fontFamily: theme.fonts.mono,
-        }}>
-          Suggested questions
-        </p>
-      )}
-      <div style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: '8px',
-        justifyContent: 'center',
-      }}>
-        {SUGGESTED_QUESTIONS.map((q) => (
-          <button
-            key={q}
-            type="button"
-            disabled={searching}
-            onClick={() => onPick(q)}
-            style={{
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: '999px',
-              color: '#aaa',
-              padding: isMobile ? '8px 12px' : '9px 14px',
-              fontSize: isMobile ? '11px' : '12px',
-              lineHeight: 1.35,
-              cursor: searching ? 'wait' : 'pointer',
-              fontFamily: theme.fonts.main,
-              textAlign: 'left',
-              maxWidth: '100%',
-              transition: 'border-color 0.15s, color 0.15s, background 0.15s',
-            }}
-            onMouseEnter={(e) => {
-              if (searching) return;
-              e.currentTarget.style.borderColor = 'rgba(0,255,136,0.35)';
-              e.currentTarget.style.color = '#ddd';
-              e.currentTarget.style.background = 'rgba(0,255,136,0.06)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
-              e.currentTarget.style.color = '#aaa';
-              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-            }}
-          >
-            {q}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/** Google-style question bar for the landing hero. Submit runs literature search. */
-function HeroSearch({ isMobile, onSearch, searching, query, onQueryChange }) {
-  const q = query ?? '';
-  const onSubmit = (e) => {
-    e.preventDefault();
-    const text = q.trim();
-    if (!text || searching) return;
-    onSearch?.(text);
-  };
-  return (
-    <form onSubmit={onSubmit} style={{
-      width: '100%',
-      maxWidth: isMobile ? '100%' : '640px',
-      marginTop: '28px',
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: isMobile ? '14px 16px' : '16px 22px',
-        background: 'rgba(255,255,255,0.06)',
-        border: '1px solid rgba(255,255,255,0.14)',
-        borderRadius: '28px',
-        backdropFilter: 'blur(12px)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-        transition: 'border-color 0.2s ease, background 0.2s ease',
-      }}
-        onFocusCapture={(e) => {
-          e.currentTarget.style.borderColor = 'rgba(0,255,136,0.45)';
-          e.currentTarget.style.background = 'rgba(255,255,255,0.09)';
-        }}
-        onBlurCapture={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget)) {
-            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)';
-            e.currentTarget.style.background = 'rgba(255,255,255,0.06)';
-          }
-        }}
-      >
-        <Search size={18} color="#888" style={{ flexShrink: 0 }} />
-        <input
-          type="search"
-          value={q}
-          onChange={(e) => onQueryChange?.(e.target.value)}
-          placeholder={HERO_PLACEHOLDER}
-          aria-label="Ask a research question"
-          style={{
-            flex: 1,
-            minWidth: 0,
-            background: 'transparent',
-            border: 'none',
-            outline: 'none',
-            color: '#fff',
-            fontSize: isMobile ? '15px' : '17px',
-            fontFamily: theme.fonts.main,
-            lineHeight: 1.4,
-          }}
-        />
-        {q.trim() && (
-          <button type="submit" disabled={searching} style={{
-            background: searching ? 'rgba(255,255,255,0.06)' : 'rgba(0,255,136,0.12)',
-            border: `1px solid ${searching ? 'rgba(255,255,255,0.15)' : 'rgba(0,255,136,0.4)'}`,
-            borderRadius: '20px',
-            color: searching ? '#888' : '#00ff88',
-            padding: '8px 14px',
-            cursor: searching ? 'wait' : 'pointer',
-            fontFamily: theme.fonts.main,
-            fontSize: '11px',
-            fontWeight: 700,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            flexShrink: 0,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}>
-            {searching ? <Loader2 size={14} style={{ animation: 'rrsrch-spin 1s linear infinite' }} /> : null}
-            {searching ? 'Searching' : 'Search'}
-          </button>
-        )}
-      </div>
-    </form>
-  );
-}
-
-function LiteratureResults({ isMobile, state, onPickQuestion, searching }) {
-  if (!state) return null;
-  const { query, loading, error, hitCount, results } = state;
-  return (
-    <div style={{
-      width: '100%',
-      maxWidth: '720px',
-      margin: isMobile ? '0 auto 32px' : '0 auto 48px',
-      padding: isMobile ? '0 16px' : '0 24px',
-    }}>
-      <div style={{
-        background: 'rgba(22, 22, 22, 0.88)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: isMobile ? '16px' : '20px',
-        backdropFilter: 'blur(20px)',
-        padding: isMobile ? '20px 18px' : '28px 28px',
-        boxShadow: '0 16px 48px rgba(0,0,0,0.45)',
-      }}>
-        <SuggestedQuestions
-          isMobile={isMobile}
-          compact
-          searching={searching}
-          onPick={onPickQuestion}
-        />
-        <p style={{
-          margin: '0 0 6px',
-          fontSize: '11px',
-          letterSpacing: '0.14em',
-          textTransform: 'uppercase',
-          color: '#00ff88',
-          fontFamily: theme.fonts.mono,
-        }}>
-          Literature search · Europe PMC
-        </p>
-        <p style={{ margin: '0 0 16px', color: '#aaa', fontSize: '14px', lineHeight: 1.5 }}>
-          {loading ? `Searching for “${query}”…` : error
-            ? `Could not search for “${query}”.`
-            : hitCount > results.length
-              ? `About ${hitCount.toLocaleString()} papers match; showing ${results.length}.`
-              : `${hitCount.toLocaleString()} paper${hitCount === 1 ? '' : 's'} found.`}
-        </p>
-        {error && (
-          <p style={{ margin: '0 0 12px', color: '#c66', fontSize: '13px', fontFamily: theme.fonts.mono }}>
-            {error}
-          </p>
-        )}
-        {!loading && !error && results.length === 0 && (
-          <p style={{ margin: 0, color: '#666', fontSize: '14px' }}>Try broader terms or check spelling.</p>
-        )}
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          {results.map((paper) => (
-            <li key={paper.pmid || paper.pmcid || paper.doi || paper.title} style={{
-              paddingBottom: '18px',
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
-            }}>
-              {paper.url ? (
-                <a href={paper.url} target="_blank" rel="noopener noreferrer" style={{
-                  color: '#fff',
-                  fontSize: '16px',
-                  fontWeight: 600,
-                  lineHeight: 1.35,
-                  textDecoration: 'none',
-                  display: 'inline-flex',
-                  alignItems: 'flex-start',
-                  gap: '8px',
-                }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = '#00ff88'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = '#fff'; }}
-                >
-                  <span>{paper.title}</span>
-                  <ExternalLink size={14} style={{ flexShrink: 0, marginTop: '4px', opacity: 0.6 }} />
-                </a>
-              ) : (
-                <span style={{ color: '#fff', fontSize: '16px', fontWeight: 600 }}>{paper.title}</span>
-              )}
-              <p style={{ margin: '6px 0 0', color: '#777', fontSize: '12px', fontFamily: theme.fonts.mono }}>
-                {[paper.authors, paper.journal, paper.year].filter(Boolean).join(' · ')}
-                {paper.openAccess ? ' · open access' : ''}
-                {paper.pmid ? ` · PMID ${paper.pmid}` : ''}
-              </p>
-              {paper.abstract && <AbstractSnippet html={paper.abstract} />}
-            </li>
-          ))}
-        </ul>
-        <p style={{
-          margin: '20px 0 0',
-          fontSize: '11px',
-          color: '#555',
-          lineHeight: 1.5,
-          fontFamily: theme.fonts.mono,
-        }}>
-          Research tool only — not medical advice. Cited reports from your own corpus ship in v1.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 function App() {
   const [activeModal, setActiveModal] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const scrollRef = useRef(0);
   const scrollContainerRef = useRef(null);
 
-  // hash routing — #/account, #/backpack (home, scrolled to the explainer);
-  // anything else is home
+  // hash routing — #/account; anything else is home
   const routeFromHash = () => {
     const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
     return h === 'account' ? 'account' : 'home';
   };
   const [route, setRoute] = useState(routeFromHash());
-  const [literature, setLiterature] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
   const contentRef = useRef(null);
-  const literatureRef = useRef(null);
-
-  const runLiteratureSearch = async (query) => {
-    setSearchQuery(query);
-    setLiterature({ query, loading: true, error: null, hitCount: 0, results: [] });
-    requestAnimationFrame(() => {
-      const el = scrollContainerRef.current;
-      const target = literatureRef.current;
-      if (el && target) {
-        el.scrollTo({ top: target.offsetTop - 72, behavior: 'smooth' });
-      }
-    });
-    try {
-      const res = await fetch(`/api/literature/search?${new URLSearchParams({ q: query, limit: '12' })}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Search failed');
-      setLiterature({
-        query,
-        loading: false,
-        error: null,
-        hitCount: data.hitCount ?? data.results?.length ?? 0,
-        results: data.results || [],
-      });
-    } catch (err) {
-      const msg = err.message || 'Search failed';
-      const hint = msg === 'Failed to fetch'
-        ? 'Could not reach the API — on localhost run `npm start` from the repo root (port 3001) while the React app uses the proxy.'
-        : msg;
-      setLiterature({ query, loading: false, error: hint, hitCount: 0, results: [] });
-    }
-  };
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash());
     window.addEventListener('hashchange', onHash);
@@ -1459,103 +1123,24 @@ function App() {
           scrollBehavior: 'smooth'
         }}
       >
-        {/* Top bar: brand + nav on one line */}
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 10,
-          display: 'flex',
-          alignItems: 'center',
-          gap: isMobile ? '8px' : '14px',
-          padding: isMobile ? '12px 16px' : '20px 40px'
-        }}>
-          <button onClick={() => navigate('home')} style={{
-            background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer',
-            fontFamily: theme.fonts.main, fontWeight: 800, fontSize: '16px',
-            letterSpacing: '-0.05em', padding: '8px 6px'
-          }}>RRSRCH</button>
-
-          <div style={{ marginLeft: 'auto' }}>
-            <NavButton onClick={() => window.open('https://x.com/rrsrch', '_blank')} icon={Twitter} label="X" />
-          </div>
-        </div>
-
-        {/* Hero Section - Full Screen (account skips it: dashboard starts at the top) */}
         {route !== 'account' && (
-        <div style={{
-          height: '100vh',
-          position: 'relative',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: isMobile ? '88px 20px 48px' : '96px 40px 64px',
-          textAlign: 'center'
-        }}>
-          <div style={{ display: 'inline-block' }}>
-            <h1 style={{
-              fontSize: 'clamp(40px, 6vw, 80px)',
-              fontWeight: 800,
-              color: 'white',
-              margin: 0,
-              letterSpacing: '-0.1em',
-              lineHeight: 0.9,
-              fontFamily: theme.fonts.main
-            }}>
-              RRSRCH
-            </h1>
-            <p style={{ color: 'white', margin: '8px 0 0 0', fontSize: '13px', lineHeight: '1.5', fontWeight: 'bold', fontFamily: theme.fonts.main, letterSpacing: '0.12em' }}>
-            : REGENERATIVE RESEARCH
-            </p>
-          </div>
-
-          <HeroSearch
-            isMobile={isMobile}
-            searching={literature?.loading}
-            query={searchQuery}
-            onQueryChange={setSearchQuery}
-            onSearch={runLiteratureSearch}
-          />
-
-          <SuggestedQuestions
-            isMobile={isMobile}
-            searching={literature?.loading}
-            onPick={runLiteratureSearch}
-          />
-
-          <p style={{ color: '#888', marginTop: '22px', fontSize: isMobile ? '15px' : '17px', maxWidth: '480px', lineHeight: '1.55', fontWeight: 500, fontFamily: theme.fonts.main, letterSpacing: '-0.01em' }}>
-          {TAGLINES[route === 'account' ? 'account' : 'home'][0]} <br />
-          {TAGLINES[route === 'account' ? 'account' : 'home'][1]}
-          </p>
-
-          <div style={{
-            position: 'absolute',
-            right: isMobile ? '16px' : '40px',
-            bottom: isMobile ? '20px' : '32px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '5px 10px',
-            background: 'rgba(255,255,255,0.05)',
-            borderRadius: '100px',
-            backdropFilter: 'blur(5px)'
-          }}>
-            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff00', boxShadow: '0 0 8px #00ff00' }}></div>
-            <span style={{ color: '#888', fontSize: '11px', fontFamily: theme.fonts.mono }}>SYSTEM ONLINE</span>
-          </div>
-        </div>
+          <SearchExperience isMobile={isMobile} scrollContainerRef={scrollContainerRef} />
         )}
 
-        {route !== 'account' && (
-          <div ref={literatureRef}>
-            <LiteratureResults
-              isMobile={isMobile}
-              state={literature}
-              searching={literature?.loading}
-              onPickQuestion={runLiteratureSearch}
-            />
+        {route === 'account' && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10,
+            display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '14px',
+            padding: isMobile ? '12px 16px' : '24px 56px',
+          }}>
+            <button onClick={() => navigate('home')} style={{
+              background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer',
+              fontFamily: theme.fonts.main, fontWeight: 800, fontSize: '16px',
+              letterSpacing: '-0.05em', padding: '8px 6px'
+            }}>RRSRCH</button>
+            <div style={{ marginLeft: 'auto' }}>
+              <NavButton onClick={() => window.open('https://x.com/rrsrch', '_blank')} icon={Twitter} label="X" />
+            </div>
           </div>
         )}
 
@@ -1583,9 +1168,6 @@ function App() {
           </>
         )}
 
-        {route !== 'account' && (
-          <SiteFooter isMobile={isMobile} onDisclaimer={() => setActiveModal('disclaimer')} />
-        )}
       </div>
 
       {/* Modal Layer */}
