@@ -2,8 +2,8 @@
  * Search UI from design handoff 3a (landing) + 4a (results).
  * Landing keeps the parent's 3D planet behind it. Results use a solid black column.
  */
-import React, { useMemo, useState, useRef } from 'react';
-import { Search, Twitter, Loader2, ExternalLink } from 'lucide-react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
+import { Search, History, Loader2, ExternalLink } from 'lucide-react';
 
 const fonts = {
   main: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
@@ -1013,9 +1013,54 @@ function SearchResultsPage({
   );
 }
 
+const HISTORY_KEY = 'rrsrch_search_history';
+const PROFILE_KEY = 'rrsrch_user_profile';
+
+function readSearchHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY) || sessionStorage.getItem(HISTORY_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((x) => typeof x === 'string' && x.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+function pushSearchHistory(q) {
+  const next = [q, ...readSearchHistory().filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, 30);
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+  return next;
+}
+
+function clearSearchHistory() {
+  try {
+    localStorage.removeItem(HISTORY_KEY);
+    sessionStorage.removeItem(HISTORY_KEY);
+  } catch { /* ignore */ }
+  return [];
+}
+
 function TopBar({
   isMobile, showSearch, query, onQueryChange, onSearch, searching, onHome,
+  history, onPickHistory, onClearHistory,
 }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   return (
     <div style={{
       position: 'fixed',
@@ -1055,16 +1100,21 @@ function TopBar({
         </div>
       )}
 
-      <div style={{ marginLeft: showSearch ? 0 : 'auto', flexShrink: 0 }}>
+      <div
+        ref={wrapRef}
+        style={{ marginLeft: showSearch ? 0 : 'auto', flexShrink: 0, position: 'relative' }}
+      >
         <button
           type="button"
-          onClick={() => window.open('https://x.com/rrsrch', '_blank')}
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          onClick={() => setOpen((v) => !v)}
           style={{
-            background: 'transparent',
+            background: open ? 'rgba(255,255,255,0.1)' : 'transparent',
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: 24,
-            color: '#aaa',
-            padding: '10px 20px',
+            color: open ? '#fff' : '#aaa',
+            padding: isMobile ? '10px 14px' : '10px 20px',
             cursor: 'pointer',
             fontFamily: fonts.main,
             fontSize: 12,
@@ -1075,11 +1125,104 @@ function TopBar({
             gap: 8,
           }}
           onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = '#aaa'; e.currentTarget.style.background = 'transparent'; }}
+          onMouseLeave={(e) => {
+            if (!open) {
+              e.currentTarget.style.color = '#aaa';
+              e.currentTarget.style.background = 'transparent';
+            }
+          }}
         >
-          <Twitter size={14} />
-          X
+          <History size={14} />
+          {isMobile ? null : 'History'}
+          {(history || []).length > 0 && (
+            <span style={{
+              fontFamily: fonts.mono, fontSize: 11, color: '#00ff88',
+              minWidth: 14, textAlign: 'center',
+            }}>
+              {history.length}
+            </span>
+          )}
         </button>
+
+        {open && (
+          <div
+            role="listbox"
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 10px)',
+              right: 0,
+              width: isMobile ? 'min(92vw, 340px)' : 380,
+              maxHeight: 420,
+              overflowY: 'auto',
+              background: 'rgba(18,18,18,0.98)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 14,
+              boxShadow: '0 16px 48px rgba(0,0,0,0.55)',
+              padding: 8,
+              zIndex: 20,
+            }}
+          >
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px 10px 10px',
+            }}>
+              <span style={{ fontSize: 12, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                Recent searches
+              </span>
+              {(history || []).length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { onClearHistory?.(); }}
+                  style={{
+                    background: 'none', border: 'none', color: '#666', cursor: 'pointer',
+                    fontFamily: fonts.main, fontSize: 12, padding: 0,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = '#ccc'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = '#666'; }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {(history || []).length === 0 ? (
+              <p style={{ margin: 0, padding: '16px 12px 20px', color: '#666', fontSize: 14, lineHeight: 1.5 }}>
+                No searches yet. Ask something and it will show up here.
+              </p>
+            ) : (
+              history.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  role="option"
+                  disabled={searching}
+                  onClick={() => {
+                    setOpen(false);
+                    onPickHistory?.(item);
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: 10,
+                    color: '#ddd',
+                    padding: '12px 12px',
+                    cursor: searching ? 'wait' : 'pointer',
+                    fontFamily: fonts.main,
+                    fontSize: 14,
+                    lineHeight: 1.45,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = '#fff'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#ddd'; }}
+                >
+                  {item}
+                </button>
+              ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1091,24 +1234,6 @@ function TopBar({
  *   scrollContainerRef: React.RefObject,
  * }} props
  */
-const HISTORY_KEY = 'rrsrch_search_history';
-const PROFILE_KEY = 'rrsrch_user_profile';
-
-function readSearchHistory() {
-  try {
-    const raw = sessionStorage.getItem(HISTORY_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? list.filter((x) => typeof x === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-
-function pushSearchHistory(q) {
-  const next = [q, ...readSearchHistory().filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, 20);
-  try { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-  return next;
-}
 
 function readUserProfile() {
   try {
@@ -1139,6 +1264,7 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
   const [report, setReport] = useState(null);
   const [engineLive, setEngineLive] = useState(false);
   const [followups, setFollowups] = useState([]);
+  const [history, setHistory] = useState(() => readSearchHistory());
   const resultsTopRef = useRef(null);
 
   const goHome = () => {
@@ -1265,6 +1391,7 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
     );
 
     const nextHistory = pushSearchHistory(q);
+    setHistory(nextHistory);
     setQuery(q);
     setTab('main');
     setMode('results');
@@ -1321,6 +1448,9 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
         onSearch={runSearch}
         searching={searching || sideLoading}
         onHome={goHome}
+        history={history}
+        onPickHistory={(q) => runSearch(q)}
+        onClearHistory={() => setHistory(clearSearchHistory())}
       />
 
       {mode === 'landing' && (
