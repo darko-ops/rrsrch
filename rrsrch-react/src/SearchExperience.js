@@ -1707,9 +1707,245 @@ function WebResultsPanel({ isMobile, web, query, report }) {
   );
 }
 
+const LIT_TYPES = [
+  {
+    id: 'review',
+    label: 'Reviews & meta-analyses',
+    chip: 'Reviews & meta-analyses',
+    tag: 'REVIEW',
+    note: 'Pool many trials. The strongest summary if recent, but only as good as what they include.',
+  },
+  {
+    id: 'rct',
+    label: 'Randomized trials',
+    chip: 'Randomized trials',
+    tag: 'RCT',
+    note: 'Patients assigned by chance against a control. The backbone of the ledger.',
+  },
+  {
+    id: 'other',
+    label: 'Other studies',
+    chip: 'Other studies',
+    tag: 'STUDY',
+    note: 'Imaging, cohort and single-arm studies. Useful for mechanism, weak on effect.',
+  },
+  {
+    id: 'trial',
+    label: 'Registered trials',
+    chip: 'Registered trials',
+    tag: 'REGISTRY',
+    note: 'From ClinicalTrials.gov. Some are still running and could change the answer.',
+  },
+];
+
+function classifyLitStudyType(paper) {
+  if (paper.studyType) return paper.studyType;
+  if (paper.kind === 'trial' || paper.nctId) return 'trial';
+  const title = String(paper.title || '');
+  if (/meta-?analysis|systematic review|umbrella review|network meta/i.test(title)) return 'review';
+  if (/randomi[sz]ed|placebo-controlled|\bRCT\b/i.test(title)) return 'rct';
+  return 'other';
+}
+
+function litPaperKey(paper) {
+  return paper.pmid || paper.pmcid || paper.doi || paper.nctId || paper.title;
+}
+
+function LitPaperCard({ paper, isMobile, open, onToggleAbstract }) {
+  const [hover, setHover] = useState(false);
+  const [imgOk, setImgOk] = useState(true);
+  const typeId = classifyLitStudyType(paper);
+  const typeMeta = LIT_TYPES.find((t) => t.id === typeId) || LIT_TYPES[2];
+  const ledger = paper.ledger;
+  const meta = [paper.authors, paper.journal, paper.year].filter(Boolean).join(' · ');
+
+  return (
+    <article
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+        padding: isMobile ? '18px 18px 18px 78px' : '20px 22px 20px 88px',
+        borderRadius: 14,
+        background: 'rgba(40,40,40,0.6)',
+        border: `1px solid ${hover ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.08)'}`,
+        transition: 'border-color 0.15s ease',
+      }}
+    >
+      <div style={{
+        position: 'absolute', left: isMobile ? 16 : 22, top: isMobile ? 18 : 20,
+        width: 48, height: 48, borderRadius: 8,
+        border: '1px solid rgba(255,255,255,0.06)',
+        background: '#161616', overflow: 'hidden',
+      }}>
+        {paper.image && imgOk ? (
+          <img
+            src={paper.image}
+            alt=""
+            onError={() => setImgOk(false)}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        ) : null}
+      </div>
+
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        fontFamily: fonts.mono, fontSize: 11, color: '#777',
+      }}>
+        <span style={{
+          padding: '2px 7px', borderRadius: 4,
+          border: '1px solid rgba(255,255,255,0.14)',
+          color: '#ccc', textTransform: 'uppercase', letterSpacing: '0.04em',
+        }}>
+          {typeMeta.tag}
+        </span>
+        <span>{paper.source}</span>
+      </div>
+
+      <a
+        href={paper.url || '#'}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          color: hover ? '#00ff88' : '#fff',
+          fontSize: 17, fontWeight: 600, lineHeight: 1.45,
+          textDecoration: 'none', display: 'inline-flex', gap: 8, alignItems: 'flex-start',
+        }}
+      >
+        <span>{paper.title}</span>
+        <ExternalLink size={13} style={{ flexShrink: 0, marginTop: 4, opacity: 0.6 }} />
+      </a>
+
+      {meta && (
+        <div style={{ color: '#777', fontSize: 13, lineHeight: 1.45 }}>{meta}</div>
+      )}
+
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+      }}>
+        {ledger && ledger.findings > 0 && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            padding: '4px 10px', borderRadius: 12,
+            background: 'rgba(0,255,136,0.06)',
+            border: '1px solid rgba(0,255,136,0.22)',
+            fontSize: 12, fontWeight: 600, color: '#ccc',
+          }}>
+            <span style={{ display: 'inline-flex', gap: 3 }}>
+              {Object.entries(ledger.byVerdict || {}).flatMap(([vk, n]) => {
+                const color = (VERDICT[vk] || VERDICT.uncertain).color;
+                return Array.from({ length: Math.min(Number(n) || 0, 6) }, (_, i) => (
+                  <span
+                    key={`${vk}-${i}`}
+                    style={{
+                      width: 7, height: 7, borderRadius: '50%', background: color, display: 'inline-block',
+                    }}
+                  />
+                ));
+              })}
+            </span>
+            In ledger · {ledger.findings} finding{ledger.findings === 1 ? '' : 's'}
+          </span>
+        )}
+        {paper.openAccess && (
+          <span style={{
+            padding: '4px 10px', borderRadius: 12,
+            border: '1px solid rgba(255,255,255,0.12)',
+            fontSize: 12, color: '#aaa',
+          }}>
+            Open access
+          </span>
+        )}
+        {paper.citations != null && (
+          <span style={{ fontFamily: fonts.mono, fontSize: 12, color: '#888' }}>
+            {paper.citations} cites
+          </span>
+        )}
+        {paper.abstract && (
+          <button
+            type="button"
+            onClick={onToggleAbstract}
+            style={{
+              marginLeft: 'auto', background: 'none', border: 'none', padding: 0,
+              fontFamily: fonts.main, fontSize: 13, fontWeight: 500,
+              color: '#aaa', cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = '#aaa'; }}
+          >
+            {open ? 'Hide abstract ↑' : 'Show abstract ↓'}
+          </button>
+        )}
+      </div>
+
+      {open && paper.abstract && (
+        <div style={{
+          marginTop: 4, paddingTop: 12,
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+          color: '#999', fontSize: 14, lineHeight: 1.6,
+        }}>
+          <AbstractSnippet html={paper.abstract} />
+        </div>
+      )}
+    </article>
+  );
+}
+
 function LiteratureResultsPanel({ isMobile, literature }) {
+  const [view, setView] = useState('type');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [oaOnly, setOaOnly] = useState(false);
+  const [openAbstracts, setOpenAbstracts] = useState(() => new Set());
+
+  const papers = useMemo(
+    () => (literature?.results || []).map((p) => ({
+      ...p,
+      studyType: classifyLitStudyType(p),
+    })),
+    [literature?.results],
+  );
+
+  const counts = useMemo(() => {
+    const c = { all: papers.length, review: 0, rct: 0, other: 0, trial: 0 };
+    for (const p of papers) c[p.studyType] = (c[p.studyType] || 0) + 1;
+    return c;
+  }, [papers]);
+
+  const filtered = useMemo(() => {
+    return papers.filter((p) => {
+      if (typeFilter !== 'all' && p.studyType !== typeFilter) return false;
+      if (oaOnly && !p.openAccess) return false;
+      return true;
+    });
+  }, [papers, typeFilter, oaOnly]);
+
+  const typeGroups = useMemo(() => {
+    return LIT_TYPES
+      .map((t) => ({ ...t, items: filtered.filter((p) => p.studyType === t.id) }))
+      .filter((g) => g.items.length > 0);
+  }, [filtered]);
+
+  const yearGroups = useMemo(() => {
+    const map = new Map();
+    for (const p of filtered) {
+      const y = String(p.year || 'Unknown');
+      if (!map.has(y)) map.set(y, []);
+      map.get(y).push(p);
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => {
+        const ya = parseInt(a[0], 10) || 0;
+        const yb = parseInt(b[0], 10) || 0;
+        return yb - ya;
+      })
+      .map(([year, items]) => ({ year, items }));
+  }, [filtered]);
+
   if (!literature) return null;
-  const { loading, error, hitCount, results, sources, sourceHits } = literature;
+  const { loading, error, hitCount, sources, sourceHits } = literature;
   const sourceLine = (sources && sources.length)
     ? sources.join(' · ')
     : 'Europe PMC · OpenAlex · Semantic Scholar · ClinicalTrials.gov';
@@ -1718,39 +1954,267 @@ function LiteratureResultsPanel({ isMobile, literature }) {
       .map(([name, n]) => `${name} ${Number(n).toLocaleString()}`)
       .join(' · ')
     : null;
+  const shown = papers.length;
+  const filtersActive = typeFilter !== 'all' || oaOnly;
+
+  const toggleAbstract = (key) => {
+    setOpenAbstracts((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const clearFilters = () => {
+    setTypeFilter('all');
+    setOaOnly(false);
+  };
+
   return (
     <div>
-      <p style={{ margin: '0 0 8px', color: '#777', fontSize: 14, lineHeight: 1.55, maxWidth: 820 }}>
-        {loading ? 'Searching research sources…'
-          : error ? error
-          : `${sourceLine}${hitCount != null ? ` · ~${hitCount.toLocaleString()} matches` : ''}`}
-      </p>
-      {!loading && !error && hitBits && (
-        <p style={{ margin: '0 0 24px', color: '#555', fontSize: 12, fontFamily: fonts.mono, lineHeight: 1.5 }}>
-          {hitBits}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
+        gap: 24, flexWrap: 'wrap',
+        padding: isMobile ? '28px 0 22px' : '40px 0 28px',
+        borderBottom: '1px solid rgba(255,255,255,0.1)',
+      }}>
+        <div>
+          <div style={{
+            fontSize: 12, fontWeight: 600, color: '#7aa7e0',
+            textTransform: 'uppercase', letterSpacing: '0.08em',
+          }}>
+            Research literature · papers + registered trials
+          </div>
+          <h2 style={{
+            margin: '10px 0 0', color: '#fff',
+            fontSize: isMobile ? 26 : 36, fontWeight: 800,
+            letterSpacing: '-0.03em', lineHeight: 1.1,
+          }}>
+            What&apos;s been studied, and how well
+          </h2>
+        </div>
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, textAlign: 'right',
+        }}>
+          <span style={{ color: '#777', fontSize: 13 }}>{sourceLine}</span>
+          <span
+            title={hitBits || undefined}
+            style={{ color: '#555', fontSize: 12, fontFamily: fonts.mono }}
+          >
+            {loading
+              ? 'Searching…'
+              : error
+                ? 'Search failed'
+                : `~${(hitCount != null ? hitCount : shown).toLocaleString()} matches · top ${shown} shown`}
+          </span>
+        </div>
+      </div>
+
+      {loading && <p style={{ color: '#888', fontSize: 15, marginTop: 28 }}>Searching research sources…</p>}
+      {error && (
+        <p style={{ color: '#c66', fontSize: 13, fontFamily: fonts.mono, lineHeight: 1.5, marginTop: 28 }}>
+          {error}
         </p>
       )}
-      {!loading && !error && !(sources && sources.length) && <div style={{ height: 16 }} />}
-      {!loading && !error && (results || []).map((paper) => (
-        <ResultLink
-          key={paper.pmid || paper.pmcid || paper.doi || paper.nctId || paper.title}
-          href={paper.url}
-          title={paper.title}
-          meta={[
-            paper.kind === 'trial' ? 'Clinical trial' : null,
-            paper.source,
-            paper.authors,
-            paper.journal,
-            paper.year,
-            paper.openAccess ? 'open access' : null,
-            paper.pmid ? `PMID ${paper.pmid}` : null,
-            paper.nctId || null,
-            paper.citations != null ? `${paper.citations} cites` : null,
-          ].filter(Boolean).join(' · ')}
-          body={paper.abstract ? <AbstractSnippet html={paper.abstract} /> : null}
-          isMobile={isMobile}
-        />
-      ))}
+
+      {!loading && !error && (
+        <>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap',
+            padding: '20px 0 8px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{
+                fontSize: 12, color: '#777', letterSpacing: '0.06em', textTransform: 'uppercase',
+              }}>
+                View
+              </span>
+              <div style={{
+                display: 'flex', gap: 2, padding: 3,
+                border: '1px solid rgba(255,255,255,0.12)', borderRadius: 22,
+              }}>
+                {[
+                  { id: 'type', label: 'By study type' },
+                  { id: 'year', label: 'Timeline' },
+                ].map((opt) => {
+                  const active = view === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setView(opt.id)}
+                      style={{
+                        background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+                        color: active ? '#fff' : '#888',
+                        fontWeight: active ? 700 : 500,
+                        border: 'none', borderRadius: 18, padding: '7px 14px',
+                        fontFamily: fonts.main, fontSize: 13, cursor: 'pointer',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <span style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.1)' }} />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setTypeFilter('all')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 14px', borderRadius: 20,
+                  border: `1px solid ${typeFilter === 'all' ? 'rgba(0,255,136,0.4)' : 'rgba(255,255,255,0.12)'}`,
+                  background: typeFilter === 'all' ? 'rgba(0,255,136,0.12)' : 'transparent',
+                  color: typeFilter === 'all' ? '#00ff88' : '#aaa',
+                  fontFamily: fonts.main, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                All
+                <span style={{ fontFamily: fonts.mono, fontSize: 11, opacity: 0.8 }}>{counts.all}</span>
+              </button>
+              {LIT_TYPES.map((t) => {
+                const active = typeFilter === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setTypeFilter(t.id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '8px 14px', borderRadius: 20,
+                      border: `1px solid ${active ? 'rgba(0,255,136,0.4)' : 'rgba(255,255,255,0.12)'}`,
+                      background: active ? 'rgba(0,255,136,0.12)' : 'transparent',
+                      color: active ? '#00ff88' : '#aaa',
+                      fontFamily: fonts.main, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >
+                    {t.chip}
+                    <span style={{ fontFamily: fonts.mono, fontSize: 11, opacity: 0.8 }}>
+                      {counts[t.id] || 0}
+                    </span>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setOaOnly((v) => !v)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 14px', borderRadius: 20,
+                  border: `1px dashed ${oaOnly ? 'rgba(0,255,136,0.4)' : 'rgba(255,255,255,0.22)'}`,
+                  background: oaOnly ? 'rgba(0,255,136,0.12)' : 'transparent',
+                  color: oaOnly ? '#00ff88' : '#aaa',
+                  fontFamily: fonts.main, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                {oaOnly ? '✓' : '+'} Open access only
+              </button>
+            </div>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div style={{ marginTop: 32 }}>
+              <p style={{ color: '#888', fontSize: 15, margin: '0 0 10px' }}>
+                No papers match these filters.
+              </p>
+              {filtersActive && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  style={{
+                    background: 'none', border: 'none', padding: 0,
+                    color: '#00ff88', fontFamily: fonts.main, fontSize: 14,
+                    fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          ) : view === 'type' ? (
+            typeGroups.map((g) => (
+              <div
+                key={g.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: isMobile ? '1fr' : '260px minmax(0, 1fr)',
+                  gap: isMobile ? 20 : 48,
+                  padding: isMobile ? '28px 0' : '40px 0',
+                  borderBottom: '1px solid rgba(255,255,255,0.1)',
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <span style={{
+                    color: '#fff', fontSize: 22, fontWeight: 800,
+                    letterSpacing: '-0.02em', lineHeight: 1.2,
+                  }}>
+                    {g.label}
+                  </span>
+                  <span style={{ color: '#888', fontSize: 14, lineHeight: 1.55 }}>{g.note}</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {g.items.map((paper) => {
+                    const key = litPaperKey(paper);
+                    return (
+                      <LitPaperCard
+                        key={key}
+                        paper={paper}
+                        isMobile={isMobile}
+                        open={openAbstracts.has(key)}
+                        onToggleAbstract={() => toggleAbstract(key)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          ) : (
+            yearGroups.map((g) => (
+              <div
+                key={g.year}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: isMobile ? '1fr' : '260px minmax(0, 1fr)',
+                  gap: isMobile ? 20 : 48,
+                  padding: isMobile ? '28px 0' : '40px 0',
+                  borderBottom: '1px solid rgba(255,255,255,0.1)',
+                }}
+              >
+                <div style={{ position: 'relative' }}>
+                  <span style={{
+                    position: 'absolute', left: 0, top: 10,
+                    width: 9, height: 9, borderRadius: '50%', background: '#fff',
+                  }} />
+                  <span style={{
+                    display: 'block', paddingLeft: 22,
+                    color: '#fff', fontSize: isMobile ? 32 : 40, fontWeight: 800,
+                    letterSpacing: '-0.04em', lineHeight: 1,
+                  }}>
+                    {g.year}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {g.items.map((paper) => {
+                    const key = litPaperKey(paper);
+                    return (
+                      <LitPaperCard
+                        key={key}
+                        paper={paper}
+                        isMobile={isMobile}
+                        open={openAbstracts.has(key)}
+                        onToggleAbstract={() => toggleAbstract(key)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -1801,9 +2265,7 @@ function SearchResultsPage({
           />
         )}
         {tab === 'literature' && (
-          <div style={{ marginTop: 32 }}>
-            <LiteratureResultsPanel isMobile={isMobile} literature={literature} />
-          </div>
+          <LiteratureResultsPanel isMobile={isMobile} literature={literature} />
         )}
       </div>
 
