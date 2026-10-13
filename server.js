@@ -429,7 +429,271 @@ app.post('/api/search/followups', async (req, res) => {
   }
 });
 
-// Literature search for the landing page (Europe PMC — same source as the evidence engine).
+function clipAbstract(text, max = 2400) {
+  const s = String(text || '').trim();
+  if (!s) return '';
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+function normalizeDoi(doi) {
+  if (!doi) return null;
+  return String(doi).replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').trim().toLowerCase() || null;
+}
+
+function paperKey(p) {
+  if (p.doi) return `doi:${normalizeDoi(p.doi)}`;
+  if (p.pmid) return `pmid:${p.pmid}`;
+  if (p.nctId) return `nct:${String(p.nctId).toUpperCase()}`;
+  const t = String(p.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return t ? `title:${t.slice(0, 120)}` : null;
+}
+
+async function searchEuropePmc(q, pageSize) {
+  const params = new URLSearchParams({
+    query: q,
+    format: 'json',
+    pageSize: String(pageSize),
+    resultType: 'core',
+  });
+  const upstream = await fetch(`${EUROPE_PMC_SEARCH}?${params}`, {
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!upstream.ok) throw new Error(`Europe PMC HTTP ${upstream.status}`);
+  const data = await upstream.json();
+  const raw = data.resultList?.result || [];
+  const hitCount = parseInt(data.hitCount, 10) || raw.length;
+  const results = raw.map((r) => {
+    const pmcid = r.pmcid ? String(r.pmcid).replace(/^PMC/i, '') : null;
+    let url = null;
+    if (r.pmid) url = `https://europepmc.org/article/MED/${r.pmid}`;
+    else if (pmcid) url = `https://europepmc.org/article/PMC/${pmcid}`;
+    else if (r.doi) url = `https://doi.org/${r.doi}`;
+    return {
+      source: 'Europe PMC',
+      kind: 'paper',
+      pmid: r.pmid || null,
+      pmcid: pmcid ? `PMC${pmcid}` : null,
+      doi: r.doi || null,
+      title: r.title || 'Untitled',
+      authors: r.authorString || null,
+      journal: r.journalTitle || null,
+      year: r.pubYear || null,
+      abstract: clipAbstract(r.abstractText),
+      openAccess: r.isOpenAccess === 'Y',
+      url,
+      citations: null,
+    };
+  });
+  return { source: 'Europe PMC', hitCount, results };
+}
+
+async function searchOpenAlex(q, pageSize) {
+  const params = new URLSearchParams({
+    search: q,
+    per_page: String(pageSize),
+    mailto: process.env.OPENALEX_MAILTO || 'research@rrsrch.com',
+  });
+  const upstream = await fetch(`https://api.openalex.org/works?${params}`, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!upstream.ok) throw new Error(`OpenAlex HTTP ${upstream.status}`);
+  const data = await upstream.json();
+  const raw = data.results || [];
+  const results = raw.map((w) => {
+    const doi = normalizeDoi(w.doi);
+    const authors = (w.authorships || [])
+      .map((a) => a.author?.display_name)
+      .filter(Boolean)
+      .slice(0, 8)
+      .join(', ');
+    const abstract = w.abstract_inverted_index
+      ? (() => {
+          // Reconstruct from inverted index
+          const pairs = [];
+          for (const [word, positions] of Object.entries(w.abstract_inverted_index)) {
+            for (const pos of positions) pairs.push([pos, word]);
+          }
+          pairs.sort((a, b) => a[0] - b[0]);
+          return pairs.map((p) => p[1]).join(' ');
+        })()
+      : '';
+    return {
+      source: 'OpenAlex',
+      kind: 'paper',
+      pmid: null,
+      pmcid: null,
+      doi,
+      title: w.display_name || w.title || 'Untitled',
+      authors: authors || null,
+      journal: w.primary_location?.source?.display_name || null,
+      year: w.publication_year ? String(w.publication_year) : null,
+      abstract: clipAbstract(abstract),
+      openAccess: !!w.open_access?.is_oa,
+      url: w.primary_location?.landing_page_url
+        || (doi ? `https://doi.org/${doi}` : w.id)
+        || null,
+      citations: typeof w.cited_by_count === 'number' ? w.cited_by_count : null,
+    };
+  });
+  return {
+    source: 'OpenAlex',
+    hitCount: data.meta?.count ?? results.length,
+    results,
+  };
+}
+
+async function searchSemanticScholar(q, pageSize) {
+  const params = new URLSearchParams({
+    query: q,
+    limit: String(pageSize),
+    fields: 'title,abstract,year,authors,venue,externalIds,url,citationCount,openAccessPdf',
+  });
+  const headers = { Accept: 'application/json' };
+  if (process.env.SEMANTIC_SCHOLAR_API_KEY) {
+    headers['x-api-key'] = process.env.SEMANTIC_SCHOLAR_API_KEY;
+  }
+  const upstream = await fetch(`https://api.semanticscholar.org/graph/v1/paper/search?${params}`, {
+    headers,
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!upstream.ok) throw new Error(`Semantic Scholar HTTP ${upstream.status}`);
+  const data = await upstream.json();
+  const raw = data.data || [];
+  const results = raw.map((p) => {
+    const doi = normalizeDoi(p.externalIds?.DOI);
+    const pmid = p.externalIds?.PubMed || null;
+    const authors = (p.authors || []).map((a) => a.name).filter(Boolean).slice(0, 8).join(', ');
+    return {
+      source: 'Semantic Scholar',
+      kind: 'paper',
+      pmid,
+      pmcid: p.externalIds?.PubMedCentral ? `PMC${p.externalIds.PubMedCentral}` : null,
+      doi,
+      title: p.title || 'Untitled',
+      authors: authors || null,
+      journal: p.venue || null,
+      year: p.year ? String(p.year) : null,
+      abstract: clipAbstract(p.abstract),
+      openAccess: !!p.openAccessPdf?.url,
+      url: p.url || p.openAccessPdf?.url || (doi ? `https://doi.org/${doi}` : null),
+      citations: typeof p.citationCount === 'number' ? p.citationCount : null,
+    };
+  });
+  return {
+    source: 'Semantic Scholar',
+    hitCount: data.total ?? results.length,
+    results,
+  };
+}
+
+async function searchClinicalTrials(q, pageSize) {
+  const params = new URLSearchParams({
+    'query.term': q,
+    pageSize: String(Math.min(pageSize, 10)),
+    format: 'json',
+    fields: 'NCTId,BriefTitle,OfficialTitle,OverallStatus,Phase,StartDate,Condition,InterventionName,BriefSummary',
+  });
+  const upstream = await fetch(`https://clinicaltrials.gov/api/v2/studies?${params}`, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!upstream.ok) throw new Error(`ClinicalTrials.gov HTTP ${upstream.status}`);
+  const data = await upstream.json();
+  const raw = data.studies || [];
+  const results = raw.map((s) => {
+    const proto = s.protocolSection || {};
+    const id = proto.identificationModule || {};
+    const status = proto.statusModule || {};
+    const design = proto.designModule || {};
+    const cond = proto.conditionsModule || {};
+    const inter = proto.armsInterventionsModule || {};
+    const desc = proto.descriptionModule || {};
+    const nctId = id.nctId || null;
+    const phases = (design.phases || []).join(', ');
+    const interventions = (inter.interventions || [])
+      .map((i) => i.name)
+      .filter(Boolean)
+      .slice(0, 4)
+      .join(', ');
+    return {
+      source: 'ClinicalTrials.gov',
+      kind: 'trial',
+      pmid: null,
+      pmcid: null,
+      doi: null,
+      nctId,
+      title: id.briefTitle || id.officialTitle || 'Untitled trial',
+      authors: null,
+      journal: [status.overallStatus, phases].filter(Boolean).join(' · ') || 'Clinical trial',
+      year: (status.startDateStruct?.date || status.startDate || '').slice(0, 4) || null,
+      abstract: clipAbstract([
+        desc.briefSummary,
+        cond.conditions?.length ? `Conditions: ${cond.conditions.join(', ')}` : null,
+        interventions ? `Interventions: ${interventions}` : null,
+      ].filter(Boolean).join('\n\n')),
+      openAccess: true,
+      url: nctId ? `https://clinicaltrials.gov/study/${nctId}` : null,
+      citations: null,
+    };
+  });
+  return {
+    source: 'ClinicalTrials.gov',
+    hitCount: data.totalCount ?? results.length,
+    results,
+  };
+}
+
+function mergeLiteratureResults(packs, limit) {
+  const byKey = new Map();
+  const sourceHits = {};
+  const used = [];
+  for (const pack of packs) {
+    if (!pack) continue;
+    sourceHits[pack.source] = pack.hitCount ?? pack.results?.length ?? 0;
+    used.push(pack.source);
+    for (const r of pack.results || []) {
+      const key = paperKey(r);
+      if (!key) continue;
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, { ...r, sources: [r.source] });
+        continue;
+      }
+      // Prefer richer abstract / OA / citation counts; keep multi-source label
+      if (!existing.sources.includes(r.source)) existing.sources.push(r.source);
+      if ((!existing.abstract || existing.abstract.length < 80) && r.abstract) {
+        existing.abstract = r.abstract;
+      }
+      if (!existing.url && r.url) existing.url = r.url;
+      if (!existing.doi && r.doi) existing.doi = r.doi;
+      if (!existing.pmid && r.pmid) existing.pmid = r.pmid;
+      if (!existing.openAccess && r.openAccess) existing.openAccess = true;
+      if ((existing.citations == null) && r.citations != null) existing.citations = r.citations;
+      if (!existing.authors && r.authors) existing.authors = r.authors;
+      if (!existing.journal && r.journal) existing.journal = r.journal;
+    }
+  }
+  const results = Array.from(byKey.values())
+    .sort((a, b) => {
+      // Trials after papers slightly? Keep mixed but prefer cited papers
+      const ca = a.citations ?? -1;
+      const cb = b.citations ?? -1;
+      if (cb !== ca) return cb - ca;
+      const ya = parseInt(a.year, 10) || 0;
+      const yb = parseInt(b.year, 10) || 0;
+      return yb - ya;
+    })
+    .slice(0, limit)
+    .map((r) => ({
+      ...r,
+      source: (r.sources && r.sources.length > 1) ? r.sources.join(' · ') : r.source,
+    }));
+  const hitCount = Object.values(sourceHits).reduce((a, b) => a + (Number(b) || 0), 0);
+  return { results, hitCount, sourceHits, sources: used };
+}
+
+// Multi-source literature: Europe PMC + OpenAlex + Semantic Scholar + ClinicalTrials.gov
 app.get('/api/literature/search', async (req, res) => {
   const q = String(req.query.q || '').trim();
   if (!q) {
@@ -439,41 +703,42 @@ app.get('/api/literature/search', async (req, res) => {
     return res.status(400).json({ error: 'query too long (500 characters max)' });
   }
   const pageSize = Math.min(Math.max(parseInt(req.query.limit, 10) || 12, 1), 25);
+  const perSource = Math.min(Math.max(pageSize, 8), 15);
   try {
-    const params = new URLSearchParams({
-      query: q,
-      format: 'json',
-      pageSize: String(pageSize),
-      resultType: 'core',
-    });
-    const upstream = await fetch(`${EUROPE_PMC_SEARCH}?${params}`);
-    if (!upstream.ok) {
-      return res.status(502).json({ error: 'Europe PMC is unavailable' });
+    const settled = await Promise.allSettled([
+      searchEuropePmc(q, perSource),
+      searchOpenAlex(q, perSource),
+      searchSemanticScholar(q, perSource),
+      searchClinicalTrials(q, Math.min(perSource, 8)),
+    ]);
+    const packs = [];
+    const errors = {};
+    for (const s of settled) {
+      if (s.status === 'fulfilled') packs.push(s.value);
+      else {
+        const msg = String(s.reason?.message || s.reason || 'failed');
+        console.error('literature source failed', msg);
+        // Infer source name from error prefix when possible
+        const m = msg.match(/^(Europe PMC|OpenAlex|Semantic Scholar|ClinicalTrials\.gov)/);
+        errors[m ? m[1] : 'unknown'] = msg;
+      }
     }
-    const data = await upstream.json();
-    const raw = data.resultList?.result || [];
-    const hitCount = parseInt(data.hitCount, 10) || raw.length;
-    const results = raw.map((r) => {
-      const pmcid = r.pmcid ? String(r.pmcid).replace(/^PMC/i, '') : null;
-      let url = null;
-      if (r.pmid) url = `https://europepmc.org/article/MED/${r.pmid}`;
-      else if (pmcid) url = `https://europepmc.org/article/PMC/${pmcid}`;
-      else if (r.doi) url = `https://doi.org/${r.doi}`;
-      const abstract = String(r.abstractText || '').trim();
-      return {
-        pmid: r.pmid || null,
-        pmcid: pmcid ? `PMC${pmcid}` : null,
-        doi: r.doi || null,
-        title: r.title || 'Untitled',
-        authors: r.authorString || null,
-        journal: r.journalTitle || null,
-        year: r.pubYear || null,
-        abstract: abstract.length > 2400 ? `${abstract.slice(0, 2400)}…` : abstract,
-        openAccess: r.isOpenAccess === 'Y',
-        url,
-      };
+    if (!packs.length) {
+      return res.status(502).json({
+        error: 'literature sources unavailable',
+        detail: Object.values(errors).join('; ') || 'all providers failed',
+      });
+    }
+    const merged = mergeLiteratureResults(packs, pageSize);
+    res.json({
+      query: q,
+      hitCount: merged.hitCount,
+      results: merged.results,
+      sources: merged.sources,
+      sourceHits: merged.sourceHits,
+      errors: Object.keys(errors).length ? errors : undefined,
+      note: 'Multi-source research (papers + trials). Not gated ledger evidence.',
     });
-    res.json({ query: q, hitCount, results, source: 'Europe PMC' });
   } catch (err) {
     console.error('literature search failed', err);
     res.status(500).json({ error: 'search failed' });
