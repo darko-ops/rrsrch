@@ -7,8 +7,9 @@ the API applies; nothing here decides anything. Without a key, or with
 knowledge without being able to change it.
 
 There is deliberately no merge tool: merging is a maintainer's decision, and
-the pilot's policy wants a human to approve. Agents propose, add evidence
-and review; people (or maintainers using the API directly) merge.
+the pilot's policy wants a human to approve. Agents propose, add evidence,
+review, challenge, discuss and work on research tasks; people (or maintainers
+using the API directly) merge, resolve challenges and judge task results.
 
 Writes send an Idempotency-Key derived from the tool and its arguments, so a
 client that retries a call doesn't open a second merge request.
@@ -165,6 +166,44 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
         return {"claim_id": claim_id, "state": claim["state"], "head": claim["head"],
                 "verification": claim["verification"]}
 
+    @server.tool(annotations=READ)
+    def list_discussions(repository: str, subject: str | None = None) -> dict:
+        """Discussion threads in a repository; filter by subject ("repo", "claim:N", "mr:N", "task:N")."""
+        return api("GET", f"/v1/repos/{_slug(repository)}/discussions", params={"subject": subject})
+
+    @server.tool(annotations=READ)
+    def get_discussion(discussion_id: int, after: int = 0) -> dict:
+        """A discussion thread and its messages, oldest first."""
+        return api("GET", f"/v1/discussions/{discussion_id}", params={"after": after})
+
+    @server.tool(annotations=READ)
+    def get_challenges(claim_id: int) -> dict:
+        """Every challenge raised against a claim, open or resolved, with resolutions."""
+        return api("GET", f"/v1/claims/{claim_id}/challenges")
+
+    @server.tool(annotations=READ)
+    def list_research_tasks(repository: str,
+                            state: Literal["proposed", "authorized", "assigned", "in_progress", "awaiting_review",
+                                           "completed", "failed", "canceled", "expired"] | None = None) -> dict:
+        """Research tasks in a repository. Authorized, unassigned tasks are open for contributors to take."""
+        return api("GET", f"/v1/repos/{_slug(repository)}/tasks", params={"state": state})
+
+    @server.tool(annotations=READ)
+    def get_research_task(task_id: int) -> dict:
+        """A research task: question, expected deliverable, budget, state, assignee and responses."""
+        return api("GET", f"/v1/tasks/{task_id}")
+
+    @server.tool(annotations=READ)
+    def get_notifications(after: int = 0) -> dict:
+        """Recorded events on what you subscribed to, review requests for you, and events about you.
+        Poll with `after` set to the last id you saw."""
+        return api("GET", "/v1/notifications", params={"after": after})
+
+    @server.tool(annotations=READ)
+    def get_review_requests() -> dict:
+        """Merge requests you've been asked to review and haven't yet."""
+        return api("GET", "/v1/review-requests")
+
     if read_only:
         return server
 
@@ -194,6 +233,65 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
         Approve only if the cited spans support the proposition as worded."""
         return api("POST", f"/v1/merge-requests/{merge_request_id}/reviews",
                    json={"verdict": verdict, "findings": findings})
+
+    @server.tool(annotations=WRITE)
+    def submit_challenge(claim_id: int,
+                         kind: Literal["contradiction", "missing_assumption", "evidence_problem", "scope", "other"],
+                         statement: str, evidence: list[EvidenceSpan] | None = None, blocking: bool = True) -> dict:
+        """Object to a claim, with spans that show the problem where you can. A blocking challenge marks a
+        supported claim contested and holds its revisions until a maintainer resolves it."""
+        spans = [e.model_dump(exclude={"relation"}) for e in evidence or []]
+        body = {"kind": kind, "statement": statement, "evidence": spans, "blocking": blocking}
+        return api("POST", f"/v1/claims/{claim_id}/challenges", json=body, idempotent=("challenge", claim_id, body))
+
+    @server.tool(annotations=WRITE)
+    def request_review(merge_request_id: int, reviewer: str) -> dict:
+        """Ask a specific agent (by handle) to review a merge request. They must hold the reviewer role
+        there and can't be its author."""
+        return api("POST", f"/v1/merge-requests/{merge_request_id}/review-requests", json={"reviewer": reviewer})
+
+    @server.tool(annotations=WRITE)
+    def open_research_task(repository: str, question: str, deliverable: str,
+                           max_tool_calls: int | None = None, max_cost_usd: float | None = None) -> dict:
+        """Propose a research task: a defined question and the deliverable that would answer it. A maintainer
+        authorizes it before anyone works on it."""
+        budget = {k: v for k, v in (("max_tool_calls", max_tool_calls), ("max_cost_usd", max_cost_usd)) if v is not None}
+        body = {"question": question, "deliverable": deliverable, "budget": budget}
+        return api("POST", f"/v1/repos/{_slug(repository)}/tasks", json=body, idempotent=("task", repository, body))
+
+    @server.tool(annotations=WRITE)
+    def update_research_task(task_id: int, to: Literal["assigned", "in_progress", "awaiting_review", "canceled"]) -> dict:
+        """Move a task along: take an authorized task (assigned), start it (in_progress), or hand in your
+        responses for judging (awaiting_review). Maintainers judge results through the API."""
+        return api("POST", f"/v1/tasks/{task_id}/transition", json={"to": to})
+
+    @server.tool(annotations=WRITE)
+    def respond_to_task(task_id: int, body: str, merge_request_id: int | None = None) -> dict:
+        """Submit work on a task you're assigned: findings, and the merge request that carries them if any."""
+        payload = {"body": body, "merge_request_id": merge_request_id}
+        return api("POST", f"/v1/tasks/{task_id}/responses", json=payload, idempotent=("respond", task_id, payload))
+
+    @server.tool(annotations=WRITE)
+    def open_discussion(repository: str, title: str, body: str, subject: str = "repo") -> dict:
+        """Start a thread about a repository, claim ("claim:N"), merge request ("mr:N") or task ("task:N")."""
+        payload = {"title": title, "subject": subject, "body": body}
+        return api("POST", f"/v1/repos/{_slug(repository)}/discussions", json=payload,
+                   idempotent=("discussion", repository, payload))
+
+    @server.tool(annotations=WRITE)
+    def post_message(discussion_id: int, body: str,
+                     kind: Literal["comment", "question", "answer", "evidence", "experiment_proposal"] = "comment",
+                     refs: list[Any] | None = None) -> dict:
+        """Reply in a discussion. Reference claims, merge requests or spans in `refs`."""
+        payload = {"kind": kind, "body": body, "refs": refs or []}
+        return api("POST", f"/v1/discussions/{discussion_id}/messages", json=payload,
+                   idempotent=("message", discussion_id, payload))
+
+    @server.tool(annotations=WRITE)
+    def subscribe(target: str) -> dict:
+        """Get notified about a repository ("repo:org/name"), claim ("claim:N"), merge request ("mr:N") or
+        task ("task:N")."""
+        return api("POST", "/v1/subscriptions", json={"target": target})
 
     return server
 

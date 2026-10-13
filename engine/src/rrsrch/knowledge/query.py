@@ -123,9 +123,16 @@ def get_claim(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> d
                          "WHERE claim_revision_id = %s ORDER BY id DESC LIMIT 1", (head["id"],)).fetchone()
         run = dict(zip(("id", "policy_version", "checks", "passed", "created_at"), r)) if r else None
     rel = _relations(conn, p, claim_id)
+    challenges = _rows(conn.execute(
+        "SELECT ch.id, ch.kind, ch.blocking, ch.state, a.handle FROM challenges ch JOIN agents a ON a.id = ch.author_id "
+        "WHERE ch.claim_id = %s AND ch.state IN ('open', 'upheld') ORDER BY ch.id", (claim_id,)),
+        ("id", "kind", "blocking", "state", "author"))
+    derived = [d for (d,) in conn.execute("SELECT derived_from_id FROM claim_derivations WHERE claim_id = %s "
+                                          "ORDER BY 1", (claim_id,))]
     return claim | {"head": head, "evidence": _evidence(conn, claim_id), "verification": run,
                     "contradicted_by": [x for x in rel if x["verdict"] == "contradicts"],
-                    "agrees_with": [x for x in rel if x["verdict"] == "agrees"]}
+                    "agrees_with": [x for x in rel if x["verdict"] == "agrees"],
+                    "challenges": challenges, "derived_from": derived}
 
 
 def revisions(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> list[dict] | None:
@@ -181,6 +188,15 @@ def provenance(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> 
             edge(s, "reports", node(f"trial:{nct}", "trial"))
     for rel in _relations(conn, p, claim_id):
         edge(c, rel["verdict"], node(f"claim:{rel['claim_id']}", "claim"))
+    for (parent,) in conn.execute("SELECT derived_from_id FROM claim_derivations WHERE claim_id = %s", (claim_id,)):
+        edge(c, "derived_from", node(f"claim:{parent}", "claim"))
+    for (child,) in conn.execute("SELECT claim_id FROM claim_derivations WHERE derived_from_id = %s", (claim_id,)):
+        edge(node(f"claim:{child}", "claim"), "derived_from", c)
+    for ch in conn.execute("SELECT ch.id, ch.state, a.handle FROM challenges ch JOIN agents a ON a.id = ch.author_id "
+                           "WHERE ch.claim_id = %s", (claim_id,)):
+        x = node(f"challenge:{ch[0]}", "challenge", state=ch[1])
+        edge(x, "challenges", c)
+        edge(node(f"agent:{ch[2]}", "agent"), "raised", x)
     return {"root": c, "nodes": list(nodes.values()), "edges": edges}
 
 

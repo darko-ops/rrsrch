@@ -98,3 +98,10 @@ def test_claim_states_follow_the_review_process():
         with pytest.raises(states.IllegalTransition):
             states.check(final, S.UNDER_REVIEW)
     assert set(states.TRANSITIONS) == set(S)                           # every state is covered
+
+
+def test_derived_from_only_enters_the_hash_when_set():
+    plain = content()
+    assert "derived_from" not in plain.canonical()                       # earlier hashes still hold
+    d = content(derived_from=(9, 3, 9))
+    assert d.canonical()["derived_from"] == [3, 9] and d.content_hash() != plain.content_hash()

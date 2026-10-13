@@ -1,11 +1,13 @@
 """The validation pipeline and the merge decision (SPEC-v2 §10.2–10.4). Pure functions.
 
-`verify` runs the checks a proposed claim must pass on its own (steps 2–6):
-schema, policy, provenance, integrity, source, and the evidence gate. Each
+`verify` runs the checks a proposed claim must pass on its own (steps 2–7):
+schema, policy, provenance, integrity, source, and the evidence gate. Source
+independence counts papers reporting the same registered trial once, and a
+claim may not derive from itself, directly or through other claims. Each
 check names its kind, so passing one is never read as passing another.
 
-`authorize` makes the merge decision (steps 7–9) from the checks, the reviews
-and who is merging. It counts only independent approvals: never the author's
+`authorize` makes the merge decision (steps 7–9) from the checks, the reviews,
+open blocking challenges and who is merging. It counts only independent approvals: never the author's
 own, never from a suspended or revoked reviewer, and, if the policy says so,
 never from the author's organization. Any standing objection from an
 independent reviewer blocks the merge.
@@ -58,6 +60,11 @@ class Proposal:
     docs: Mapping[tuple[str, str], Doc]       # (source_id, sha256) -> current document
     head_hash: str | None = None              # the claim's current revision; None for a new claim
     reviews: tuple[Review, ...] = field(default_factory=tuple)
+    claim_id: int | None = None               # the claim being revised; None for a new claim
+    trials: Mapping[str, frozenset[str]] = field(default_factory=dict)   # source_id -> registered trials it reports
+    known_claims: frozenset[int] = frozenset()          # derived_from ids that exist in this repository
+    ancestors: frozenset[int] = frozenset()             # every claim reachable through derived_from, transitively
+    blocking_challenges: tuple[int, ...] = ()           # open blocking challenges on the claim being revised
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,26 @@ class MergeDecision:
 
     def __bool__(self) -> bool:
         return self.allowed
+
+
+def independent_sources(sources: set[str], trials: Mapping[str, frozenset[str]]) -> int:
+    """How many independent sources: two papers reporting the same registered trial are one study."""
+    parent = {s: s for s in sources}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    by_trial: dict[str, str] = {}
+    for s in sources:
+        for t in trials.get(s, ()):
+            if t in by_trial:
+                parent[find(s)] = find(by_trial[t])
+            else:
+                by_trial[t] = s
+    return len({find(s) for s in sources})
 
 
 def _check(kind: CheckKind, name: str, ok: bool, detail: str = "") -> Check:
@@ -91,14 +118,23 @@ def verify(p: Proposal) -> tuple[ClaimContent | None, list[Check]]:
                          f"{c.type} claims aren't accepted here (allowed: "
                          f"{', '.join(t.value for t in p.policy.allowed_types)})"))
     support = [s for rel, s in c.evidence if rel is Relation.SUPPORTS]
-    distinct = {s.source_id for s in support}
-    checks.append(_check(S, "min_sources", len(distinct) >= p.policy.min_sources,
-                         f"{len(distinct)} distinct supporting source(s), policy needs {p.policy.min_sources}"
-                         + (" (duplicate spans of one source count once)" if len(support) > len(distinct) else "")))
+    sources = {s.source_id for s in support}
+    independent = independent_sources(sources, p.trials)
+    checks.append(_check(S, "min_sources", independent >= p.policy.min_sources,
+                         f"{independent} independent supporting source(s), policy needs {p.policy.min_sources}"
+                         + (" (spans of one source count once)" if len(support) > len(sources) else "")
+                         + (" (sources reporting the same trial count once)" if len(sources) > independent else "")))
 
     checks.append(_check(P, "author_active", p.author_status == "active", f"author is {p.author_status}"))
     unknown = sorted({s.source_id for _, s in c.evidence} - p.known_sources)
     checks.append(_check(P, "sources_known", not unknown, f"unknown source(s): {', '.join(unknown)}"))
+    if c.derived_from:
+        missing = sorted(set(c.derived_from) - p.known_claims)
+        checks.append(_check(P, "derived_from_known", not missing,
+                             f"derived_from claim(s) not in {p.repository}: {missing}"))
+        circular = p.claim_id is not None and (p.claim_id in c.derived_from or p.claim_id in p.ancestors)
+        checks.append(_check(P, "no_circular_derivation", not circular,
+                             f"claim {p.claim_id} would derive from itself through {sorted(c.derived_from)}"))
 
     checks.append(_check(I, "parent_is_head", c.parent_hash == p.head_hash,
                          "new claims have no parent" if p.head_hash is None else
@@ -132,6 +168,8 @@ def authorize(p: Proposal, checks: list[Check], merger: Decision) -> MergeDecisi
     if not merger:
         reasons.append(f"merger: {merger.reason}")
     reasons += [f"check {c.kind}/{c.name} failed: {c.detail}" for c in checks if not c.passed]
+
+    reasons += [f"blocking challenge {cid} is open" for cid in p.blocking_challenges]
 
     approvals, humans = 0, 0
     for r in p.reviews:

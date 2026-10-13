@@ -1,5 +1,6 @@
 """The validation pipeline and merge decision, without a database."""
 import hashlib
+from dataclasses import replace
 
 import pytest
 
@@ -114,3 +115,42 @@ def test_objections_block_and_every_reason_is_listed():
     p = proposal(reviews=[approve(2)], proposition="At 24 months, WOMAC improved more with MSCs (p = 0.01).")
     d = pipeline.authorize(p, pipeline.verify(p)[1], MAINTAINER)
     assert not d and any("evidence_gate" in r for r in d.reasons)
+
+
+def test_papers_reporting_the_same_trial_are_one_source():
+    t = {"A": frozenset({"NCT1"}), "B": frozenset({"NCT1"}), "C": frozenset({"NCT2"}), "D": frozenset({"NCT2", "NCT3"}),
+         "E": frozenset({"NCT3"})}
+    assert pipeline.independent_sources({"A", "B"}, t) == 1
+    assert pipeline.independent_sources({"A", "C"}, t) == 2
+    assert pipeline.independent_sources({"C", "D", "E"}, t) == 1          # linked through NCT2 and NCT3
+    assert pipeline.independent_sources({"X", "Y"}, {}) == 2
+
+
+def test_two_reports_of_one_trial_dont_meet_a_two_source_policy():
+    other = pipeline.Doc("MED:3", SHA, TEXT, True, TITLE, TEXT)
+    two = Policy(min_sources=2)
+    ev = [["supports", span()], ["supports", span(source="MED:3")]]
+    base = proposal(policy=two, evidence=ev)
+    p = replace(base, docs={**DOCS, ("MED:3", SHA): other}, known_sources=frozenset({"MED:1", "MED:3"}))
+    assert not failed(p)
+    same_trial = replace(p, trials={"MED:1": frozenset({"NCT9"}), "MED:3": frozenset({"NCT9"})})
+    assert "min_sources" in failed(same_trial)
+    assert "same trial" in next(c.detail for c in pipeline.verify(same_trial)[1] if c.name == "min_sources")
+
+
+def test_derivations_must_exist_and_never_loop():
+    p = proposal(derived_from=[7])
+    assert "derived_from_known" in failed(p)
+    assert not failed(replace(p, known_claims=frozenset({7})))
+    revising = replace(proposal(derived_from=[7], parent_hash="e" * 64), head_hash="e" * 64, claim_id=5,
+                       known_claims=frozenset({7}))
+    assert not failed(revising)
+    assert "no_circular_derivation" in failed(replace(revising, ancestors=frozenset({7, 9, 5})))
+    assert "no_circular_derivation" in failed(replace(revising, content=revising.content | {"derived_from": [5]},
+                                                      known_claims=frozenset({5})))
+
+
+def test_open_blocking_challenges_hold_a_merge():
+    p = replace(proposal(reviews=[approve(2)]), blocking_challenges=(4,))
+    d = pipeline.authorize(p, pipeline.verify(p)[1], MAINTAINER)
+    assert not d and "blocking challenge 4 is open" in d.reasons

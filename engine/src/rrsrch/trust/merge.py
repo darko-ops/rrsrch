@@ -40,15 +40,15 @@ class Outcome:
     revision_id: int | None = None
 
 
-def _repo_and_role(conn, p: Principal | None, repository_id: int) -> tuple[access.Repo, access.Role | None]:
+def repo_and_role(conn, p: Principal | None, repository_id: int) -> tuple[access.Repo, access.Role | None]:
     repo = conn.execute("SELECT id, slug, organization_id, visibility FROM repositories WHERE id = %s",
                         (repository_id,)).fetchone()
     repo = access.Repo(*repo)
     return repo, ids.role_in(conn, p.agent_id if p else None, repo.id)
 
 
-def _require(conn, p: Principal | None, action: Action, repository_id: int) -> access.Repo:
-    repo, role = _repo_and_role(conn, p, repository_id)
+def require(conn, p: Principal | None, action: Action, repository_id: int) -> access.Repo:
+    repo, role = repo_and_role(conn, p, repository_id)
     if not access.decide(p, Action.READ, repo, role):
         raise Refused(404, "not found")
     d = access.decide(p, action, repo, role)
@@ -82,11 +82,25 @@ def _proposal(conn, repo: access.Repo, policy_version: str, content: dict, autho
             "JOIN agents a ON a.id = r.reviewer_id WHERE r.merge_request_id = %s ORDER BY r.id",
             (merge_request_id,)))
     head = _head(conn, claim_id) if claim_id else None
+    trials: dict[str, set[str]] = {}
+    for sid, nct in conn.execute("SELECT source_id, nct_id FROM trial_links WHERE source_id = ANY(%s)", (source_ids,)):
+        trials.setdefault(sid, set()).add(nct)
+    derived = [d for d in content.get("derived_from") or [] if isinstance(d, int)]
+    known_claims = {r[0] for r in conn.execute("SELECT id FROM claims WHERE id = ANY(%s) AND repository_id = %s",
+                                               (derived, repo.id))}
+    ancestors = {r[0] for r in conn.execute(
+        "WITH RECURSIVE up(id) AS (SELECT unnest(%s::bigint[]) UNION "
+        "SELECT d.derived_from_id FROM claim_derivations d JOIN up ON d.claim_id = up.id) SELECT id FROM up",
+        (derived,))}
+    blocking = tuple(r[0] for r in conn.execute(
+        "SELECT id FROM challenges WHERE claim_id = %s AND state = 'open' AND blocking ORDER BY id", (claim_id,))) \
+        if claim_id else ()
     return pipeline.Proposal(
         content=content, repository=repo.slug, policy=load_policy(conn, repo.id, policy_version),
         author_id=author_id, author_org=author[0], author_status=author[1], known_sources=frozenset(known),
-        docs=docs,
-        head_hash=head[1] if head else None, reviews=reviews)
+        docs=docs, head_hash=head[1] if head else None, reviews=reviews, claim_id=claim_id,
+        trials={k: frozenset(v) for k, v in trials.items()}, known_claims=frozenset(known_claims),
+        ancestors=frozenset(ancestors), blocking_challenges=blocking)
 
 
 def _record_run(conn, checks: list[Check], policy_version: str, *, merge_request_id=None, revision_id=None) -> int:
@@ -103,7 +117,7 @@ def open_request(conn: psycopg.Connection, p: Principal | None, repository_slug:
     repo = ids.get_repo(conn, repository_slug)
     if repo is None:
         raise Refused(404, "not found")
-    _require(conn, p, Action.PROPOSE, repo.id)
+    require(conn, p, Action.PROPOSE, repo.id)
     policy_version = conn.execute("SELECT policy_version FROM repositories WHERE id = %s", (repo.id,)).fetchone()[0]
     base = None
     if claim_id is not None:
@@ -142,7 +156,7 @@ def _load(conn, mr_id: int, lock: bool = False) -> dict:
 
 def review(conn: psycopg.Connection, p: Principal | None, mr_id: int, verdict: str, findings: str = "") -> None:
     mr = _load(conn, mr_id)
-    _require(conn, p, Action.REVIEW, mr["repository_id"])
+    require(conn, p, Action.REVIEW, mr["repository_id"])
     if mr["state"] != "open":
         raise Refused(409, f"merge request is {mr['state']}")
     if p.agent_id == mr["author_id"]:
@@ -151,6 +165,8 @@ def review(conn: psycopg.Connection, p: Principal | None, mr_id: int, verdict: s
         "INSERT INTO reviews (merge_request_id, reviewer_id, verdict, findings) VALUES (%s, %s, %s, %s) "
         "ON CONFLICT (merge_request_id, reviewer_id) DO UPDATE SET verdict = EXCLUDED.verdict, "
         "findings = EXCLUDED.findings, created_at = now()", (mr_id, p.agent_id, verdict, findings))
+    conn.execute("UPDATE review_requests SET state = 'done', closed_at = now() "
+                 "WHERE merge_request_id = %s AND reviewer_id = %s AND state = 'open'", (mr_id, p.agent_id))
     audit.append(conn, f"review.{verdict}", f"mr:{mr_id}", actor_id=p.agent_id,
                  repository_id=mr["repository_id"], policy_version=mr["policy_version"])
 
@@ -158,7 +174,7 @@ def review(conn: psycopg.Connection, p: Principal | None, mr_id: int, verdict: s
 def evaluate(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> tuple[dict, list[Check], pipeline.MergeDecision]:
     """What a merge would decide right now, without merging. Needs read access."""
     mr = _load(conn, mr_id)
-    repo, role = _repo_and_role(conn, p, mr["repository_id"])
+    repo, role = repo_and_role(conn, p, mr["repository_id"])
     if not access.decide(p, Action.READ, repo, role):
         raise Refused(404, "not found")
     proposal = _proposal(conn, repo, mr["policy_version"], mr["content"], mr["author_id"], mr["claim_id"], mr_id)
@@ -168,12 +184,12 @@ def evaluate(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> tuple
 
 def merge(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> Outcome:
     mr = _load(conn, mr_id, lock=True)
-    repo = _require(conn, p, Action.MAINTAIN, mr["repository_id"])
+    repo = require(conn, p, Action.MAINTAIN, mr["repository_id"])
     if mr["state"] != "open":
         raise Refused(409, f"merge request is {mr['state']}")
     if mr["claim_id"] is not None:
         conn.execute("SELECT 1 FROM claims WHERE id = %s FOR UPDATE", (mr["claim_id"],))
-    _, role = _repo_and_role(conn, p, repo.id)
+    _, role = repo_and_role(conn, p, repo.id)
     proposal = _proposal(conn, repo, mr["policy_version"], mr["content"], mr["author_id"], mr["claim_id"], mr_id)
     _, checks = pipeline.verify(proposal)
     decision = pipeline.authorize(proposal, checks, access.decide(p, Action.MAINTAIN, repo, role))
@@ -221,6 +237,10 @@ def merge(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> Outcome:
 
     for rel, span in content.evidence:
         kstore.link_evidence(conn, claim_id, rel, span)
+    conn.execute("DELETE FROM claim_derivations WHERE claim_id = %s", (claim_id,))
+    for parent_claim in sorted(set(content.derived_from)):
+        conn.execute("INSERT INTO claim_derivations (claim_id, derived_from_id) VALUES (%s, %s)",
+                     (claim_id, parent_claim))
     rev_id = conn.execute(
         "INSERT INTO claim_revisions (claim_id, version, parent_id, content, content_hash, agent_id) "
         "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
@@ -243,7 +263,7 @@ def close(conn: psycopg.Connection, p: Principal | None, mr_id: int, state: str)
         if p is None or p.agent_id != mr["author_id"]:
             raise Refused(403, "only the author can withdraw a merge request")
     elif state == "rejected":
-        _require(conn, p, Action.MAINTAIN, mr["repository_id"])
+        require(conn, p, Action.MAINTAIN, mr["repository_id"])
     else:
         raise Refused(400, "state must be withdrawn or rejected")
     if mr["state"] != "open":

@@ -27,7 +27,7 @@ from starlette.exceptions import HTTPException
 from ..ledger import db
 from ..reader.llm import LLM
 from . import answer as answer_mod
-from . import identity_routes, knowledge_routes, trust_routes
+from . import collab_routes, identity_routes, knowledge_routes, trust_routes
 
 MAX_QUESTION = 800
 MAX_BODY = 256 * 1024
@@ -51,6 +51,7 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
     app.include_router(identity_routes.router)
     app.include_router(trust_routes.router)
     app.include_router(knowledge_routes.router)
+    app.include_router(collab_routes.router)
 
     @app.middleware("http")
     async def bounded_body(request: Request, call_next):
