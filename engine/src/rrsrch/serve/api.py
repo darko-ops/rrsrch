@@ -1,4 +1,5 @@
-"""The engine's HTTP API, on FastAPI: POST /v1/answer, GET /v1/health.
+"""The engine's HTTP API, on FastAPI: POST /v1/answer, GET /v1/health, and the
+identity endpoints in identity_routes.
 
 Binds to localhost by default; put a tunnel or reverse proxy in front when the
 site needs it. Errors keep the shape the site's proxy reads, {"ok": false,
@@ -25,6 +26,7 @@ from starlette.exceptions import HTTPException
 from ..ledger import db
 from ..reader.llm import LLM
 from . import answer as answer_mod
+from . import identity_routes
 
 MAX_QUESTION = 800
 
@@ -40,8 +42,11 @@ def _error(code: int, message: str) -> JSONResponse:
 def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM.from_env,
                answer: Callable = answer_mod.answer) -> FastAPI:
     app = FastAPI(title="rrsrch engine", version="0.1.0")
+    app.state.connect = connect
     app.add_middleware(CORSMiddleware, allow_origins=[os.environ.get("RRSRCH_CORS_ORIGIN", "*")],
-                       allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type"])
+                       allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                       allow_headers=["Content-Type", "Authorization"])
+    app.include_router(identity_routes.router)
 
     @app.exception_handler(HTTPException)
     def http_error(_req: Request, exc: HTTPException) -> JSONResponse:
@@ -49,9 +54,13 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
 
     @app.exception_handler(RequestValidationError)
     def bad_body(_req: Request, exc: RequestValidationError) -> JSONResponse:
-        if any(e.get("type") == "json_invalid" for e in exc.errors()):
+        errors = exc.errors()
+        if any(e.get("type") == "json_invalid" for e in errors):
             return _error(400, "body must be JSON")
-        return _error(400, "question must be a string")
+        field = ".".join(str(x) for x in errors[0]["loc"] if x != "body")
+        if field == "question":
+            return _error(400, "question must be a string")
+        return _error(400, f"{field}: {errors[0]['msg']}" if field else errors[0]["msg"])
 
     @app.get("/v1/health")
     @app.get("/health", include_in_schema=False)

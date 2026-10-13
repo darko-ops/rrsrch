@@ -13,20 +13,28 @@ ADMIN_URL = os.environ.get("RRSRCH_DATABASE_URL", db.DEFAULT_URL)
 
 
 @pytest.fixture
-def conn():
+def db_url():
+    """A fresh, empty database; yields its URL and drops it afterwards."""
     name = f"rrsrch_test_{uuid.uuid4().hex[:8]}"
     try:
         admin = psycopg.connect(ADMIN_URL, autocommit=True, connect_timeout=3)
     except psycopg.OperationalError:
         pytest.skip("Postgres not running (docker compose up -d)")
     admin.execute(f"CREATE DATABASE {name}")
-    c = psycopg.connect(ADMIN_URL.rsplit("/", 1)[0] + f"/{name}")
+    try:
+        yield ADMIN_URL.rsplit("/", 1)[0] + f"/{name}"
+    finally:
+        admin.execute(f"DROP DATABASE {name} WITH (FORCE)")
+        admin.close()
+
+
+@pytest.fixture
+def conn(db_url):
+    c = psycopg.connect(db_url)
     try:
         yield c
     finally:
         c.close()
-        admin.execute(f"DROP DATABASE {name}")
-        admin.close()
 
 
 @pytest.fixture

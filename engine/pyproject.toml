@@ -32,4 +32,5 @@ packages = ["src/rrsrch"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]   # also works when macOS hides the editable-install .pth (Python 3.13 skips hidden .pth files)
 markers = ["network: hits Europe PMC / ClinicalTrials.gov (deselect with -m 'not network')", "db: needs the Postgres from docker-compose"]
