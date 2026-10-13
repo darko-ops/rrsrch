@@ -122,6 +122,59 @@ async function initPostsFile() {
   }
 }
 
+const EUROPE_PMC_SEARCH = 'https://www.ebi.ac.uk/europepmc/webservices/rest/search';
+
+// Literature search for the landing page (Europe PMC — same source as the evidence engine).
+app.get('/api/literature/search', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) {
+    return res.status(400).json({ error: 'query required' });
+  }
+  if (q.length > 500) {
+    return res.status(400).json({ error: 'query too long (500 characters max)' });
+  }
+  const pageSize = Math.min(Math.max(parseInt(req.query.limit, 10) || 12, 1), 25);
+  try {
+    const params = new URLSearchParams({
+      query: q,
+      format: 'json',
+      pageSize: String(pageSize),
+      resultType: 'core',
+    });
+    const upstream = await fetch(`${EUROPE_PMC_SEARCH}?${params}`);
+    if (!upstream.ok) {
+      return res.status(502).json({ error: 'Europe PMC is unavailable' });
+    }
+    const data = await upstream.json();
+    const raw = data.resultList?.result || [];
+    const hitCount = parseInt(data.hitCount, 10) || raw.length;
+    const results = raw.map((r) => {
+      const pmcid = r.pmcid ? String(r.pmcid).replace(/^PMC/i, '') : null;
+      let url = null;
+      if (r.pmid) url = `https://europepmc.org/article/MED/${r.pmid}`;
+      else if (pmcid) url = `https://europepmc.org/article/PMC/${pmcid}`;
+      else if (r.doi) url = `https://doi.org/${r.doi}`;
+      const abstract = (r.abstractText || '').replace(/\s+/g, ' ').trim();
+      return {
+        pmid: r.pmid || null,
+        pmcid: pmcid ? `PMC${pmcid}` : null,
+        doi: r.doi || null,
+        title: r.title || 'Untitled',
+        authors: r.authorString || null,
+        journal: r.journalTitle || null,
+        year: r.pubYear || null,
+        abstract: abstract.length > 420 ? `${abstract.slice(0, 417)}…` : abstract,
+        openAccess: r.isOpenAccess === 'Y',
+        url,
+      };
+    });
+    res.json({ query: q, hitCount, results, source: 'Europe PMC' });
+  } catch (err) {
+    console.error('literature search failed', err);
+    res.status(500).json({ error: 'search failed' });
+  }
+});
+
 // API endpoint to fetch market indices
 app.get('/api/markets', async (req, res) => {
   try {
