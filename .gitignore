@@ -29,3 +29,14 @@ node_modules/
 
 # Local Backpack MCP client scratch dir (node_modules only, never shipped)
 backpack/
+
+# Evidence engine local artifacts (see engine/.gitignore too)
+engine/.venv/
+engine/data/
+engine/**/__pycache__/
+engine/**/*.egg-info/
+engine/.pytest_cache/
+**/__pycache__/
+.venv/
+# Leftover local backpack tree at repo root only (not engine/src/rrsrch)
+/rrsrch/
