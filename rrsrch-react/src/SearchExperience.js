@@ -421,7 +421,7 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, onPickPr
   );
 }
 
-function ReportResults({ isMobile, scrollParentRef, onAskNext, searching, report, engineLive }) {
+function ReportResults({ isMobile, scrollParentRef, onAskNext, searching, report, engineLive, web, literature }) {
   const [expanded, setExpanded] = useState({});
   const sectionRefs = useRef({});
   const groups = report.groups || [];
@@ -627,6 +627,14 @@ function ReportResults({ isMobile, scrollParentRef, onAskNext, searching, report
           <span style={{ color: '#ccc' }}>Not covered by this corpus:</span> {report.gaps}
         </p>
       )}
+
+      {(web || literature) && (
+        <div style={{ marginTop: 48, borderTop: '1px solid rgba(255,255,255,0.14)', paddingTop: 8 }}>
+          <OpenWebSection isMobile={isMobile} web={web} />
+          <LiteratureSection isMobile={isMobile} literature={literature} />
+        </div>
+      )}
+
       <p style={{ margin: '56px 0 0', fontSize: 13, color: '#666' }}>
         Research tool only — not medical advice.
       </p>
@@ -634,8 +642,130 @@ function ReportResults({ isMobile, scrollParentRef, onAskNext, searching, report
   );
 }
 
-function LiteratureResultsPage({ isMobile, state, onAskNext, searching }) {
-  const { query, loading, error, hitCount, results } = state;
+function ResultLink({ href, title, meta, body, isMobile }) {
+  return (
+    <div style={{
+      padding: '0 0 28px',
+      marginBottom: 28,
+      borderBottom: '1px solid rgba(255,255,255,0.06)',
+    }}>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            color: '#fff', fontSize: isMobile ? 17 : 19, fontWeight: 600,
+            lineHeight: 1.45, textDecoration: 'none',
+            display: 'inline-flex', alignItems: 'flex-start', gap: 8,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = '#00ff88'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = '#fff'; }}
+        >
+          <span>{title}</span>
+          <ExternalLink size={14} style={{ flexShrink: 0, marginTop: 5, opacity: 0.6 }} />
+        </a>
+      ) : (
+        <span style={{ color: '#fff', fontSize: isMobile ? 17 : 19, fontWeight: 600 }}>{title}</span>
+      )}
+      {meta && <p style={{ margin: '8px 0 0', color: '#777', fontSize: 14 }}>{meta}</p>}
+      {body}
+    </div>
+  );
+}
+
+function OpenWebSection({ isMobile, web }) {
+  if (!web) return null;
+  const { loading, error, results, provider, detail } = web;
+  return (
+    <section style={{ marginTop: 56 }}>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', marginBottom: 8,
+      }}>
+        <h3 style={{
+          margin: 0, color: '#fff', fontSize: isMobile ? 22 : 28,
+          fontWeight: 800, letterSpacing: '-0.025em',
+        }}>
+          Open web
+        </h3>
+        <span style={{ fontSize: 13, color: '#888' }}>
+          {provider === 'brave' ? 'Brave Search'
+            : provider === 'serper' ? 'Google via Serper'
+            : provider === 'duckduckgo' ? 'DuckDuckGo'
+            : 'general web'}
+          {' · '}not ledger evidence
+        </span>
+      </div>
+      <p style={{ margin: '0 0 24px', color: '#777', fontSize: 14, lineHeight: 1.55, maxWidth: 720 }}>
+        Pages from across the internet. These are not citation-gated claims from the ledger.
+      </p>
+      {loading && <p style={{ color: '#888', fontSize: 14 }}>Searching the open web…</p>}
+      {error && (
+        <p style={{ color: '#c66', fontSize: 13, fontFamily: fonts.mono, lineHeight: 1.5 }}>
+          {error}{detail ? ` — ${detail}` : ''}
+        </p>
+      )}
+      {!loading && !error && (results || []).length === 0 && (
+        <p style={{ color: '#666', fontSize: 14 }}>No web results.</p>
+      )}
+      {!loading && !error && (results || []).map((r) => (
+        <ResultLink
+          key={r.url || r.title}
+          href={r.url}
+          title={r.title}
+          meta={[r.source, r.url].filter(Boolean).join(' · ')}
+          body={r.snippet ? (
+            <p style={{ margin: '8px 0 0', color: '#999', fontSize: 14, lineHeight: 1.55 }}>{r.snippet}</p>
+          ) : null}
+          isMobile={isMobile}
+        />
+      ))}
+    </section>
+  );
+}
+
+function LiteratureSection({ isMobile, literature }) {
+  if (!literature) return null;
+  const { loading, error, hitCount, results } = literature;
+  return (
+    <section style={{ marginTop: 56 }}>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', marginBottom: 8,
+      }}>
+        <h3 style={{
+          margin: 0, color: '#fff', fontSize: isMobile ? 22 : 28,
+          fontWeight: 800, letterSpacing: '-0.025em',
+        }}>
+          Literature
+        </h3>
+        <span style={{ fontSize: 13, color: '#888' }}>Europe PMC · papers</span>
+      </div>
+      <p style={{ margin: '0 0 24px', color: '#777', fontSize: 14, lineHeight: 1.55, maxWidth: 720 }}>
+        {loading ? 'Searching Europe PMC…'
+          : error ? error
+          : hitCount > (results?.length || 0)
+            ? `About ${hitCount.toLocaleString()} papers; showing ${(results || []).length}.`
+            : `${(hitCount || 0).toLocaleString()} paper${hitCount === 1 ? '' : 's'}.`}
+      </p>
+      {!loading && !error && (results || []).map((paper) => (
+        <ResultLink
+          key={paper.pmid || paper.pmcid || paper.doi || paper.title}
+          href={paper.url}
+          title={paper.title}
+          meta={[
+            paper.authors, paper.journal, paper.year,
+            paper.openAccess ? 'open access' : null,
+            paper.pmid ? `PMID ${paper.pmid}` : null,
+          ].filter(Boolean).join(' · ')}
+          body={paper.abstract ? <AbstractSnippet html={paper.abstract} /> : null}
+          isMobile={isMobile}
+        />
+      ))}
+    </section>
+  );
+}
+
+function ExploreResultsPage({ isMobile, query, web, literature, onAskNext, searching }) {
   return (
     <div style={{
       maxWidth: 1120,
@@ -643,68 +773,21 @@ function LiteratureResultsPage({ isMobile, state, onAskNext, searching }) {
       padding: isMobile ? '48px 20px 72px' : '72px 40px 96px',
       fontFamily: fonts.main,
     }}>
-      <div style={{ fontSize: 14, color: '#888' }}>Literature search · Europe PMC</div>
+      <div style={{ fontSize: 14, color: '#888' }}>Open web + literature</div>
       <h2 style={{
         margin: '12px 0 0', color: '#fff',
         fontSize: isMobile ? 26 : 36, fontWeight: 700,
         lineHeight: 1.2, letterSpacing: '-0.025em', maxWidth: 900,
       }}>
-        {loading ? `Searching for “${query}”…`
-          : error ? `Could not search for “${query}”.`
-          : hitCount > (results?.length || 0)
-            ? `About ${hitCount.toLocaleString()} papers match`
-            : `${(hitCount || 0).toLocaleString()} paper${hitCount === 1 ? '' : 's'} found`}
+        {query}
       </h2>
       <p style={{ margin: '12px 0 0', color: '#777', fontSize: 15, maxWidth: 720, lineHeight: 1.55 }}>
-        Open papers below. Cited reports from the local evidence ledger ship with v1 —
-        suggestion cards above show what that will look like.
+        Web results from the open internet, plus papers from Europe PMC. A gated answer from
+        the claim ledger appears when the local engine is connected.
       </p>
 
-      {error && (
-        <p style={{ margin: '20px 0 0', color: '#c66', fontSize: 13, fontFamily: fonts.mono }}>{error}</p>
-      )}
-      {!loading && !error && results?.length === 0 && (
-        <p style={{ margin: '28px 0 0', color: '#666', fontSize: 15 }}>Try broader terms or check spelling.</p>
-      )}
-
-      <div style={{ marginTop: 40, display: 'flex', flexDirection: 'column' }}>
-        {(results || []).map((paper) => (
-          <div
-            key={paper.pmid || paper.pmcid || paper.doi || paper.title}
-            style={{
-              padding: '0 0 28px',
-              marginBottom: 28,
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
-            }}
-          >
-            {paper.url ? (
-              <a
-                href={paper.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  color: '#fff', fontSize: isMobile ? 17 : 19, fontWeight: 600,
-                  lineHeight: 1.45, textDecoration: 'none',
-                  display: 'inline-flex', alignItems: 'flex-start', gap: 8,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = '#00ff88'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = '#fff'; }}
-              >
-                <span>{paper.title}</span>
-                <ExternalLink size={14} style={{ flexShrink: 0, marginTop: 5, opacity: 0.6 }} />
-              </a>
-            ) : (
-              <span style={{ color: '#fff', fontSize: isMobile ? 17 : 19, fontWeight: 600 }}>{paper.title}</span>
-            )}
-            <p style={{ margin: '8px 0 0', color: '#777', fontSize: 14 }}>
-              {[paper.authors, paper.journal, paper.year].filter(Boolean).join(' · ')}
-              {paper.openAccess ? ' · open access' : ''}
-              {paper.pmid ? ` · PMID ${paper.pmid}` : ''}
-            </p>
-            {paper.abstract && <AbstractSnippet html={paper.abstract} />}
-          </div>
-        ))}
-      </div>
+      <OpenWebSection isMobile={isMobile} web={web} />
+      <LiteratureSection isMobile={isMobile} literature={literature} />
 
       <div style={{ marginTop: 64 }}>
         <div style={{ fontSize: 15, color: '#ccc', fontWeight: 600, marginBottom: 16 }}>
@@ -814,10 +897,11 @@ function TopBar({
  */
 export default function SearchExperience({ isMobile, scrollContainerRef }) {
   const [query, setQuery] = useState('');
-  // landing | report | literature
+  // landing | report | explore
   const [mode, setMode] = useState('landing');
   const [searching, setSearching] = useState(false);
   const [literature, setLiterature] = useState(null);
+  const [web, setWeb] = useState(null);
   const [report, setReport] = useState(null);
   const [engineLive, setEngineLive] = useState(false);
   const resultsTopRef = useRef(null);
@@ -825,6 +909,7 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
   const goHome = () => {
     setMode('landing');
     setLiterature(null);
+    setWeb(null);
     setReport(null);
     setQuery('');
     setSearching(false);
@@ -832,17 +917,80 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
     if (el) el.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const loadSideSources = async (q) => {
+    setWeb({ loading: true, error: null, results: [], provider: null });
+    setLiterature({ query: q, loading: true, error: null, hitCount: 0, results: [] });
+
+    const fetchWeb = async () => {
+      try {
+        const res = await fetch(`/api/web/search?${new URLSearchParams({ q, limit: '8' })}`);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setWeb({
+            loading: false,
+            error: data.error || 'Web search failed',
+            detail: data.detail || null,
+            results: [],
+            provider: null,
+          });
+          return;
+        }
+        setWeb({
+          loading: false,
+          error: null,
+          detail: null,
+          results: data.results || [],
+          provider: data.provider || null,
+        });
+      } catch (err) {
+        const msg = err.message || 'Web search failed';
+        setWeb({
+          loading: false,
+          error: msg === 'Failed to fetch'
+            ? 'Could not reach the API — on localhost run npm start from the repo root.'
+            : msg,
+          detail: null,
+          results: [],
+          provider: null,
+        });
+      }
+    };
+
+    const fetchLit = async () => {
+      try {
+        const res = await fetch(`/api/literature/search?${new URLSearchParams({ q, limit: '12' })}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Search failed');
+        setLiterature({
+          query: q,
+          loading: false,
+          error: null,
+          hitCount: data.hitCount ?? data.results?.length ?? 0,
+          results: data.results || [],
+        });
+      } catch (err) {
+        const msg = err.message || 'Search failed';
+        const hint = msg === 'Failed to fetch'
+          ? 'Could not reach the API — on localhost run npm start from the repo root (port 3001).'
+          : msg;
+        setLiterature({ query: q, loading: false, error: hint, hitCount: 0, results: [] });
+      }
+    };
+
+    await Promise.all([fetchWeb(), fetchLit()]);
+  };
+
   const showDemoReport = (item) => {
     setQuery(item.q);
     setReport({ ...DEMO_REPORT, gaps: DEMO_REPORT.gaps });
     setEngineLive(false);
     setMode('report');
-    setLiterature(null);
     setSearching(false);
     requestAnimationFrame(() => {
       const el = scrollContainerRef?.current;
       if (el) el.scrollTo({ top: 0, behavior: 'smooth' });
     });
+    loadSideSources(item.q);
   };
 
   const askEngine = async (q) => {
@@ -881,12 +1029,12 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
         setReport(live);
         setEngineLive(true);
         setMode('report');
-        setLiterature(null);
         setSearching(false);
+        loadSideSources(q);
         return;
       }
     } catch (err) {
-      // Engine configured but failed — fall through to demo/PMC
+      // Engine configured but failed — fall through to demo/explore
       console.warn('engine answer failed', err);
     }
 
@@ -896,34 +1044,16 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
       return;
     }
 
-    setMode('literature');
+    setMode('explore');
     setReport(null);
-    setLiterature({ query: q, loading: true, error: null, hitCount: 0, results: [] });
-    try {
-      const res = await fetch(`/api/literature/search?${new URLSearchParams({ q, limit: '12' })}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Search failed');
-      setLiterature({
-        query: q,
-        loading: false,
-        error: null,
-        hitCount: data.hitCount ?? data.results?.length ?? 0,
-        results: data.results || [],
-      });
-    } catch (err) {
-      const msg = err.message || 'Search failed';
-      const hint = msg === 'Failed to fetch'
-        ? 'Could not reach the API — on localhost run npm start from the repo root (port 3001).'
-        : msg;
-      setLiterature({ query: q, loading: false, error: hint, hitCount: 0, results: [] });
-    } finally {
-      setSearching(false);
-    }
+    setSearching(false);
+    await loadSideSources(q);
   };
 
   const onPickPreview = (item) => runSearch(item, { preferDemo: true });
 
-  const inResults = mode === 'report' || mode === 'literature';
+  const inResults = mode === 'report' || mode === 'explore';
+  const sideLoading = web?.loading || literature?.loading;
 
   return (
     <>
@@ -933,7 +1063,7 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
         query={query}
         onQueryChange={setQuery}
         onSearch={runSearch}
-        searching={searching || literature?.loading}
+        searching={searching || sideLoading}
         onHome={goHome}
       />
 
@@ -958,14 +1088,18 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
               searching={searching}
               report={report}
               engineLive={engineLive}
+              web={web}
+              literature={literature}
             />
           )}
-          {mode === 'literature' && literature && (
-            <LiteratureResultsPage
+          {mode === 'explore' && (
+            <ExploreResultsPage
               isMobile={isMobile}
-              state={literature}
+              query={query}
+              web={web}
+              literature={literature}
               onAskNext={onPickPreview}
-              searching={searching || literature.loading}
+              searching={searching || sideLoading}
             />
           )}
         </div>
