@@ -369,8 +369,8 @@ def cmd_skeptic_run(args) -> int:
 
 
 def cmd_serve(args) -> int:
-    from .serve import http as server
-    server.run(host=args.host, port=args.port)
+    from .serve import api
+    api.run(host=args.host, port=args.port)
     return 0
 
 
