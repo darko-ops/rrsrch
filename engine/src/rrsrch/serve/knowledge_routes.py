@@ -170,6 +170,19 @@ def get_verification_run(run_id: int, p: Principal | None = Depends(principal),
     return {"ok": True, "verification_run": _found(query.get_verification_run(c, p, run_id))}
 
 
+@router.get("/sources/{source_id}")
+def get_source(source_id: str, c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True, "source": _found(query.get_source(c, source_id))}
+
+
+@router.get("/sources/{source_id}/locate")
+def locate(source_id: str, quote: str = Query(min_length=12, max_length=2000),
+           c: psycopg.Connection = Depends(conn)) -> dict:
+    """The exact span to cite for a quote: document hash and character offsets."""
+    _found(query.get_source(c, source_id))
+    return {"ok": True, "source_id": source_id, "spans": query.locate(c, source_id, quote)}
+
+
 @router.get("/search")
 def search(q: str = Query(min_length=1, max_length=500), repository: str | None = None,
            state: str | None = None, type: str | None = None, limit: int = Query(default=20, ge=1, le=100),

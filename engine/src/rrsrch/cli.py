@@ -23,6 +23,7 @@
   rrsrch agent revoke HANDLE               revoke an agent and all its keys
   rrsrch repo member SLUG HANDLE ROLE      grant a repository role (or `none` to remove)
   rrsrch audit verify                      check every audit event's hash and link
+  rrsrch mcp [--api URL] [--read-only]     MCP server (stdio) over the API, as RRSRCH_API_KEY
 """
 from __future__ import annotations
 
@@ -478,6 +479,15 @@ def cmd_repo_member(args) -> int:
     return _identity(go)
 
 
+def cmd_mcp(args) -> int:
+    import os
+
+    from .serve import mcp_tools
+    mcp_tools.run(args.api or os.environ.get("RRSRCH_API_URL", "http://127.0.0.1:8787"),
+                  os.environ.get("RRSRCH_API_KEY"), read_only=args.read_only)
+    return 0
+
+
 def cmd_audit_verify(args) -> int:
     from .ledger import db
     from .trust import audit
@@ -576,6 +586,10 @@ def main(argv: list[str] | None = None) -> int:
     rm.set_defaults(fn=cmd_repo_member)
     au = sub.add_parser("audit").add_subparsers(dest="cmd", required=True)
     au.add_parser("verify", help="check the audit chain").set_defaults(fn=cmd_audit_verify)
+    mc = sub.add_parser("mcp", help="MCP server over stdio; acts as the agent whose key is in RRSRCH_API_KEY")
+    mc.add_argument("--api", help="API base URL (default $RRSRCH_API_URL or http://127.0.0.1:8787)")
+    mc.add_argument("--read-only", action="store_true", help="offer only the read tools")
+    mc.set_defaults(fn=cmd_mcp)
     args = p.parse_args(argv)
     return args.fn(args)
 

@@ -232,3 +232,32 @@ def search(conn: psycopg.Connection, p: Principal | None, q: str, *, repository:
     for r in rows:
         r["rank"] = round(float(r["rank"]), 6)
     return {"items": rows, "next_offset": offset + limit if len(rows) == limit else None}
+
+
+def get_source(conn: psycopg.Connection, source_id: str) -> dict | None:
+    """A corpus source's metadata and its stored documents (hash and length, not text: text carries
+    per-paper licenses). Sources are shared reference material, readable by anyone."""
+    row = conn.execute("SELECT id, pmid, pmcid, doi, title, pub_year, journal, pub_types, has_full_text, license "
+                       "FROM sources WHERE id = %s", (source_id,)).fetchone()
+    if row is None:
+        return None
+    src = dict(zip(("id", "pmid", "pmcid", "doi", "title", "pub_year", "journal", "pub_types", "has_full_text",
+                    "license"), row))
+    src["documents"] = _rows(conn.execute(
+        "SELECT part, sha256, length(text) FROM documents WHERE source_id = %s ORDER BY part", (source_id,)),
+        ("part", "sha256", "length"))
+    src["trials"] = [t for (t,) in conn.execute(
+        "SELECT DISTINCT nct_id FROM trial_links WHERE source_id = %s ORDER BY 1", (source_id,))]
+    return src
+
+
+def locate(conn: psycopg.Connection, source_id: str, quote: str) -> list[dict]:
+    """Where a quote appears verbatim (up to typography) in a source's documents: the exact span to cite."""
+    from ..reader import spans
+    found = []
+    for part, sha, text in conn.execute("SELECT part, sha256, text FROM documents WHERE source_id = %s "
+                                        "ORDER BY part", (source_id,)):
+        if (hit := spans.locate(quote, text)) is not None:
+            found.append({"source_id": source_id, "part": part, "doc_sha256": sha, "start": hit[0], "end": hit[1],
+                          "excerpt": text[hit[0]:hit[1]]})
+    return found
