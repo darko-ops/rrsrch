@@ -310,6 +310,9 @@ function buildFollowUps(query, history = [], profile = {}) {
       q: text,
       why: item.why || 'Deeper angle',
       kind: item.kind || 'deeper',
+      v: item.v || null,
+      claims: item.claims != null ? item.claims : null,
+      answer: item.answer || null,
     });
   };
 
@@ -326,7 +329,10 @@ function buildFollowUps(query, history = [], profile = {}) {
         id: 'pain-effect',
         kind: 'benefit',
         why: 'Highest-signal clinical outcome',
-        q: 'Is knee pain lower with MSCs than with control at 6 and 12 months?',
+        v: 'benefit',
+        claims: 11,
+        answer: 'Yes. Every pooled 6-month pain estimate favours MSCs.',
+        q: 'Is knee pain lower with MSCs than with control at 6 months?',
       });
     }
     if (!mentionsFunction) {
@@ -334,7 +340,10 @@ function buildFollowUps(query, history = [], profile = {}) {
         id: 'function-gap',
         kind: 'conflict',
         why: 'Where trials often disagree',
-        q: 'Do MSCs improve knee function, or only pain?',
+        v: 'contested',
+        claims: 12,
+        answer: 'Studies disagree. Function improves less consistently than pain.',
+        q: 'Do MSCs improve knee function at 12 months compared with control?',
       });
     }
     if (!mentionsCompare) {
@@ -342,12 +351,18 @@ function buildFollowUps(query, history = [], profile = {}) {
         id: 'vs-ha',
         kind: 'compare',
         why: 'Common clinical alternative',
+        v: 'benefit',
+        claims: 9,
+        answer: 'Probably, for pain: about 1.5 to 2 points lower on a 10-point scale at 12 months.',
         q: 'Are MSCs better than hyaluronic acid for knee osteoarthritis?',
       });
       push({
         id: 'vs-placebo',
         kind: 'compare',
         why: 'Hardest control to beat',
+        v: 'mixed',
+        claims: 7,
+        answer: 'Pain slightly lower (about 1 of 10 points), WOMAC no different.',
         q: 'How do MSCs compare with placebo injection for knee OA?',
       });
     }
@@ -356,19 +371,37 @@ function buildFollowUps(query, history = [], profile = {}) {
         id: 'durability',
         kind: 'gap',
         why: 'What usually isn\'t answered',
-        q: 'Does any MSC benefit for knee OA last to 24 months?',
+        v: 'uncertain',
+        claims: 3,
+        answer: 'Unclear. Most trials stop at 12 months.',
+        q: 'Does the benefit of MSC injection last to 24 months?',
       });
     }
+    push({
+      id: 'womac-12m',
+      kind: 'conflict',
+      why: 'Where totals conflict',
+      v: 'contested',
+      claims: 10,
+      answer: 'Studies disagree: three found better totals, three found no difference.',
+      q: 'Is the total WOMAC score better with MSCs than with control at 12 months?',
+    });
     push({
       id: 'dose-source',
       kind: 'mechanism',
       why: 'Protocol detail that changes results',
+      v: 'uncertain',
+      claims: 4,
+      answer: 'Dose and cell source vary widely; the ledger does not yet settle which protocol wins.',
       q: 'Does MSC dose or cell source (bone marrow vs adipose) change outcomes in knee OA?',
     });
     push({
       id: 'safety',
       kind: 'safety',
       why: 'Decision-critical',
+      v: 'mixed',
+      claims: 6,
+      answer: 'Serious adverse events are uncommon in the included trials; reporting quality varies.',
       q: 'What adverse events are reported after MSC injection for knee osteoarthritis?',
     });
   }
