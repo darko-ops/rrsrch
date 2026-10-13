@@ -170,6 +170,50 @@ app.get('/api/engine/health', async (_req, res) => {
 });
 
 // Open-web search (Comet-like layer). Prefer Brave, then Serper. Not the evidence ledger.
+function hostnameOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return null; }
+}
+
+function faviconFor(url, source) {
+  const host = source || hostnameOf(url);
+  if (!host) return null;
+  return `https://icons.duckduckgo.com/ip3/${host}.ico`;
+}
+
+/** Classify open-web hostnames into trust buckets for the Web tab. */
+function classifyWebKind(url, source) {
+  const host = String(source || hostnameOf(url) || '').toLowerCase();
+  if (!host) return 'clinic';
+  if (
+    /\.gov(\.|$)/.test(host)
+    || /(fda|cdc|nih|who\.int|ema\.europa|nhs\.uk|nice\.org|health\.gov)/.test(host)
+  ) return 'authority';
+  if (
+    /(reddit\.com|quora\.com|stackoverflow\.com|discourse\.|forum\.|patient\.info|healthunlocked)/.test(host)
+  ) return 'forum';
+  if (
+    /(nytimes|washingtonpost|bbc\.|cnn\.|reuters|bloomberg|statnews|fiercebiotech|nature\.com\/news|sciencedaily|theguardian|forbes|wsj\.|npr\.org|webmd\.com\/news)/.test(host)
+  ) return 'news';
+  if (
+    /(harvard\.edu|stanford\.edu|mayoclinic|clevelandclinic|hopkinsmedicine|nejm\.org|thelancet|bmj\.com|cochrane|pubmed|nih\.gov|nature\.com|science\.org|cell\.com|lancet|medscape|uptodate|aafp\.org|acr\.org)/.test(host)
+    || /\.edu(\.|$)/.test(host)
+  ) return 'medical';
+  if (/(clinic|regen|stem.?cell|orthop|sports.?med|wellness|aesthetic)/.test(host)) return 'clinic';
+  return 'clinic';
+}
+
+function enrichWebResult(r) {
+  const url = r.url || null;
+  const source = r.source || hostnameOf(url);
+  return {
+    ...r,
+    source,
+    kind: r.kind || classifyWebKind(url, source),
+    favicon: r.favicon || faviconFor(url, source),
+    thumbnail: r.thumbnail || null,
+  };
+}
+
 async function searchBrave(q, count) {
   const key = process.env.BRAVE_SEARCH_API_KEY;
   if (!key) return null;
@@ -180,11 +224,13 @@ async function searchBrave(q, count) {
   });
   if (!upstream.ok) throw new Error(`Brave search HTTP ${upstream.status}`);
   const data = await upstream.json();
-  const results = (data.web?.results || []).map((r) => ({
+  const results = (data.web?.results || []).map((r) => enrichWebResult({
     title: r.title || 'Untitled',
     url: r.url || null,
     snippet: r.description || '',
     source: (() => { try { return new URL(r.url).hostname.replace(/^www\./, ''); } catch { return null; } })(),
+    thumbnail: r.thumbnail?.src || r.thumbnail?.url || null,
+    favicon: r.meta_url?.favicon || null,
   }));
   return { provider: 'brave', results };
 }
@@ -200,11 +246,12 @@ async function searchSerper(q, count) {
   });
   if (!upstream.ok) throw new Error(`Serper HTTP ${upstream.status}`);
   const data = await upstream.json();
-  const results = (data.organic || []).map((r) => ({
+  const results = (data.organic || []).map((r) => enrichWebResult({
     title: r.title || 'Untitled',
     url: r.link || null,
     snippet: r.snippet || '',
     source: (() => { try { return new URL(r.link).hostname.replace(/^www\./, ''); } catch { return null; } })(),
+    thumbnail: r.imageUrl || null,
   }));
   return { provider: 'serper', results };
 }
@@ -243,15 +290,164 @@ async function searchDuckDuckGo(q, count) {
     const title = m[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() || 'Untitled';
     let source = null;
     try { source = new URL(href).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
-    results.push({
+    results.push(enrichWebResult({
       title,
       url: href,
       snippet: snippets[i] || '',
       source,
-    });
+    }));
     i += 1;
   }
   return { provider: 'duckduckgo', results };
+}
+
+/**
+ * Heuristic "by argument" clustering for the Web tab.
+ * Clusters snippets into claim themes and assigns yes/no sides by polarity.
+ * Ledger verdict/note come from the optional client-provided report summary.
+ */
+function buildWebArguments(query, results = [], ledger = {}) {
+  const themes = [
+    {
+      id: 'pain-benefit',
+      title: 'MSCs lower knee pain versus control',
+      match: /pain|vas|analges/i,
+      yes: /lower|reduc|improv|relie|benefit|effective|significant/i,
+      no: /no (significant )?difference|not (superior|better)|failed|no benefit|unclear|inconclusive/i,
+      defaultVerdict: 'benefit',
+      defaultNote: 'Pain outcomes favour MSCs in several trials; effect sizes vary.',
+    },
+    {
+      id: 'function',
+      title: 'MSCs improve knee function, not just pain',
+      match: /function|womac|ikdc|koos|mobility|stiff/i,
+      yes: /improv|better|increas|restor|gain/i,
+      no: /no (significant )?difference|did not|fail|unclear|mixed|not follow/i,
+      defaultVerdict: 'contested',
+      defaultNote: 'Function is less consistent than pain across the ledger.',
+    },
+    {
+      id: 'durability',
+      title: 'Any benefit lasts beyond 12–24 months',
+      match: /24 month|long[- ]?term|durab|sustain|lasts?/i,
+      yes: /last|sustain|maintain|durable|at 24/i,
+      no: /stop at 12|short[- ]?term|unclear|unknown|no data|not followed/i,
+      defaultVerdict: 'uncertain',
+      defaultNote: 'Most included trials stop at 12 months; longer follow-up is thin.',
+    },
+    {
+      id: 'vs-standard',
+      title: 'MSCs beat hyaluronic acid or placebo',
+      match: /hyaluronic|placebo|saline|control|compar/i,
+      yes: /better than|superior|outperform|favou?rs? msc/i,
+      no: /no better|equivalent|similar to|not superior/i,
+      defaultVerdict: 'mixed',
+      defaultNote: 'Comparators matter: HA and placebo are harder bars than usual care.',
+    },
+    {
+      id: 'safety',
+      title: 'MSC injections are safe for knee OA',
+      match: /safe|adverse|side effect|complicat|risk/i,
+      yes: /safe|well[- ]tolerat|no serious|low risk/i,
+      no: /adverse|risk|complicat|infection|caution/i,
+      defaultVerdict: 'mixed',
+      defaultNote: 'Serious events look uncommon in trials; reporting quality varies.',
+    },
+  ];
+
+  const ledgerVerdict = ledger.verdict || null;
+  const ledgerNote = ledger.note || null;
+  const args = [];
+
+  for (const theme of themes) {
+    const yes = [];
+    const no = [];
+    for (const r of results) {
+      const blob = `${r.title || ''} ${r.snippet || ''}`;
+      if (!theme.match.test(blob)) continue;
+      const quote = String(r.snippet || r.title || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+      const entry = {
+        url: r.url,
+        quote: quote || (r.title || ''),
+        title: r.title,
+        source: r.source,
+        kind: r.kind,
+        favicon: r.favicon,
+        thumbnail: r.thumbnail,
+      };
+      const yesHit = theme.yes.test(blob);
+      const noHit = theme.no.test(blob);
+      if (yesHit && !noHit) yes.push(entry);
+      else if (noHit && !yesHit) no.push(entry);
+      else if (yesHit && noHit) {
+        // Mixed language on the page — put with pushback if "no" wins the end of the snippet
+        if (/however|but|although|despite/i.test(blob)) no.push(entry);
+        else yes.push(entry);
+      } else {
+        // Matched theme keywords only — lean yes for clinic/news, no for authority hedging
+        if (r.kind === 'authority' || r.kind === 'medical') no.push(entry);
+        else yes.push(entry);
+      }
+    }
+    if (!yes.length && !no.length) continue;
+    let verdict = theme.defaultVerdict;
+    let note = theme.defaultNote;
+    if (ledgerVerdict && /pain|function|mixed/i.test(theme.id + theme.title)) {
+      // Prefer live ledger summary when present
+      if (theme.id === 'pain-benefit' && (ledgerVerdict === 'benefit' || ledgerVerdict === 'mixed')) {
+        verdict = ledgerVerdict === 'mixed' ? 'benefit' : ledgerVerdict;
+      }
+      if (theme.id === 'function' && (ledgerVerdict === 'contested' || ledgerVerdict === 'mixed' || ledgerVerdict === 'no_difference')) {
+        verdict = ledgerVerdict === 'mixed' ? 'contested' : ledgerVerdict;
+      }
+      if (ledgerNote && (theme.id === 'pain-benefit' || theme.id === 'function')) {
+        note = ledgerNote;
+      }
+    }
+    if (!yes.length && !no.length) continue;
+    args.push({
+      id: theme.id,
+      title: theme.title,
+      ledger: {
+        verdict: verdict || 'none',
+        note: note || 'Not covered by the claim ledger yet.',
+      },
+      yes,
+      no,
+    });
+  }
+
+  // If nothing matched, fall back to a single "open web claims" bucket
+  if (!args.length && results.length) {
+    args.push({
+      id: 'general',
+      title: String(query || 'What the open web claims').slice(0, 120),
+      ledger: {
+        verdict: ledgerVerdict || 'none',
+        note: ledgerNote || 'Not covered by the claim ledger yet.',
+      },
+      yes: results.slice(0, 4).map((r) => ({
+        url: r.url,
+        quote: String(r.snippet || r.title || '').slice(0, 220),
+        title: r.title,
+        source: r.source,
+        kind: r.kind,
+        favicon: r.favicon,
+        thumbnail: r.thumbnail,
+      })),
+      no: results.slice(4, 8).map((r) => ({
+        url: r.url,
+        quote: String(r.snippet || r.title || '').slice(0, 220),
+        title: r.title,
+        source: r.source,
+        kind: r.kind,
+        favicon: r.favicon,
+        thumbnail: r.thumbnail,
+      })),
+    });
+  }
+
+  return args.slice(0, 6);
 }
 
 app.get('/api/web/search', async (req, res) => {
@@ -283,12 +479,35 @@ app.get('/api/web/search', async (req, res) => {
     return res.json({
       query: q,
       provider: packed.provider,
-      results: packed.results,
+      results: (packed.results || []).map(enrichWebResult),
       note: 'Open web — not gated ledger evidence. Research tool only, not medical advice.',
     });
   } catch (err) {
     console.error('web search failed', err);
     return res.status(500).json({ error: 'search failed' });
+  }
+});
+
+/** Cluster open-web results by argument for the Web tab "By argument" view. */
+app.post('/api/web/arguments', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const q = String(body.query || body.q || '').trim();
+    const results = Array.isArray(body.results) ? body.results : [];
+    if (!results.length) {
+      return res.status(400).json({ error: 'results required' });
+    }
+    const ledger = body.ledger && typeof body.ledger === 'object' ? body.ledger : {};
+    const enriched = results.map(enrichWebResult);
+    const arguments_ = buildWebArguments(q, enriched, ledger);
+    return res.json({
+      query: q,
+      arguments: arguments_,
+      note: 'Heuristic clustering from titles/snippets — not a full page read.',
+    });
+  } catch (err) {
+    console.error('web arguments failed', err);
+    return res.status(500).json({ error: 'arguments failed' });
   }
 });
 
