@@ -744,7 +744,7 @@ function MainAnswer({ isMobile, scrollParentRef, report, engineLive, query, web,
     <div style={{ maxWidth: 880 }}>
       <p style={{ margin: 0, color: '#d8d8d8', fontSize: isMobile ? 17 : 20, lineHeight: 1.7 }}>
         Here&rsquo;s a working overview for <span style={{ color: '#fff' }}>“{query}”</span> drawn from
-        open web and Europe PMC. This is not a citation-gated ledger answer — switch to{' '}
+        open web and research literature. This is not a citation-gated ledger answer — switch to{' '}
         <button
           type="button"
           onClick={() => onTab('literature')}
@@ -845,26 +845,43 @@ function WebResultsPanel({ isMobile, web }) {
 
 function LiteratureResultsPanel({ isMobile, literature }) {
   if (!literature) return null;
-  const { loading, error, hitCount, results } = literature;
+  const { loading, error, hitCount, results, sources, sourceHits } = literature;
+  const sourceLine = (sources && sources.length)
+    ? sources.join(' · ')
+    : 'Europe PMC · OpenAlex · Semantic Scholar · ClinicalTrials.gov';
+  const hitBits = sourceHits && typeof sourceHits === 'object'
+    ? Object.entries(sourceHits)
+      .map(([name, n]) => `${name} ${Number(n).toLocaleString()}`)
+      .join(' · ')
+    : null;
   return (
     <div>
-      <p style={{ margin: '0 0 24px', color: '#777', fontSize: 14, lineHeight: 1.55, maxWidth: 720 }}>
-        Europe PMC
-        {loading ? ' · searching…'
-          : error ? ` · ${error}`
-          : hitCount != null
-            ? ` · ${hitCount.toLocaleString()} paper${hitCount === 1 ? '' : 's'}`
-            : ''}
+      <p style={{ margin: '0 0 8px', color: '#777', fontSize: 14, lineHeight: 1.55, maxWidth: 820 }}>
+        {loading ? 'Searching research sources…'
+          : error ? error
+          : `${sourceLine}${hitCount != null ? ` · ~${hitCount.toLocaleString()} matches` : ''}`}
       </p>
+      {!loading && !error && hitBits && (
+        <p style={{ margin: '0 0 24px', color: '#555', fontSize: 12, fontFamily: fonts.mono, lineHeight: 1.5 }}>
+          {hitBits}
+        </p>
+      )}
+      {!loading && !error && !(sources && sources.length) && <div style={{ height: 16 }} />}
       {!loading && !error && (results || []).map((paper) => (
         <ResultLink
-          key={paper.pmid || paper.pmcid || paper.doi || paper.title}
+          key={paper.pmid || paper.pmcid || paper.doi || paper.nctId || paper.title}
           href={paper.url}
           title={paper.title}
           meta={[
-            paper.authors, paper.journal, paper.year,
+            paper.kind === 'trial' ? 'Clinical trial' : null,
+            paper.source,
+            paper.authors,
+            paper.journal,
+            paper.year,
             paper.openAccess ? 'open access' : null,
             paper.pmid ? `PMID ${paper.pmid}` : null,
+            paper.nctId || null,
+            paper.citations != null ? `${paper.citations} cites` : null,
           ].filter(Boolean).join(' · ')}
           body={paper.abstract ? <AbstractSnippet html={paper.abstract} /> : null}
           isMobile={isMobile}
@@ -1186,13 +1203,18 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
           error: null,
           hitCount: data.hitCount ?? data.results?.length ?? 0,
           results: data.results || [],
+          sources: data.sources || (data.source ? [data.source] : []),
+          sourceHits: data.sourceHits || null,
         });
       } catch (err) {
         const msg = err.message || 'Search failed';
         const hint = msg === 'Failed to fetch'
           ? 'Could not reach the API — on localhost run npm start from the repo root (port 3001).'
           : msg;
-        setLiterature({ query: q, loading: false, error: hint, hitCount: 0, results: [] });
+        setLiterature({
+          query: q, loading: false, error: hint, hitCount: 0, results: [],
+          sources: [], sourceHits: null,
+        });
       }
     };
 
