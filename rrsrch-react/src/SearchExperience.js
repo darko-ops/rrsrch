@@ -1193,39 +1193,516 @@ function MainAnswer({
   );
 }
 
-function WebResultsPanel({ isMobile, web }) {
+const WEB_KINDS = [
+  { id: 'all', label: 'All' },
+  { id: 'authority', label: 'Health authority' },
+  { id: 'medical', label: 'Medical / academic' },
+  { id: 'clinic', label: 'Clinic' },
+  { id: 'news', label: 'News' },
+  { id: 'forum', label: 'Forum' },
+];
+
+const WEB_KIND_META = {
+  authority: {
+    label: 'Health authority',
+    note: 'Regulators and public-health bodies. Cautious and slow to update, but not selling anything.',
+  },
+  medical: {
+    label: 'Medical / academic',
+    note: 'Hospital and university health pages. Usually summarise trials; check the date.',
+  },
+  clinic: {
+    label: 'Clinic',
+    note: 'Sells the treatment. Expect outcomes framed in the best light.',
+  },
+  news: {
+    label: 'News',
+    note: 'Reporting on studies or the industry. Good for context, not for effect sizes.',
+  },
+  forum: {
+    label: 'Forum',
+    note: 'Personal experience. Real, but one knee at a time.',
+  },
+};
+
+function providerLabel(provider) {
+  if (provider === 'brave') return 'Brave Search';
+  if (provider === 'serper') return 'Google via Serper';
+  if (provider === 'duckduckgo') return 'DuckDuckGo';
+  return 'Open web';
+}
+
+function WebThumb({ src, size = 64 }) {
+  const [broken, setBroken] = useState(!src);
+  return (
+    <div style={{
+      width: size, height: size, flexShrink: 0, borderRadius: 10,
+      border: '1px solid rgba(255,255,255,0.06)', overflow: 'hidden',
+      background: '#161616',
+    }}>
+      {!broken && src ? (
+        <img
+          src={src}
+          alt=""
+          onError={() => setBroken(true)}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function WebFavicon({ src, size = 16 }) {
+  const [broken, setBroken] = useState(!src);
+  if (broken || !src) {
+    return (
+      <span style={{
+        width: size, height: size, borderRadius: size > 14 ? 4 : 3, flexShrink: 0,
+        background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.12)',
+        display: 'inline-block',
+      }} />
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      width={size}
+      height={size}
+      onError={() => setBroken(true)}
+      style={{ width: size, height: size, borderRadius: size > 14 ? 4 : 3, flexShrink: 0, objectFit: 'cover' }}
+    />
+  );
+}
+
+function WebKindCard({ r, isMobile }) {
+  return (
+    <a
+      href={r.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        display: 'flex', flexDirection: 'column', gap: 10,
+        padding: 20, borderRadius: 14,
+        background: 'rgba(40,40,40,0.6)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        textDecoration: 'none', color: 'inherit',
+        minHeight: isMobile ? undefined : 180,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'rgba(55,55,55,0.8)';
+        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'rgba(40,40,40,0.6)';
+        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+      }}
+    >
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+        <WebThumb src={r.thumbnail} size={64} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minWidth: 0 }}>
+          <span style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            fontFamily: fonts.mono, fontSize: 12, color: '#888',
+          }}>
+            <WebFavicon src={r.favicon} size={16} />
+            {r.source || 'web'}
+          </span>
+          <span style={{ color: '#fff', fontSize: 16, fontWeight: 600, lineHeight: 1.4 }}>
+            {r.title}
+          </span>
+        </div>
+      </div>
+      {r.snippet && (
+        <span style={{ color: '#999', fontSize: 14, lineHeight: 1.55 }}>{r.snippet}</span>
+      )}
+      <span style={{
+        marginTop: 'auto', paddingTop: 4, color: '#00ff88',
+        fontSize: 13, fontWeight: 500,
+      }}>
+        Open page ↗
+      </span>
+    </a>
+  );
+}
+
+function WebArgCard({ p }) {
+  const kindLabel = WEB_KIND_META[p.kind]?.label || p.kind || 'Web';
+  return (
+    <a
+      href={p.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{
+        display: 'flex', gap: 16, padding: 16, borderRadius: 14,
+        background: 'rgba(40,40,40,0.6)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        textDecoration: 'none', color: 'inherit',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'rgba(55,55,55,0.8)';
+        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'rgba(40,40,40,0.6)';
+        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+      }}
+    >
+      <WebThumb src={p.thumbnail} size={96} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+        <span style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          fontFamily: fonts.mono, fontSize: 12, color: '#888',
+        }}>
+          <WebFavicon src={p.favicon} size={14} />
+          {[p.source, kindLabel].filter(Boolean).join(' · ')}
+        </span>
+        <span style={{ color: '#eee', fontSize: 15, lineHeight: 1.5 }}>
+          “{p.quote}”
+        </span>
+        <span style={{ color: '#666', fontSize: 12, lineHeight: 1.45 }}>{p.title}</span>
+      </div>
+    </a>
+  );
+}
+
+function WebResultsPanel({ isMobile, web, query, report }) {
+  const [view, setView] = useState('kind');
+  const [kindFilter, setKindFilter] = useState('all');
+  const [arguments_, setArguments] = useState(null);
+  const [argsLoading, setArgsLoading] = useState(false);
+  const [argsError, setArgsError] = useState(null);
+
+  const loading = web?.loading;
+  const error = web?.error;
+  const results = web?.results;
+  const provider = web?.provider;
+  const detail = web?.detail;
+  const list = results || [];
+
+  const counts = useMemo(() => {
+    const c = { all: list.length };
+    for (const k of WEB_KINDS) {
+      if (k.id === 'all') continue;
+      c[k.id] = list.filter((r) => r.kind === k.id).length;
+    }
+    return c;
+  }, [list]);
+
+  const filtered = useMemo(() => (
+    kindFilter === 'all' ? list : list.filter((r) => r.kind === kindFilter)
+  ), [list, kindFilter]);
+
+  const kindGroups = useMemo(() => {
+    const order = ['authority', 'medical', 'clinic', 'news', 'forum'];
+    return order
+      .map((id) => ({
+        id,
+        ...WEB_KIND_META[id],
+        items: filtered.filter((r) => r.kind === id),
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [filtered]);
+
+  const loadArguments = async () => {
+    if (arguments_ || argsLoading || !list.length) return;
+    setArgsLoading(true);
+    setArgsError(null);
+    try {
+      const res = await fetch('/api/web/arguments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          results: list,
+          ledger: report ? {
+            verdict: report.verdict || null,
+            note: report.headline || report.kicker || null,
+          } : {},
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not cluster arguments');
+      setArguments(data.arguments || []);
+    } catch (err) {
+      setArgsError(err.message || 'Could not cluster arguments');
+    } finally {
+      setArgsLoading(false);
+    }
+  };
+
+  const onSelectView = (next) => {
+    setView(next);
+    if (next === 'arg') loadArguments();
+  };
+
+  const filteredArgs = useMemo(() => {
+    if (!arguments_) return [];
+    return arguments_
+      .map((a) => {
+        const yes = (a.yes || []).filter((p) => kindFilter === 'all' || p.kind === kindFilter);
+        const no = (a.no || []).filter((p) => kindFilter === 'all' || p.kind === kindFilter);
+        return { ...a, yes, no };
+      })
+      .filter((a) => a.yes.length || a.no.length);
+  }, [arguments_, kindFilter]);
+
+  // New search → clear cached argument clusters
+  useEffect(() => {
+    setArguments(null);
+    setArgsError(null);
+    setView('kind');
+    setKindFilter('all');
+  }, [query, list.length, provider]);
+
   if (!web) return null;
-  const { loading, error, results, provider, detail } = web;
+
+  const n = list.length;
+  const headline = view === 'arg'
+    ? 'What the web argues, and what the trials say'
+    : "What the web says, by who's saying it";
+
   return (
     <div>
-      <p style={{ margin: '0 0 24px', color: '#777', fontSize: 14, lineHeight: 1.55, maxWidth: 720 }}>
-        {provider === 'brave' ? 'Brave Search'
-          : provider === 'serper' ? 'Google via Serper'
-          : provider === 'duckduckgo' ? 'DuckDuckGo'
-          : 'Open web'}
-        {' · '}not ledger evidence
-      </p>
-      {loading && <p style={{ color: '#888', fontSize: 14 }}>Searching the open web…</p>}
+      <div style={{
+        padding: isMobile ? '28px 0 22px' : '40px 0 28px',
+        display: 'flex',
+        alignItems: isMobile ? 'flex-start' : 'flex-end',
+        justifyContent: 'space-between',
+        gap: 24,
+        flexDirection: isMobile ? 'column' : 'row',
+        borderBottom: '1px solid rgba(255,255,255,0.1)',
+      }}>
+        <div>
+          <div style={{
+            fontSize: 12, color: '#fab219', letterSpacing: '0.08em',
+            textTransform: 'uppercase', fontWeight: 600,
+          }}>
+            Open web · not ledger evidence
+          </div>
+          <h2 style={{
+            margin: '10px 0 0', color: '#fff',
+            fontSize: isMobile ? 26 : 36, fontWeight: 800,
+            letterSpacing: '-0.03em', lineHeight: 1.1,
+          }}>
+            {headline}
+          </h2>
+        </div>
+        <span style={{ color: '#777', fontSize: 13, flexShrink: 0 }}>
+          {providerLabel(provider)} · {n} result{n === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {loading && <p style={{ color: '#888', fontSize: 15, marginTop: 28 }}>Searching the open web…</p>}
       {error && (
-        <p style={{ color: '#c66', fontSize: 13, fontFamily: fonts.mono, lineHeight: 1.5 }}>
+        <p style={{ color: '#c66', fontSize: 13, fontFamily: fonts.mono, lineHeight: 1.5, marginTop: 28 }}>
           {error}{detail ? ` — ${detail}` : ''}
         </p>
       )}
-      {!loading && !error && (results || []).length === 0 && (
-        <p style={{ color: '#666', fontSize: 14 }}>No web results.</p>
+
+      {!loading && !error && (
+        <>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap',
+            padding: '20px 0 8px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{
+                fontSize: 12, color: '#777', letterSpacing: '0.06em', textTransform: 'uppercase',
+              }}>
+                View
+              </span>
+              <div style={{
+                display: 'flex', gap: 2, padding: 3,
+                border: '1px solid rgba(255,255,255,0.12)', borderRadius: 22,
+              }}>
+                {[
+                  { id: 'kind', label: "Who's talking" },
+                  { id: 'arg', label: 'By argument' },
+                ].map((opt) => {
+                  const active = view === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => onSelectView(opt.id)}
+                      style={{
+                        background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+                        color: active ? '#fff' : '#888',
+                        fontWeight: active ? 700 : 500,
+                        border: 'none', borderRadius: 18, padding: '7px 14px',
+                        fontFamily: fonts.main, fontSize: 13, cursor: 'pointer',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <span style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.1)' }} />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {WEB_KINDS.map((k) => {
+                const active = kindFilter === k.id;
+                const count = counts[k.id] || 0;
+                return (
+                  <button
+                    key={k.id}
+                    type="button"
+                    onClick={() => setKindFilter(k.id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '8px 14px', borderRadius: 20,
+                      border: `1px solid ${active ? 'rgba(0,255,136,0.4)' : 'rgba(255,255,255,0.12)'}`,
+                      background: active ? 'rgba(0,255,136,0.12)' : 'transparent',
+                      color: active ? '#00ff88' : '#aaa',
+                      fontFamily: fonts.main, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >
+                    {k.label}
+                    <span style={{ fontFamily: fonts.mono, fontSize: 11, opacity: 0.8 }}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {view === 'kind' && (
+            kindGroups.length === 0 ? (
+              <p style={{ color: '#666', fontSize: 14, marginTop: 32 }}>No pages match this filter.</p>
+            ) : kindGroups.map((kg) => (
+              <div
+                key={kg.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: isMobile ? '1fr' : '260px minmax(0, 1fr)',
+                  gap: isMobile ? 20 : 48,
+                  padding: isMobile ? '28px 0' : '40px 0',
+                  borderBottom: '1px solid rgba(255,255,255,0.1)',
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <span style={{
+                    color: '#fff', fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em',
+                  }}>
+                    {kg.label}
+                  </span>
+                  <span style={{ color: '#888', fontSize: 14, lineHeight: 1.55 }}>{kg.note}</span>
+                </div>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
+                  gap: 12,
+                }}>
+                  {kg.items.map((r) => (
+                    <WebKindCard key={r.url || r.title} r={r} isMobile={isMobile} />
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+
+          {view === 'arg' && (
+            <>
+              {argsLoading && (
+                <p style={{ color: '#888', fontSize: 15, marginTop: 32 }}>
+                  Lining pages up by argument…
+                </p>
+              )}
+              {argsError && (
+                <p style={{
+                  color: '#c66', fontSize: 13, fontFamily: fonts.mono,
+                  lineHeight: 1.5, marginTop: 32,
+                }}>
+                  {argsError}
+                </p>
+              )}
+              {!argsLoading && !argsError && filteredArgs.length === 0 && (
+                <p style={{ color: '#666', fontSize: 14, marginTop: 32 }}>
+                  No arguments match this filter.
+                </p>
+              )}
+              {!argsLoading && filteredArgs.map((a) => {
+                const vKey = a.ledger?.verdict || 'none';
+                const v = VERDICT[vKey] || { label: 'Not covered', color: '#666666' };
+                return (
+                  <div
+                    key={a.id}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: isMobile ? '1fr' : '260px minmax(0, 1fr)',
+                      gap: isMobile ? 20 : 48,
+                      padding: isMobile ? '28px 0' : '40px 0',
+                      borderBottom: '1px solid rgba(255,255,255,0.1)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <span style={{
+                        color: '#fff', fontSize: 22, fontWeight: 800,
+                        letterSpacing: '-0.02em', lineHeight: 1.2,
+                      }}>
+                        “{a.title}”
+                      </span>
+                      <div style={{
+                        display: 'flex', flexDirection: 'column', gap: 6,
+                        padding: '12px 14px', borderRadius: 10,
+                        background: 'rgba(255,255,255,0.03)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                      }}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 8,
+                          fontSize: 12, fontWeight: 700, color: v.color,
+                        }}>
+                          <span style={{
+                            width: 8, height: 8, borderRadius: '50%', background: v.color,
+                          }} />
+                          Ledger: {v.label}
+                        </span>
+                        <span style={{ color: '#aaa', fontSize: 13, lineHeight: 1.5 }}>
+                          {a.ledger?.note}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, minmax(0, 1fr))',
+                      gap: 12,
+                    }}>
+                      {[
+                        { key: 'yes', label: 'Makes this claim', items: a.yes || [] },
+                        { key: 'no', label: 'Pushes back', items: a.no || [] },
+                      ].map((col) => (
+                        <div key={col.key} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          <span style={{
+                            fontSize: 12, color: '#ccc', letterSpacing: '0.06em',
+                            textTransform: 'uppercase', fontWeight: 600,
+                          }}>
+                            {col.label}{' '}
+                            <span style={{ fontFamily: fonts.mono, color: '#777' }}>
+                              {col.items.length}
+                            </span>
+                          </span>
+                          {col.items.length === 0 ? (
+                            <span style={{
+                              padding: 20, borderRadius: 14,
+                              border: '1px dashed rgba(255,255,255,0.1)',
+                              color: '#555', fontSize: 13,
+                            }}>
+                              No pages
+                            </span>
+                          ) : col.items.map((p) => (
+                            <WebArgCard key={`${col.key}-${p.url || p.title}`} p={p} />
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </>
       )}
-      {!loading && !error && (results || []).map((r) => (
-        <ResultLink
-          key={r.url || r.title}
-          href={r.url}
-          title={r.title}
-          meta={[r.source, r.url].filter(Boolean).join(' · ')}
-          body={r.snippet ? (
-            <p style={{ margin: '8px 0 0', color: '#999', fontSize: 14, lineHeight: 1.55 }}>{r.snippet}</p>
-          ) : null}
-          isMobile={isMobile}
-        />
-      ))}
     </div>
   );
 }
@@ -1316,9 +1793,12 @@ function SearchResultsPage({
           />
         )}
         {tab === 'web' && (
-          <div style={{ marginTop: 32 }}>
-            <WebResultsPanel isMobile={isMobile} web={web} />
-          </div>
+          <WebResultsPanel
+            isMobile={isMobile}
+            web={web}
+            query={query}
+            report={report}
+          />
         )}
         {tab === 'literature' && (
           <div style={{ marginTop: 32 }}>
