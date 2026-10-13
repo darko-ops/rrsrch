@@ -94,6 +94,7 @@ The model is any OpenAI-compatible server (vLLM or Ollama on the DGX Spark):
 ```bash
 export RRSRCH_LLM_URL=http://spark-31f4.local:8000/v1     # vLLM; Ollama is :11434/v1
 export RRSRCH_READER_MODEL=<model name the server uses>
+export RRSRCH_LLM_TIMEOUT=600                              # optional; seconds per model call, default 300
 uv run rrsrch read plan             # what will be sent: ~180 chunks, ~440k characters
 uv run rrsrch read run --limit 2    # try two sources first
 uv run rrsrch read run              # everything; reruns skip what's already read
