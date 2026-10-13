@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException
 from ..identity import access, store
 from ..identity.access import Action, Principal, Role
 from ..knowledge.models import HANDLE, AgentKind
+from ..trust import audit
 
 router = APIRouter(prefix="/v1")
 
@@ -101,6 +102,8 @@ def register_agent(body: NewAgent, p: Principal | None = Depends(principal),
                                      org_role=body.org_role)
     except store.Conflict as e:
         raise HTTPException(409, str(e)) from e
+    audit.append(c, "agent.register", f"agent:{body.handle}", actor_id=p.agent_id,
+                 detail={"organization_id": p.organization_id, "kind": body.kind.value, "org_role": body.org_role})
     return {"ok": True, "agent": _public(agent) | {"org_role": agent["org_role"]}}
 
 
@@ -114,7 +117,9 @@ def revoke_agent(handle: str, p: Principal | None = Depends(principal),
                  c: psycopg.Connection = Depends(conn)) -> dict:
     agent = _target_agent(c, handle)
     _require(access.can_manage_agents(p, agent["organization_id"]))
-    return {"ok": True, "handle": handle, "status": "revoked", "keys_revoked": store.revoke_agent(c, agent["id"])}
+    n = store.revoke_agent(c, agent["id"])
+    audit.append(c, "agent.revoke", f"agent:{handle}", actor_id=p.agent_id, detail={"keys_revoked": n})
+    return {"ok": True, "handle": handle, "status": "revoked", "keys_revoked": n}
 
 
 @router.post("/agents/{handle}/keys", status_code=201)
@@ -133,6 +138,8 @@ def issue_key(handle: str, body: NewKey, p: Principal | None = Depends(principal
         token, key_id, expires = store.issue_key(c, agent["id"], scopes, days=body.days, label=body.label)
     except ValueError as e:
         raise HTTPException(409 if isinstance(e, store.Conflict) else 400, str(e)) from e
+    audit.append(c, "key.issue", f"agent:{handle}", actor_id=p.agent_id,
+                 detail={"key_id": key_id, "scopes": sorted(scopes), "days": body.days})
     return {"ok": True, "key": token, "key_id": key_id, "scopes": sorted(scopes), "expires_at": expires,
             "note": "store this key now; it is not shown again"}
 
@@ -144,7 +151,9 @@ def revoke_key(key_id: int, p: Principal | None = Depends(principal), c: psycopg
         raise HTTPException(404)
     if not (p and p.agent_id == owner[0]):
         _require(access.can_manage_agents(p, owner[1]))
-    return {"ok": True, "key_id": key_id, "revoked": store.revoke_key(c, key_id)}
+    revoked = store.revoke_key(c, key_id)
+    audit.append(c, "key.revoke", f"key:{key_id}", actor_id=p.agent_id, detail={"revoked": revoked})
+    return {"ok": True, "key_id": key_id, "revoked": revoked}
 
 
 @router.get("/repos/{owner}/{name}/access")
@@ -167,6 +176,8 @@ def set_member(owner: str, name: str, handle: str, body: MemberRole, p: Principa
         store.set_member(c, repo.id, agent["id"], body.role, granted_by=p.agent_id)
     except store.Conflict as e:
         raise HTTPException(409, str(e)) from e
+    audit.append(c, "member.set", f"agent:{handle}", actor_id=p.agent_id, repository_id=repo.id,
+                 detail={"role": body.role.value})
     return {"ok": True, "repository": repo.slug, "handle": handle, "role": body.role.value}
 
 
@@ -176,4 +187,7 @@ def remove_member(owner: str, name: str, handle: str, p: Principal | None = Depe
     repo, role = _repo(c, p, owner, name)
     _require(access.decide(p, Action.ADMINISTER, repo, role))
     agent = _target_agent(c, handle)
-    return {"ok": True, "repository": repo.slug, "handle": handle, "removed": store.remove_member(c, repo.id, agent["id"])}
+    removed = store.remove_member(c, repo.id, agent["id"])
+    audit.append(c, "member.remove", f"agent:{handle}", actor_id=p.agent_id, repository_id=repo.id,
+                 detail={"removed": removed})
+    return {"ok": True, "repository": repo.slug, "handle": handle, "removed": removed}

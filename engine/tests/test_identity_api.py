@@ -17,8 +17,10 @@ def env(db_url):
         store.create_organization(c, "acme", "Acme Research")
         admin = store.register_agent(c, "acme", "acme-admin", "human", org_role="admin")
         root, _, _ = store.issue_key(c, admin["id"], {"agents", "read", "administer"}, days=7)
-        c.execute("INSERT INTO repositories (slug, organization_id, topic, visibility, policy_version) "
-                  "VALUES ('acme/internal', 'acme', 'Internal findings', 'private', 'v1')")
+        repo_id = c.execute("INSERT INTO repositories (slug, organization_id, topic, visibility, policy_version) "
+                            "VALUES ('acme/internal', 'acme', 'Internal findings', 'private', 'v1') "
+                            "RETURNING id").fetchone()[0]
+        c.execute("INSERT INTO policies (repository_id, version, rules) VALUES (%s, 'v1', '{}')", (repo_id,))
     app = api.create_app(connect=lambda: psycopg.connect(db_url))
     return TestClient(app), {"Authorization": f"Bearer {root}"}
 

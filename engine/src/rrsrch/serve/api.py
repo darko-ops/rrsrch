@@ -1,5 +1,5 @@
 """The engine's HTTP API, on FastAPI: POST /v1/answer, GET /v1/health, and the
-identity endpoints in identity_routes.
+identity (identity_routes) and review/merge (trust_routes) endpoints.
 
 Binds to localhost by default; put a tunnel or reverse proxy in front when the
 site needs it. Errors keep the shape the site's proxy reads, {"ok": false,
@@ -26,7 +26,7 @@ from starlette.exceptions import HTTPException
 from ..ledger import db
 from ..reader.llm import LLM
 from . import answer as answer_mod
-from . import identity_routes
+from . import identity_routes, trust_routes
 
 MAX_QUESTION = 800
 
@@ -47,6 +47,7 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
                        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                        allow_headers=["Content-Type", "Authorization"])
     app.include_router(identity_routes.router)
+    app.include_router(trust_routes.router)
 
     @app.exception_handler(HTTPException)
     def http_error(_req: Request, exc: HTTPException) -> JSONResponse:
