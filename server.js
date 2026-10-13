@@ -292,6 +292,143 @@ app.get('/api/web/search', async (req, res) => {
   }
 });
 
+/** Suggested deeper / adjacent searches (Claude-style routes of thought). */
+function buildFollowUps(query, history = [], profile = {}) {
+  const q = String(query || '').trim();
+  const lower = q.toLowerCase();
+  const prior = (history || []).map((h) => String(h || '').toLowerCase()).filter(Boolean);
+  const interest = String(profile.interest || profile.focus || '').toLowerCase();
+  const seen = new Set([lower, ...prior]);
+  const out = [];
+
+  const push = (item) => {
+    const text = String(item.q || '').trim();
+    if (!text || seen.has(text.toLowerCase())) return;
+    seen.add(text.toLowerCase());
+    out.push({
+      id: item.id || `fu-${out.length + 1}`,
+      q: text,
+      why: item.why || 'Deeper angle',
+      kind: item.kind || 'deeper',
+    });
+  };
+
+  const isMsc = /msc|mesenchymal|stem cell/i.test(q);
+  const isKnee = /knee|osteoarthritis|oa\b|womac|ikdc/i.test(q);
+  const mentionsPain = /pain|vas/i.test(q);
+  const mentionsFunction = /function|womac|ikdc|koos/i.test(q);
+  const mentionsTime = /6 month|12 month|24 month|long[- ]?term|durab/i.test(q);
+  const mentionsCompare = /vs\.?|versus|compar|better than|hyaluronic|placebo|prp/i.test(q);
+
+  if (isMsc && isKnee) {
+    if (!mentionsPain) {
+      push({
+        id: 'pain-effect',
+        kind: 'benefit',
+        why: 'Highest-signal clinical outcome',
+        q: 'Is knee pain lower with MSCs than with control at 6 and 12 months?',
+      });
+    }
+    if (!mentionsFunction) {
+      push({
+        id: 'function-gap',
+        kind: 'conflict',
+        why: 'Where trials often disagree',
+        q: 'Do MSCs improve knee function, or only pain?',
+      });
+    }
+    if (!mentionsCompare) {
+      push({
+        id: 'vs-ha',
+        kind: 'compare',
+        why: 'Common clinical alternative',
+        q: 'Are MSCs better than hyaluronic acid for knee osteoarthritis?',
+      });
+      push({
+        id: 'vs-placebo',
+        kind: 'compare',
+        why: 'Hardest control to beat',
+        q: 'How do MSCs compare with placebo injection for knee OA?',
+      });
+    }
+    if (!mentionsTime) {
+      push({
+        id: 'durability',
+        kind: 'gap',
+        why: 'What usually isn\'t answered',
+        q: 'Does any MSC benefit for knee OA last to 24 months?',
+      });
+    }
+    push({
+      id: 'dose-source',
+      kind: 'mechanism',
+      why: 'Protocol detail that changes results',
+      q: 'Does MSC dose or cell source (bone marrow vs adipose) change outcomes in knee OA?',
+    });
+    push({
+      id: 'safety',
+      kind: 'safety',
+      why: 'Decision-critical',
+      q: 'What adverse events are reported after MSC injection for knee osteoarthritis?',
+    });
+  }
+
+  // Generic intrigue routes from the query itself
+  push({
+    id: 'contradict',
+    kind: 'conflict',
+    why: 'Find the disagreement',
+    q: `Where do studies disagree about: ${q}?`,
+  });
+  push({
+    id: 'strongest',
+    kind: 'evidence',
+    why: 'Quality filter',
+    q: `What is the strongest randomized evidence on: ${q}?`,
+  });
+  push({
+    id: 'limits',
+    kind: 'gap',
+    why: 'Know what is missing',
+    q: `What remains unproven about: ${q}?`,
+  });
+
+  if (interest.includes('clinic') || interest.includes('patient')) {
+    push({
+      id: 'practice',
+      kind: 'practice',
+      why: 'Matches your focus',
+      q: `What would a cautious clinician tell a patient about: ${q}?`,
+    });
+  }
+  if (interest.includes('invest') || interest.includes('market')) {
+    push({
+      id: 'market',
+      kind: 'market',
+      why: 'Matches your focus',
+      q: `What commercial or trial pipeline signals matter for: ${q}?`,
+    });
+  }
+
+  // Prefer questions not already asked; cap at 6
+  return out.slice(0, 6);
+}
+
+app.post('/api/search/followups', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const q = String(body.query || body.q || '').trim();
+    if (!q) return res.status(400).json({ error: 'query required' });
+    const history = Array.isArray(body.history) ? body.history.slice(0, 20) : [];
+    const profile = body.profile && typeof body.profile === 'object' ? body.profile : {};
+    const suggestions = buildFollowUps(q, history, profile);
+    return res.json({ query: q, suggestions });
+  } catch (err) {
+    console.error('followups failed', err);
+    return res.status(500).json({ error: 'followups failed' });
+  }
+});
+
 // Literature search for the landing page (Europe PMC — same source as the evidence engine).
 app.get('/api/literature/search', async (req, res) => {
   const q = String(req.query.q || '').trim();
