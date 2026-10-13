@@ -372,12 +372,6 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, onPickPr
       }}>
         : REGENERATIVE RESEARCH
       </p>
-      <p style={{
-        color: '#999', margin: '28px 0 0', fontSize: isMobile ? 16 : 19,
-        lineHeight: 1.6, textAlign: 'center', maxWidth: 620,
-      }}>
-        Know what the literature shows — and where it conflicts. Every sentence traced to its source.
-      </p>
 
       <div style={{ width: '100%', marginTop: 48 }}>
         <SearchBox
@@ -396,9 +390,8 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, onPickPr
         textAlign: 'left',
       }}>
         <span style={{ fontSize: 15, color: '#ccc', fontWeight: 600 }}>
-          Or start with a question we&rsquo;ve already answered
+          Or check this out:
         </span>
-        <span style={{ fontSize: 14, color: '#666' }}>— tap to see the full evidence</span>
       </div>
 
       <div style={{
@@ -891,6 +884,33 @@ function LiteratureResultsPanel({ isMobile, literature }) {
   );
 }
 
+/** Answer-style header line — substance, not a mode label. */
+function deriveAnswerSubheading({ report, web, literature }) {
+  if (report?.headline) return report.headline;
+  const firstSentence = report?.sentences?.[0]?.text;
+  if (firstSentence) return firstSentence;
+
+  if (web?.loading || literature?.loading) return null;
+
+  const lit = (literature?.results || []).filter((p) => p.kind !== 'trial');
+  const trials = (literature?.results || []).filter((p) => p.kind === 'trial');
+  const webHits = web?.results || [];
+
+  // Prefer a short synthesis from what we actually found
+  if (lit[0]?.title && webHits[0]?.title) {
+    const nLit = literature?.hitCount || lit.length;
+    return `${lit[0].title.replace(/\.$/, '')} — with ${Number(nLit).toLocaleString()} papers and open-web coverage in view.`;
+  }
+  if (lit[0]?.title) return lit[0].title;
+  if (trials[0]?.title) return trials[0].title;
+  if (webHits[0]?.snippet) {
+    const s = webHits[0].snippet.replace(/\s+/g, ' ').trim();
+    return s.length > 180 ? `${s.slice(0, 180)}…` : s;
+  }
+  if (webHits[0]?.title) return webHits[0].title;
+  return null;
+}
+
 function SearchResultsPage({
   isMobile, scrollParentRef, query, report, engineLive, web, literature,
   followups, onAskNext, searching, tab, onTab,
@@ -899,10 +919,7 @@ function SearchResultsPage({
   const litCount = literature?.results?.length || 0;
 
   const topic = query;
-  const subheading = report?.headline
-    || (web?.loading || literature?.loading
-      ? 'Gathering web and literature…'
-      : 'Holistic answer across evidence layers');
+  const subheading = deriveAnswerSubheading({ report, web, literature });
   const additional = [
     report?.kicker,
     engineLive ? 'Evidence engine live' : null,
@@ -934,12 +951,14 @@ function SearchResultsPage({
         }}>
           {topic}
         </h2>
-        <p style={{
-          margin: '14px 0 0', color: '#ccc',
-          fontSize: isMobile ? 17 : 20, fontWeight: 500, lineHeight: 1.4,
-        }}>
-          {subheading}
-        </p>
+        {subheading && (
+          <p style={{
+            margin: '14px 0 0', color: '#ccc',
+            fontSize: isMobile ? 17 : 20, fontWeight: 500, lineHeight: 1.4,
+          }}>
+            {subheading}
+          </p>
+        )}
         {additional && (
           <p style={{ margin: '12px 0 0', color: '#777', fontSize: 14, lineHeight: 1.5 }}>
             {additional}
