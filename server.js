@@ -126,6 +126,10 @@ const EUROPE_PMC_SEARCH = 'https://www.ebi.ac.uk/europepmc/webservices/rest/sear
 // Local evidence engine (rrsrch serve). Unset = site falls back to demo/PMC.
 const ENGINE_URL = (process.env.RRSRCH_ENGINE_URL || '').replace(/\/$/, '');
 
+// Short-lived answer cache (writer is slow; Cloudflare/Vercel otherwise 524).
+const engineAnswerCache = new Map();
+const ENGINE_ANSWER_TTL_MS = 30 * 60 * 1000;
+
 // Evidence-engine answer (proxies to rrsrch serve when RRSRCH_ENGINE_URL is set).
 app.post('/api/engine/answer', async (req, res) => {
   if (!ENGINE_URL) {
@@ -138,6 +142,11 @@ app.post('/api/engine/answer', async (req, res) => {
   const question = String(req.body?.question || '').trim();
   if (!question) return res.status(400).json({ ok: false, error: 'question required' });
   if (question.length > 800) return res.status(400).json({ ok: false, error: 'question too long' });
+  const cacheKey = question.toLowerCase();
+  const cached = engineAnswerCache.get(cacheKey);
+  if (cached && (Date.now() - cached.at) < ENGINE_ANSWER_TTL_MS) {
+    return res.json({ ...cached.data, cached: true });
+  }
   try {
     const upstream = await fetch(`${ENGINE_URL}/v1/answer`, {
       method: 'POST',
@@ -151,6 +160,7 @@ app.post('/api/engine/answer', async (req, res) => {
         data.error ? data : { ok: false, error: 'engine error' },
       );
     }
+    engineAnswerCache.set(cacheKey, { at: Date.now(), data });
     return res.json(data);
   } catch (err) {
     console.error('engine answer failed', err);

@@ -77,8 +77,13 @@ class Handler(BaseHTTPRequestHandler):
                 db.migrate(conn)
                 body = answer_mod.answer(conn, llm, question)
             self._json(200, body)
+        except BrokenPipeError:
+            return
         except Exception as e:  # noqa: BLE001
-            self._json(500, {"ok": False, "error": str(e)[:400]})
+            try:
+                self._json(500, {"ok": False, "error": str(e)[:400]})
+            except BrokenPipeError:
+                return
 
 
 def run(host: str = "127.0.0.1", port: int = 8787) -> None:
