@@ -1230,7 +1230,8 @@ Waiting for approval... ✓`}</CodeBlock>
 
 // Hero taglines: the product page (home) and the account page
 const TAGLINES = {
-  home: ['WHAT THE LITERATURE ACTUALLY SHOWS.', 'EVERY SENTENCE TRACED TO ITS SOURCE.'],
+  home: ['know what the literature shows — and where it conflicts.',
+         'every sentence traced to its source.'],
   account: ['YOUR ACCOUNT & CONNECTIONS.', 'SIGN IN AND POINT YOUR AGENTS.'],
 };
 
@@ -1488,24 +1489,7 @@ function App() {
           padding: isMobile ? '88px 20px 48px' : '96px 40px 64px',
           textAlign: 'center'
         }}>
-           <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '20px',
-            padding: '5px 10px',
-            background: 'rgba(255,255,255,0.05)',
-            borderRadius: '100px',
-            backdropFilter: 'blur(5px)'
-          }}>
-            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff00', boxShadow: '0 0 8px #00ff00' }}></div>
-            <span style={{ color: '#888', fontSize: '11px', fontFamily: theme.fonts.mono }}>SYSTEM ONLINE</span>
-          </div>
-
           <div style={{ display: 'inline-block' }}>
-            <p style={{ color: 'white', margin: '0 0 4px 0', fontSize: '13px', lineHeight: '1.5', fontWeight: 'bold', fontFamily: theme.fonts.main, textAlign: 'right' }}>
-            : REGENERATIVE RESEARCH
-            </p>
             <h1 style={{
               fontSize: 'clamp(40px, 6vw, 80px)',
               fontWeight: 800,
@@ -1517,6 +1501,9 @@ function App() {
             }}>
               RRSRCH
             </h1>
+            <p style={{ color: 'white', margin: '8px 0 0 0', fontSize: '13px', lineHeight: '1.5', fontWeight: 'bold', fontFamily: theme.fonts.main, letterSpacing: '0.12em' }}>
+            : REGENERATIVE RESEARCH
+            </p>
           </div>
 
           <HeroSearch
@@ -1530,10 +1517,26 @@ function App() {
             }}
           />
 
-          <p style={{ color: '#666', marginTop: '22px', fontSize: '18px', maxWidth: '520px', lineHeight: '1.5', fontWeight: 'bold', fontFamily: theme.fonts.main }}>
+          <p style={{ color: '#888', marginTop: '22px', fontSize: isMobile ? '15px' : '17px', maxWidth: '480px', lineHeight: '1.55', fontWeight: 500, fontFamily: theme.fonts.main, letterSpacing: '-0.01em' }}>
           {TAGLINES[route === 'account' ? 'account' : 'home'][0]} <br />
           {TAGLINES[route === 'account' ? 'account' : 'home'][1]}
           </p>
+
+          <div style={{
+            position: 'absolute',
+            right: isMobile ? '16px' : '40px',
+            bottom: isMobile ? '20px' : '32px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '5px 10px',
+            background: 'rgba(255,255,255,0.05)',
+            borderRadius: '100px',
+            backdropFilter: 'blur(5px)'
+          }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff00', boxShadow: '0 0 8px #00ff00' }}></div>
+            <span style={{ color: '#888', fontSize: '11px', fontFamily: theme.fonts.mono }}>SYSTEM ONLINE</span>
+          </div>
         </div>
         )}
 
