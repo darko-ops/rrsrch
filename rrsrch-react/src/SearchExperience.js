@@ -421,9 +421,10 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, onPickPr
   );
 }
 
-function DemoResults({ isMobile, scrollParentRef, onAskNext, searching }) {
+function ReportResults({ isMobile, scrollParentRef, onAskNext, searching, report, engineLive }) {
   const [expanded, setExpanded] = useState({});
   const sectionRefs = useRef({});
+  const groups = report.groups || [];
 
   const scrollTo = (key) => {
     const el = scrollParentRef?.current;
@@ -440,76 +441,92 @@ function DemoResults({ isMobile, scrollParentRef, onAskNext, searching }) {
       flexDirection: 'column',
       fontFamily: fonts.main,
     }}>
-      <div style={{ fontSize: 14, color: '#888' }}>{DEMO_REPORT.kicker}</div>
+      <div style={{ fontSize: 14, color: '#888', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span>{report.kicker}</span>
+        {engineLive && (
+          <span style={{
+            fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase',
+            color: '#00ff88', border: '1px solid rgba(0,255,136,0.35)',
+            borderRadius: 100, padding: '3px 10px', fontFamily: fonts.mono,
+          }}>
+            evidence engine
+          </span>
+        )}
+      </div>
       <h2 style={{
         margin: '12px 0 0', color: '#fff',
         fontSize: isMobile ? 28 : 44, fontWeight: 700,
         lineHeight: 1.15, letterSpacing: '-0.025em', maxWidth: 900,
       }}>
-        {DEMO_REPORT.headline}
+        {report.headline}
       </h2>
+      {report.detail && (
+        <p style={{ margin: '12px 0 0', color: '#888', fontSize: 15, maxWidth: 720 }}>{report.detail}</p>
+      )}
 
       <div style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 880 }}>
-        {DEMO_REPORT.sentences.map((s, i) => (
+        {(report.sentences || []).map((s, i) => (
           <p key={i} style={{ margin: 0, color: '#d8d8d8', fontSize: isMobile ? 17 : 20, lineHeight: 1.7 }}>
             {s.text}
-            {s.cites.map((id) => (
+            {(s.cites || []).map((id) => (
               <sup key={id} style={{ color: '#00ff88', fontSize: 12, marginLeft: 2 }}>{id}</sup>
             ))}
           </p>
         ))}
       </div>
-      {DEMO_REPORT.refused > 0 && (
+      {(report.refused || 0) > 0 && (
         <p style={{ margin: '20px 0 0', fontSize: 14, color: '#777' }}>
-          {DEMO_REPORT.refused} more sentences were drafted but left out because the sources didn&rsquo;t support them.
+          {report.refused} more sentence{report.refused === 1 ? '' : 's'} were drafted but left out because the sources didn&rsquo;t support them.
         </p>
       )}
 
-      <div style={{
-        marginTop: 56,
-        display: 'grid',
-        gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))',
-        borderTop: '1px solid rgba(255,255,255,0.14)',
-        borderBottom: '1px solid rgba(255,255,255,0.14)',
-      }}>
-        {DEMO_REPORT.groups.map((g, i) => (
-          <button
-            key={g.key}
-            type="button"
-            onClick={() => scrollTo(g.key)}
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              gap: 16,
-              padding: isMobile ? '22px 0' : '28px 28px 28px 0',
-              paddingLeft: !isMobile && i === 0 ? 0 : undefined,
-              borderRight: !isMobile && i < DEMO_REPORT.groups.length - 1
-                ? '1px solid rgba(255,255,255,0.14)' : 'none',
-              borderBottom: isMobile && i < DEMO_REPORT.groups.length - 1
-                ? '1px solid rgba(255,255,255,0.08)' : 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              textAlign: 'left',
-              fontFamily: fonts.main,
-            }}
-          >
-            <span style={{
-              color: '#fff', fontSize: isMobile ? 40 : 56, fontWeight: 800,
-              letterSpacing: '-0.04em', lineHeight: 1,
-            }}>
-              {g.big}
-            </span>
-            <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <VerdictDot color={g.color} label={g.label} size={15} />
-              <span style={{ color: '#888', fontSize: 14 }}>{g.studiesPlain}</span>
-            </span>
-          </button>
-        ))}
-      </div>
+      {groups.length > 0 && (
+        <div style={{
+          marginTop: 56,
+          display: 'grid',
+          gridTemplateColumns: isMobile ? '1fr' : `repeat(${Math.min(groups.length, 3)}, minmax(0, 1fr))`,
+          borderTop: '1px solid rgba(255,255,255,0.14)',
+          borderBottom: '1px solid rgba(255,255,255,0.14)',
+        }}>
+          {groups.map((g, i) => (
+            <button
+              key={g.key}
+              type="button"
+              onClick={() => scrollTo(g.key)}
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 16,
+                padding: isMobile ? '22px 0' : '28px 28px 28px 0',
+                paddingLeft: !isMobile && i === 0 ? 0 : undefined,
+                borderRight: !isMobile && i < groups.length - 1
+                  ? '1px solid rgba(255,255,255,0.14)' : 'none',
+                borderBottom: isMobile && i < groups.length - 1
+                  ? '1px solid rgba(255,255,255,0.08)' : 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontFamily: fonts.main,
+              }}
+            >
+              <span style={{
+                color: '#fff', fontSize: isMobile ? 40 : 56, fontWeight: 800,
+                letterSpacing: '-0.04em', lineHeight: 1,
+              }}>
+                {g.big}
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <VerdictDot color={g.color} label={g.label} size={15} />
+                <span style={{ color: '#888', fontSize: 14 }}>{g.studiesPlain}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
-      {DEMO_REPORT.groups.map((g, i) => {
+      {groups.map((g, i) => {
         const showAll = expanded[g.key];
-        const rows = showAll ? g.rows : g.rows;
+        const rows = showAll && g.extra ? [...(g.rows || []), ...g.extra] : (g.rows || []);
         return (
           <div
             key={g.key}
@@ -525,7 +542,7 @@ function DemoResults({ isMobile, scrollParentRef, onAskNext, searching }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <VerdictDot
                 color={g.color}
-                label={`${String(i + 1).padStart(2, '0')} · ${g.label}`}
+                label={`${g.numPad || String(i + 1).padStart(2, '0')} · ${g.label}`}
               />
               <h3 style={{
                 margin: 0, color: '#fff', fontSize: isMobile ? 28 : 36,
@@ -566,7 +583,7 @@ function DemoResults({ isMobile, scrollParentRef, onAskNext, searching }) {
                   <span style={{ color: '#777', fontSize: 14, lineHeight: 1.5 }}>{r.src}</span>
                 </div>
               ))}
-              {g.hidden > 0 && !showAll && (
+              {(g.hidden > 0 || (g.extra && g.extra.length)) && !showAll && g.morePlain && (
                 <button
                   type="button"
                   onClick={() => setExpanded((s) => ({ ...s, [g.key]: true }))}
@@ -605,9 +622,11 @@ function DemoResults({ isMobile, scrollParentRef, onAskNext, searching }) {
         </div>
       </div>
 
-      <p style={{ margin: '40px 0 0', color: '#888', fontSize: 15, lineHeight: 1.6, maxWidth: 800 }}>
-        <span style={{ color: '#ccc' }}>Not covered by this corpus:</span> {DEMO_REPORT.gaps}
-      </p>
+      {report.gaps && (
+        <p style={{ margin: '40px 0 0', color: '#888', fontSize: 15, lineHeight: 1.6, maxWidth: 800 }}>
+          <span style={{ color: '#ccc' }}>Not covered by this corpus:</span> {report.gaps}
+        </p>
+      )}
       <p style={{ margin: '56px 0 0', fontSize: 13, color: '#666' }}>
         Research tool only — not medical advice.
       </p>
@@ -795,23 +814,29 @@ function TopBar({
  */
 export default function SearchExperience({ isMobile, scrollContainerRef }) {
   const [query, setQuery] = useState('');
-  const [mode, setMode] = useState('landing'); // landing | demo | literature
+  // landing | report | literature
+  const [mode, setMode] = useState('landing');
   const [searching, setSearching] = useState(false);
   const [literature, setLiterature] = useState(null);
+  const [report, setReport] = useState(null);
+  const [engineLive, setEngineLive] = useState(false);
   const resultsTopRef = useRef(null);
 
   const goHome = () => {
     setMode('landing');
     setLiterature(null);
+    setReport(null);
     setQuery('');
     setSearching(false);
     const el = scrollContainerRef?.current;
     if (el) el.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const showDemo = (item) => {
+  const showDemoReport = (item) => {
     setQuery(item.q);
-    setMode('demo');
+    setReport({ ...DEMO_REPORT, gaps: DEMO_REPORT.gaps });
+    setEngineLive(false);
+    setMode('report');
     setLiterature(null);
     setSearching(false);
     requestAnimationFrame(() => {
@@ -820,25 +845,60 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
     });
   };
 
-  const runLiteratureSearch = async (text) => {
-    const q = text.trim();
-    if (!q) return;
-    // Known preview questions → demo report (4a), matching the handoff.
-    const known = PREVIEW_QUESTIONS.find((p) => p.q === q)
-      || ASK_NEXT.find((p) => p.q === q);
-    if (known) {
-      showDemo(known);
-      return;
+  const askEngine = async (q) => {
+    const res = await fetch('/api/engine/answer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 503 && (data.error === 'engine offline' || data.detail)) {
+      return null; // not configured — caller falls back
     }
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.error || 'Engine error');
+    }
+    return data;
+  };
+
+  const runSearch = async (text, { preferDemo } = {}) => {
+    const q = (typeof text === 'string' ? text : text?.q || '').trim();
+    if (!q) return;
+    const previewItem = typeof text === 'object' && text?.q ? text : (
+      PREVIEW_QUESTIONS.find((p) => p.q === q) || ASK_NEXT.find((p) => p.q === q)
+    );
 
     setQuery(q);
     setSearching(true);
-    setMode('literature');
-    setLiterature({ query: q, loading: true, error: null, hitCount: 0, results: [] });
     requestAnimationFrame(() => {
       const el = scrollContainerRef?.current;
       if (el) el.scrollTo({ top: 0, behavior: 'smooth' });
     });
+
+    try {
+      const live = await askEngine(q);
+      if (live) {
+        setReport(live);
+        setEngineLive(true);
+        setMode('report');
+        setLiterature(null);
+        setSearching(false);
+        return;
+      }
+    } catch (err) {
+      // Engine configured but failed — fall through to demo/PMC
+      console.warn('engine answer failed', err);
+    }
+
+    if (preferDemo || previewItem) {
+      showDemoReport(previewItem || { q });
+      setSearching(false);
+      return;
+    }
+
+    setMode('literature');
+    setReport(null);
+    setLiterature({ query: q, loading: true, error: null, hitCount: 0, results: [] });
     try {
       const res = await fetch(`/api/literature/search?${new URLSearchParams({ q, limit: '12' })}`);
       const data = await res.json();
@@ -861,7 +921,9 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
     }
   };
 
-  const inResults = mode === 'demo' || mode === 'literature';
+  const onPickPreview = (item) => runSearch(item, { preferDemo: true });
+
+  const inResults = mode === 'report' || mode === 'literature';
 
   return (
     <>
@@ -870,7 +932,7 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
         showSearch={inResults}
         query={query}
         onQueryChange={setQuery}
-        onSearch={runLiteratureSearch}
+        onSearch={runSearch}
         searching={searching || literature?.loading}
         onHome={goHome}
       />
@@ -880,27 +942,29 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
           isMobile={isMobile}
           query={query}
           onQueryChange={setQuery}
-          onSearch={runLiteratureSearch}
+          onSearch={runSearch}
           searching={searching}
-          onPickPreview={showDemo}
+          onPickPreview={onPickPreview}
         />
       )}
 
       {inResults && (
         <div ref={resultsTopRef} style={{ background: 'rgba(0,0,0,0.55)', minHeight: '100vh' }}>
-          {mode === 'demo' && (
-            <DemoResults
+          {mode === 'report' && report && (
+            <ReportResults
               isMobile={isMobile}
               scrollParentRef={scrollContainerRef}
-              onAskNext={showDemo}
+              onAskNext={onPickPreview}
               searching={searching}
+              report={report}
+              engineLive={engineLive}
             />
           )}
           {mode === 'literature' && literature && (
             <LiteratureResultsPage
               isMobile={isMobile}
               state={literature}
-              onAskNext={showDemo}
+              onAskNext={onPickPreview}
               searching={searching || literature.loading}
             />
           )}

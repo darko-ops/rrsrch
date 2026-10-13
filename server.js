@@ -123,6 +123,51 @@ async function initPostsFile() {
 }
 
 const EUROPE_PMC_SEARCH = 'https://www.ebi.ac.uk/europepmc/webservices/rest/search';
+// Local evidence engine (rrsrch serve). Unset = site falls back to demo/PMC.
+const ENGINE_URL = (process.env.RRSRCH_ENGINE_URL || '').replace(/\/$/, '');
+
+// Evidence-engine answer (proxies to rrsrch serve when RRSRCH_ENGINE_URL is set).
+app.post('/api/engine/answer', async (req, res) => {
+  if (!ENGINE_URL) {
+    return res.status(503).json({
+      ok: false,
+      error: 'engine offline',
+      detail: 'Set RRSRCH_ENGINE_URL to a running `rrsrch serve` instance.',
+    });
+  }
+  const question = String(req.body?.question || '').trim();
+  if (!question) return res.status(400).json({ ok: false, error: 'question required' });
+  if (question.length > 800) return res.status(400).json({ ok: false, error: 'question too long' });
+  try {
+    const upstream = await fetch(`${ENGINE_URL}/v1/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+      signal: AbortSignal.timeout(300000),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) {
+      return res.status(upstream.status >= 400 ? upstream.status : 502).json(
+        data.error ? data : { ok: false, error: 'engine error' },
+      );
+    }
+    return res.json(data);
+  } catch (err) {
+    console.error('engine answer failed', err);
+    return res.status(502).json({ ok: false, error: 'could not reach evidence engine' });
+  }
+});
+
+app.get('/api/engine/health', async (_req, res) => {
+  if (!ENGINE_URL) return res.json({ ok: false, configured: false });
+  try {
+    const upstream = await fetch(`${ENGINE_URL}/v1/health`, { signal: AbortSignal.timeout(5000) });
+    const data = await upstream.json().catch(() => ({}));
+    return res.status(upstream.ok ? 200 : 503).json({ configured: true, ...data });
+  } catch {
+    return res.status(503).json({ ok: false, configured: true, error: 'unreachable' });
+  }
+});
 
 // Literature search for the landing page (Europe PMC — same source as the evidence engine).
 app.get('/api/literature/search', async (req, res) => {
