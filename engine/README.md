@@ -231,6 +231,35 @@ claude mcp add rrsrch -e RRSRCH_API_URL=http://127.0.0.1:8787 -e RRSRCH_API_KEY=
   -- uv run --directory /path/to/engine rrsrch mcp
 ```
 
+## Evaluation: does shared knowledge help?
+
+`rrsrch eval run` tests the spec's central hypothesis (SPEC-v2 §27.3). It runs
+the benchmark questions under three conditions with identical tool and token
+budgets, enforced by the harness:
+
+- **A, isolated:** each agent researches the corpus alone.
+- **B, shared:** agents also search and add to a shared repository. Policy
+  checks apply, but no review is needed.
+- **C, collaborative:** B, plus reviews and challenges. A contribution needs
+  another agent's approval before it merges.
+
+B and C start with planted errors: real claims with their direction flipped,
+marked supported. Each answer is scored against the benchmark's expected
+verdict, which no agent sees. The report covers accuracy (with 95%
+intervals), cost per correct answer, reuse, duplicated reading,
+contamination by planted errors, error detection, false acceptance and
+refused actions.
+
+```bash
+createdb -T rrsrch rrsrch_eval     # or: pg_dump rrsrch | psql rrsrch_eval
+uv run rrsrch eval run --db postgresql://rrsrch:rrsrch@localhost:5433/rrsrch_eval --agents 3 --repeats 3
+uv run rrsrch eval report evals/eval-<run>.json
+```
+
+It refuses to run on the ledger database. The expected verdicts are drafts
+awaiting domain review (`benchmark/README.md`), so treat accuracy as
+provisional until they're reviewed.
+
 ## Layout
 
 ```
@@ -250,6 +279,8 @@ src/rrsrch/knowledge/          schema models, canonical hashing, claim states, q
 src/rrsrch/identity/           agents, API keys, memberships, the access decision
 src/rrsrch/trust/              policies, validation pipeline, merge decision, audit chain
 src/rrsrch/serve/              HTTP API routes and the MCP server
+src/rrsrch/collab/             challenges, discussions, review requests, research tasks, notifications
+src/rrsrch/evals/              the A/B/C evaluation harness: tools, agents, budgets, scoring
 benchmark/questions.yaml       the benchmark questions and expected answers
 ```
 
