@@ -154,7 +154,7 @@ app.get('/api/literature/search', async (req, res) => {
       if (r.pmid) url = `https://europepmc.org/article/MED/${r.pmid}`;
       else if (pmcid) url = `https://europepmc.org/article/PMC/${pmcid}`;
       else if (r.doi) url = `https://doi.org/${r.doi}`;
-      const abstract = (r.abstractText || '').replace(/\s+/g, ' ').trim();
+      const abstract = String(r.abstractText || '').trim();
       return {
         pmid: r.pmid || null,
         pmcid: pmcid ? `PMC${pmcid}` : null,
@@ -163,7 +163,7 @@ app.get('/api/literature/search', async (req, res) => {
         authors: r.authorString || null,
         journal: r.journalTitle || null,
         year: r.pubYear || null,
-        abstract: abstract.length > 420 ? `${abstract.slice(0, 417)}…` : abstract,
+        abstract: abstract.length > 2400 ? `${abstract.slice(0, 2400)}…` : abstract,
         openAccess: r.isOpenAccess === 'Y',
         url,
       };

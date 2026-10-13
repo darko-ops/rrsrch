@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
@@ -1238,9 +1238,117 @@ const TAGLINES = {
 const HERO_PLACEHOLDER =
   'Does MSC therapy improve cartilage repair in knee osteoarthritis?';
 
+const SUGGESTED_QUESTIONS = [
+  'MSC-hydrogel composite knee cartilage defects safety and efficacy',
+  'mesenchymal stem cell knee osteoarthritis pain at 12 months',
+  'adipose derived MSC versus hyaluronic acid knee osteoarthritis',
+  'intra-articular mesenchymal stromal cell adverse events knee',
+  'bone marrow MSC knee osteoarthritis randomized controlled trial',
+];
+
+const ALLOWED_ABSTRACT_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'SUB', 'SUP', 'BR', 'P']);
+
+function sanitizeEuropePmcHtml(html) {
+  if (!html) return '';
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const walk = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+      if (node.nodeType !== Node.ELEMENT_NODE) return '';
+      const tag = node.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE') return '';
+      const inner = Array.from(node.childNodes).map(walk).join('');
+      if (!ALLOWED_ABSTRACT_TAGS.has(tag)) return inner;
+      if (tag === 'BR') return '<br />';
+      return `<${tag.toLowerCase()}>${inner}</${tag.toLowerCase()}>`;
+    };
+    return Array.from(doc.body.childNodes).map(walk).join('').trim();
+  } catch {
+    return html.replace(/<[^>]+>/g, '');
+  }
+}
+
+function AbstractSnippet({ html }) {
+  const safe = useMemo(() => sanitizeEuropePmcHtml(html), [html]);
+  if (!safe) return null;
+  return (
+    <div
+      className="literature-abstract"
+      style={{ margin: '8px 0 0', color: '#999', fontSize: '13px', lineHeight: 1.55 }}
+      dangerouslySetInnerHTML={{ __html: safe }}
+    />
+  );
+}
+
+function SuggestedQuestions({ isMobile, onPick, searching, compact }) {
+  return (
+    <div style={{
+      width: '100%',
+      maxWidth: isMobile ? '100%' : '640px',
+      marginTop: compact ? 0 : '18px',
+      marginBottom: compact ? '16px' : 0,
+    }}>
+      {!compact && (
+        <p style={{
+          margin: '0 0 10px',
+          fontSize: '11px',
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
+          color: '#666',
+          fontFamily: theme.fonts.mono,
+        }}>
+          Suggested questions
+        </p>
+      )}
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '8px',
+        justifyContent: 'center',
+      }}>
+        {SUGGESTED_QUESTIONS.map((q) => (
+          <button
+            key={q}
+            type="button"
+            disabled={searching}
+            onClick={() => onPick(q)}
+            style={{
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: '999px',
+              color: '#aaa',
+              padding: isMobile ? '8px 12px' : '9px 14px',
+              fontSize: isMobile ? '11px' : '12px',
+              lineHeight: 1.35,
+              cursor: searching ? 'wait' : 'pointer',
+              fontFamily: theme.fonts.main,
+              textAlign: 'left',
+              maxWidth: '100%',
+              transition: 'border-color 0.15s, color 0.15s, background 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              if (searching) return;
+              e.currentTarget.style.borderColor = 'rgba(0,255,136,0.35)';
+              e.currentTarget.style.color = '#ddd';
+              e.currentTarget.style.background = 'rgba(0,255,136,0.06)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
+              e.currentTarget.style.color = '#aaa';
+              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+            }}
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Google-style question bar for the landing hero. Submit runs literature search. */
-function HeroSearch({ isMobile, onSearch, searching }) {
-  const [q, setQ] = useState('');
+function HeroSearch({ isMobile, onSearch, searching, query, onQueryChange }) {
+  const q = query ?? '';
   const onSubmit = (e) => {
     e.preventDefault();
     const text = q.trim();
@@ -1280,7 +1388,7 @@ function HeroSearch({ isMobile, onSearch, searching }) {
         <input
           type="search"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => onQueryChange?.(e.target.value)}
           placeholder={HERO_PLACEHOLDER}
           aria-label="Ask a research question"
           style={{
@@ -1322,7 +1430,7 @@ function HeroSearch({ isMobile, onSearch, searching }) {
   );
 }
 
-function LiteratureResults({ isMobile, state }) {
+function LiteratureResults({ isMobile, state, onPickQuestion, searching }) {
   if (!state) return null;
   const { query, loading, error, hitCount, results } = state;
   return (
@@ -1340,6 +1448,12 @@ function LiteratureResults({ isMobile, state }) {
         padding: isMobile ? '20px 18px' : '28px 28px',
         boxShadow: '0 16px 48px rgba(0,0,0,0.45)',
       }}>
+        <SuggestedQuestions
+          isMobile={isMobile}
+          compact
+          searching={searching}
+          onPick={onPickQuestion}
+        />
         <p style={{
           margin: '0 0 6px',
           fontSize: '11px',
@@ -1396,11 +1510,7 @@ function LiteratureResults({ isMobile, state }) {
                 {paper.openAccess ? ' · open access' : ''}
                 {paper.pmid ? ` · PMID ${paper.pmid}` : ''}
               </p>
-              {paper.abstract && (
-                <p style={{ margin: '8px 0 0', color: '#999', fontSize: '13px', lineHeight: 1.55 }}>
-                  {paper.abstract}
-                </p>
-              )}
+              {paper.abstract && <AbstractSnippet html={paper.abstract} />}
             </li>
           ))}
         </ul>
@@ -1432,10 +1542,12 @@ function App() {
   };
   const [route, setRoute] = useState(routeFromHash());
   const [literature, setLiterature] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const contentRef = useRef(null);
   const literatureRef = useRef(null);
 
   const runLiteratureSearch = async (query) => {
+    setSearchQuery(query);
     setLiterature({ query, loading: true, error: null, hitCount: 0, results: [] });
     requestAnimationFrame(() => {
       const el = scrollContainerRef.current;
@@ -1640,7 +1752,15 @@ function App() {
           <HeroSearch
             isMobile={isMobile}
             searching={literature?.loading}
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
             onSearch={runLiteratureSearch}
+          />
+
+          <SuggestedQuestions
+            isMobile={isMobile}
+            searching={literature?.loading}
+            onPick={runLiteratureSearch}
           />
 
           <p style={{ color: '#888', marginTop: '22px', fontSize: isMobile ? '15px' : '17px', maxWidth: '480px', lineHeight: '1.55', fontWeight: 500, fontFamily: theme.fonts.main, letterSpacing: '-0.01em' }}>
@@ -1668,7 +1788,12 @@ function App() {
 
         {route !== 'account' && (
           <div ref={literatureRef}>
-            <LiteratureResults isMobile={isMobile} state={literature} />
+            <LiteratureResults
+              isMobile={isMobile}
+              state={literature}
+              searching={literature?.loading}
+              onPickQuestion={runLiteratureSearch}
+            />
           </div>
         )}
 
