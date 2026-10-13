@@ -510,7 +510,7 @@ function EvidenceGroups({ isMobile, scrollParentRef, report }) {
   const scrollTo = (key) => {
     const el = scrollParentRef?.current;
     const target = sectionRefs.current[key];
-    if (el && target) el.scrollTo({ top: target.offsetTop - 88, behavior: 'smooth' });
+    if (el && target) el.scrollTo({ top: target.offsetTop - 120, behavior: 'smooth' });
   };
 
   return (
@@ -933,7 +933,8 @@ function SearchResultsPage({
     <div style={{
       maxWidth: 1120,
       margin: '0 auto',
-      padding: isMobile ? '48px 20px 72px' : '72px 40px 96px',
+      // Clear the fixed top search bar (logo + compact search + padding)
+      padding: isMobile ? '112px 20px 72px' : '136px 40px 96px',
       fontFamily: fonts.main,
     }}>
       {/* Search header */}
