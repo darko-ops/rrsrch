@@ -313,22 +313,23 @@ function SuggestionCard({ item, onPick, searching, showFindingsLink }) {
         gap: 14,
         padding: 24,
         borderRadius: 16,
-        background: 'rgba(255,255,255,0.03)',
-        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(40,40,40,0.85)',
+        border: '1px solid rgba(255,255,255,0.1)',
         cursor: searching ? 'wait' : 'pointer',
         textAlign: 'left',
         fontFamily: fonts.main,
         transition: 'background 0.15s, border-color 0.15s',
         width: '100%',
+        backdropFilter: 'blur(8px)',
       }}
       onMouseEnter={(e) => {
         if (searching) return;
-        e.currentTarget.style.background = 'rgba(255,255,255,0.06)';
+        e.currentTarget.style.background = 'rgba(55,55,55,0.92)';
         e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
-        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+        e.currentTarget.style.background = 'rgba(40,40,40,0.85)';
+        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
       }}
     >
       <VerdictDot color={v.color} label={v.label} />
