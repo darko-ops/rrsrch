@@ -12,7 +12,7 @@ pytestmark = pytest.mark.db
 def test_load_is_repeatable_and_links_trials(conn, corpus_dir):
     assert db.migrate(conn) == ["0001_ledger.sql", "0002_reader.sql", "0003_writer.sql",
                                 "0004_trials.sql", "0005_skeptic.sql", "0006_knowledge.sql",
-                                "0007_identity.sql", "0008_trust.sql"]
+                                "0007_identity.sql", "0008_trust.sql", "0009_knowledge_api.sql"]
     assert db.migrate(conn) == []
     rep = db.load_corpus(conn, corpus_dir)
     assert (rep.sources, rep.trials, rep.links) == (1, 1, 1)

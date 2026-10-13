@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 import psycopg
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
@@ -19,6 +19,7 @@ from ..identity import access
 from ..identity import store as ids
 from ..identity.access import Action, Principal
 from ..trust import merge
+from . import idempotency
 from .identity_routes import conn, principal
 
 router = APIRouter(prefix="/v1")
@@ -39,9 +40,9 @@ class Close(BaseModel):
     state: Literal["withdrawn", "rejected"]
 
 
-def _call(fn, *args):
+def _call(fn, *args, **kwargs):
     try:
-        return fn(*args)
+        return fn(*args, **kwargs)
     except merge.Refused as e:
         raise HTTPException(e.status, str(e)) from e
 
@@ -51,11 +52,13 @@ def _checks(checks) -> list[dict]:
 
 
 @router.post("/merge-requests", status_code=201)
-def open_merge_request(body: NewMergeRequest, p: Principal | None = Depends(principal),
-                       c: psycopg.Connection = Depends(conn)) -> dict:
-    out = _call(merge.open_request, c, p, body.repository, body.content, body.claim_id)
-    return {"ok": True, "merge_request_id": out.merge_request_id, "state": out.state,
-            "checks_passed": all(x.passed for x in out.checks), "checks": _checks(out.checks)}
+def open_merge_request(body: NewMergeRequest, request: Request, p: Principal | None = Depends(principal),
+                       c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    def go():
+        out = _call(merge.open_request, c, p, body.repository, body.content, body.claim_id)
+        return 201, {"ok": True, "merge_request_id": out.merge_request_id, "state": out.state,
+                     "checks_passed": all(x.passed for x in out.checks), "checks": _checks(out.checks)}
+    return idempotency.run(request, c, p, body, go)
 
 
 @router.get("/merge-requests/{mr_id}")

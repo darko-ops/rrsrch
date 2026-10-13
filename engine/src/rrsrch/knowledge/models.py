@@ -136,10 +136,10 @@ class ClaimContent(_Model):
     """What a claim says and rests on. This, and only this, is hashed into a revision."""
     repository: str = Field(pattern=REPO_SLUG)
     type: ClaimType
-    proposition: str = Field(min_length=1)
+    proposition: str = Field(min_length=1, max_length=2000)
     scope: dict[str, Any] = Field(default_factory=dict)
     fields: dict[str, Any] = Field(default_factory=dict)
-    evidence: tuple[tuple[Relation, Span], ...] = Field(min_length=1)
+    evidence: tuple[tuple[Relation, Span], ...] = Field(min_length=1, max_length=50)
     parent_hash: str | None = Field(default=None, pattern=SHA256)
 
     def canonical(self) -> dict[str, Any]:

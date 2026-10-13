@@ -1,5 +1,6 @@
 """The engine's HTTP API, on FastAPI: POST /v1/answer, GET /v1/health, and the
-identity (identity_routes) and review/merge (trust_routes) endpoints.
+identity (identity_routes), review/merge (trust_routes) and knowledge
+(knowledge_routes) endpoints.
 
 Binds to localhost by default; put a tunnel or reverse proxy in front when the
 site needs it. Errors keep the shape the site's proxy reads, {"ok": false,
@@ -26,9 +27,10 @@ from starlette.exceptions import HTTPException
 from ..ledger import db
 from ..reader.llm import LLM
 from . import answer as answer_mod
-from . import identity_routes, trust_routes
+from . import identity_routes, knowledge_routes, trust_routes
 
 MAX_QUESTION = 800
+MAX_BODY = 256 * 1024
 
 
 class AnswerRequest(BaseModel):
@@ -44,10 +46,17 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
     app = FastAPI(title="rrsrch engine", version="0.1.0")
     app.state.connect = connect
     app.add_middleware(CORSMiddleware, allow_origins=[os.environ.get("RRSRCH_CORS_ORIGIN", "*")],
-                       allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                       allow_headers=["Content-Type", "Authorization"])
+                       allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                       allow_headers=["Content-Type", "Authorization", "Idempotency-Key"])
     app.include_router(identity_routes.router)
     app.include_router(trust_routes.router)
+    app.include_router(knowledge_routes.router)
+
+    @app.middleware("http")
+    async def bounded_body(request: Request, call_next):
+        if int(request.headers.get("content-length") or 0) > MAX_BODY:
+            return _error(413, f"request body over {MAX_BODY // 1024} KB")
+        return await call_next(request)
 
     @app.exception_handler(HTTPException)
     def http_error(_req: Request, exc: HTTPException) -> JSONResponse:
