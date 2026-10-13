@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
-import { MessageCircle, X, Twitter, ArrowRight, Search, Github, Database, Zap, Shield, Terminal as TerminalIcon, Clock, ChevronDown } from 'lucide-react';
+import { MessageCircle, X, Twitter, ArrowRight, Search, Github, Database, Zap, Shield, Terminal as TerminalIcon, Clock } from 'lucide-react';
 
 // Product / deploy config
 const REPO_URL = 'https://github.com/darko-ops/RRSRCH';
@@ -303,118 +303,6 @@ function NavButton({ onClick, icon: Icon, label, active }) {
       <Icon size={14} />
       {label}
     </button>
-  );
-}
-
-// Top-bar dropdown, styled to match NavButton; closes on outside click or selection.
-// `active` lights the trigger green; `selectedLabel` marks the current item in the menu.
-function NavDropdown({ label, icon: Icon, items, active, selectedLabel }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [open]);
-
-  const restBg = active ? 'rgba(0,255,136,0.08)' : 'transparent';
-  const restColor = active ? NAV_GREEN : '#aaa';
-  return (
-    <div ref={wrapRef} style={{ position: 'relative' }}>
-      <button
-        onClick={() => setOpen(!open)}
-        style={{
-          background: open ? (active ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.1)') : restBg,
-          border: active ? '1px solid rgba(0,255,136,0.45)' : '1px solid rgba(255,255,255,0.1)',
-          borderRadius: '24px',
-          color: open ? (active ? NAV_GREEN : 'white') : restColor,
-          padding: '10px 20px',
-          cursor: 'pointer',
-          fontFamily: theme.fonts.main,
-          fontSize: '12px',
-          textTransform: 'uppercase',
-          letterSpacing: '1px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          transition: 'all 0.2s ease',
-          backdropFilter: 'blur(5px)'
-        }}
-        onMouseEnter={e => {
-          e.currentTarget.style.background = active ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.1)';
-          e.currentTarget.style.color = active ? NAV_GREEN : 'white';
-        }}
-        onMouseLeave={e => {
-          if (open) return;
-          e.currentTarget.style.background = restBg;
-          e.currentTarget.style.color = restColor;
-        }}
-      >
-        {Icon && <Icon size={14} />}
-        {label}
-        <ChevronDown size={12} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease' }} />
-      </button>
-      {open && (
-        <div style={{
-          position: 'absolute',
-          top: 'calc(100% + 8px)',
-          left: 0,
-          minWidth: '180px',
-          background: 'rgba(12,12,12,0.92)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: '14px',
-          padding: '6px',
-          backdropFilter: 'blur(10px)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '2px',
-          animation: 'slideIn 0.15s ease-out',
-          zIndex: 20
-        }}>
-          {items.map(({ label: itemLabel, icon: ItemIcon, accent, onClick }) => {
-            const selected = itemLabel === selectedLabel;
-            return (
-              <button
-                key={itemLabel}
-                onClick={() => { setOpen(false); onClick(); }}
-                style={{
-                  background: selected ? 'rgba(0,255,136,0.08)' : 'transparent',
-                  border: 'none',
-                  borderRadius: '10px',
-                  color: selected ? NAV_GREEN : '#aaa',
-                  padding: '10px 14px',
-                  cursor: 'pointer',
-                  fontFamily: theme.fonts.main,
-                  fontSize: '12px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  textAlign: 'left',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.background = selected ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.08)';
-                  e.currentTarget.style.color = selected ? NAV_GREEN : 'white';
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.background = selected ? 'rgba(0,255,136,0.08)' : 'transparent';
-                  e.currentTarget.style.color = selected ? NAV_GREEN : '#aaa';
-                }}
-              >
-                <ItemIcon size={14} color={selected ? NAV_GREEN : accent} />
-                {itemLabel}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -1340,98 +1228,93 @@ Waiting for approval... ✓`}</CodeBlock>
   );
 }
 
-// Hero taglines per route: vague for the brand, specific once a product is chosen
+// Hero taglines: the product page (home) and the account page
 const TAGLINES = {
-  home: ['TRUST WHAT YOUR AGENTS KNOW.', 'RESEARCH, REGENERATED.'],
-  backpack: ['BACKPACK — SHARED, VERIFIED MEMORY.', 'SEARCH ONCE. REUSE FOREVER.'],
+  home: ['know what the literature shows — and where it conflicts.',
+         'every sentence traced to its source.'],
   account: ['YOUR ACCOUNT & CONNECTIONS.', 'SIGN IN AND POINT YOUR AGENTS.'],
 };
 
-// --- Home: hero product card — appears on the right after 2s; picking it ---
-// --- expands it ---
+const HERO_PLACEHOLDER =
+  'Does MSC therapy improve cartilage repair in knee osteoarthritis?';
 
-function HeroProductCards({ isMobile, navigate }) {
-  const [visible, setVisible] = useState([false]);
-  const [pick, setPick] = useState(null);   // 'backpack' | null
-  useEffect(() => {
-    const t = setTimeout(() => setVisible([true]), 2000);
-    return () => clearTimeout(t);
-  }, []);
-
-  const products = [
-    {
-      route: 'backpack', name: 'Backpack', accent: '#00ff88', icon: Database,
-      liner: 'Shared, verified memory for your agents.',
-      more: 'A search-and-deposit corpus with confidence, provenance, and freshness on every claim — agents check it before re-deriving anything. Self-host today.'
-    }
-  ];
-
+/** Google-style question bar for the landing hero. Submit scrolls to the explainer. */
+function HeroSearch({ isMobile, onSearch }) {
+  const [q, setQ] = useState('');
+  const onSubmit = (e) => {
+    e.preventDefault();
+    const text = q.trim();
+    if (!text) return;
+    onSearch?.(text);
+  };
   return (
-    <div style={{
-      position: 'absolute',
-      right: isMobile ? '16px' : '60px',
-      left: isMobile ? '16px' : 'auto',
-      top: isMobile ? '14%' : '50%',
-      transform: isMobile ? 'none' : 'translateY(-50%)',
-      display: 'flex', flexDirection: 'column', gap: '14px',
-      width: isMobile ? 'auto' : '360px', zIndex: 6
+    <form onSubmit={onSubmit} style={{
+      width: '100%',
+      maxWidth: isMobile ? '100%' : '640px',
+      marginTop: '28px',
     }}>
-      {products.map((p, i) => {
-        const Icon = p.icon;
-        const expanded = pick === p.route;
-        const dimmed = pick && !expanded;
-        return (
-          <div key={p.route}
-            onClick={() => setPick(p.route)}
-            style={{
-              borderRadius: '22px',
-              border: `1px solid ${expanded ? p.accent : 'rgba(255,255,255,0.12)'}`,
-              background: 'rgba(8,8,8,0.55)',
-              backdropFilter: 'blur(14px)',
-              padding: dimmed ? '14px 22px' : expanded ? '26px' : '22px',
-              maxHeight: dimmed ? '52px' : expanded ? '420px' : '150px',
-              overflow: 'hidden',
-              cursor: 'pointer',
-              opacity: visible[i] ? (dimmed ? 0.75 : 1) : 0,
-              transform: visible[i] ? 'translateX(0)' : 'translateX(44px)',
-              transition: 'all 0.45s cubic-bezier(.4,0,.2,1)'
-            }}
-            onMouseEnter={(e) => { if (!expanded) e.currentTarget.style.borderColor = p.accent; }}
-            onMouseLeave={(e) => { if (!expanded) e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Icon size={18} color={p.accent} />
-              <span style={{ color: '#fff', fontSize: '17px', fontWeight: 800, fontFamily: theme.fonts.main }}>{p.name}</span>
-              {dimmed && (
-                <span style={{ marginLeft: 'auto', color: '#777', fontSize: '11px', fontFamily: theme.fonts.mono, textTransform: 'uppercase', letterSpacing: '1px' }}>view</span>
-              )}
-            </div>
-            {!dimmed && (
-              <div style={{ color: '#9a9a9a', fontSize: '13.5px', lineHeight: 1.6, marginTop: '10px', fontFamily: theme.fonts.main }}>
-                {p.liner}
-              </div>
-            )}
-            {expanded && (
-              <>
-                <div style={{ color: '#7a7a7a', fontSize: '13px', lineHeight: 1.65, marginTop: '10px', fontFamily: theme.fonts.main }}>
-                  {p.more}
-                </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); navigate(p.route); }}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: '8px',
-                    marginTop: '16px', background: p.accent, color: '#000',
-                    border: 'none', borderRadius: '10px', padding: '10px 18px',
-                    fontSize: '13px', fontWeight: 800, cursor: 'pointer',
-                    fontFamily: theme.fonts.main
-                  }}>
-                  Explore {p.name} <ArrowRight size={14} />
-                </button>
-              </>
-            )}
-          </div>
-        );
-      })}
-    </div>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        padding: isMobile ? '14px 16px' : '16px 22px',
+        background: 'rgba(255,255,255,0.06)',
+        border: '1px solid rgba(255,255,255,0.14)',
+        borderRadius: '28px',
+        backdropFilter: 'blur(12px)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
+        transition: 'border-color 0.2s ease, background 0.2s ease',
+      }}
+        onFocusCapture={(e) => {
+          e.currentTarget.style.borderColor = 'rgba(0,255,136,0.45)';
+          e.currentTarget.style.background = 'rgba(255,255,255,0.09)';
+        }}
+        onBlurCapture={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) {
+            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)';
+            e.currentTarget.style.background = 'rgba(255,255,255,0.06)';
+          }
+        }}
+      >
+        <Search size={18} color="#888" style={{ flexShrink: 0 }} />
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={HERO_PLACEHOLDER}
+          aria-label="Ask a research question"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            color: '#fff',
+            fontSize: isMobile ? '15px' : '17px',
+            fontFamily: theme.fonts.main,
+            lineHeight: 1.4,
+          }}
+        />
+        {q.trim() && (
+          <button type="submit" style={{
+            background: 'rgba(0,255,136,0.12)',
+            border: '1px solid rgba(0,255,136,0.4)',
+            borderRadius: '20px',
+            color: '#00ff88',
+            padding: '8px 14px',
+            cursor: 'pointer',
+            fontFamily: theme.fonts.main,
+            fontSize: '11px',
+            fontWeight: 700,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            flexShrink: 0,
+          }}>
+            Search
+          </button>
+        )}
+      </div>
+    </form>
   );
 }
 
@@ -1441,7 +1324,8 @@ function App() {
   const scrollRef = useRef(0);
   const scrollContainerRef = useRef(null);
 
-  // hash routing — #/backpack, #/account; anything else is home
+  // hash routing — #/account, #/backpack (home, scrolled to the explainer);
+  // anything else is home
   const routeFromHash = () => {
     const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
     return ['backpack', 'account'].includes(h) ? h : 'home';
@@ -1453,14 +1337,12 @@ function App() {
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
-  // picking a product keeps the hero and swaps the content BELOW it — so scroll
-  // the reader down to where the change happened (and back up for home)
+  // #/backpack keeps the hero and scrolls the reader down to the explainer
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
     const t = setTimeout(() => {
-      // home and account both start at the top (account has no hero at all);
-      // product pages keep the hero and scroll down to their content
+      // home and account both start at the top (account has no hero at all)
       if (route === 'home' || route === 'account') el.scrollTo({ top: 0, behavior: 'smooth' });
       else if (contentRef.current) {
         el.scrollTo({ top: contentRef.current.offsetTop - 24, behavior: 'smooth' });
@@ -1590,16 +1472,6 @@ function App() {
             letterSpacing: '-0.05em', padding: '8px 6px'
           }}>RRSRCH</button>
 
-          <NavDropdown
-            label={route === 'backpack' ? 'Backpack' : 'Products'}
-            active={route === 'backpack'}
-            selectedLabel={route === 'backpack' ? 'Backpack' : null}
-            items={[
-              { label: 'Backpack', icon: Database, accent: '#00ff88', onClick: () => navigate('backpack') },
-            ]} />
-          <NavButton onClick={() => navigate('account')} icon={TerminalIcon} label="Agents"
-            active={route === 'account'} />
-
           <div style={{ marginLeft: 'auto' }}>
             <NavButton onClick={() => window.open('https://x.com/rrsrch', '_blank')} icon={Twitter} label="X" />
           </div>
@@ -1612,31 +1484,12 @@ function App() {
           position: 'relative',
           display: 'flex',
           flexDirection: 'column',
-          justifyContent: 'flex-end', // Pushed to bottom
-          alignItems: 'flex-start',
-          paddingBottom: '15vh', // Spacing from bottom
-          paddingLeft: '60px',
-          textAlign: 'left'
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: isMobile ? '88px 20px 48px' : '96px 40px 64px',
+          textAlign: 'center'
         }}>
-          {route === 'home' && <HeroProductCards isMobile={isMobile} navigate={navigate} />}
-           <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '20px',
-            padding: '5px 10px',
-            background: 'rgba(255,255,255,0.05)',
-            borderRadius: '100px',
-            backdropFilter: 'blur(5px)'
-          }}>
-            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff00', boxShadow: '0 0 8px #00ff00' }}></div>
-            <span style={{ color: '#888', fontSize: '11px', fontFamily: theme.fonts.mono }}>SYSTEM ONLINE</span>
-          </div>
-
           <div style={{ display: 'inline-block' }}>
-            <p style={{ color: 'white', margin: '0 0 4px 0', fontSize: '13px', lineHeight: '1.5', fontWeight: 'bold', fontFamily: theme.fonts.main, textAlign: 'right' }}>
-            : REGENERATIVE RESEARCH
-            </p>
             <h1 style={{
               fontSize: 'clamp(40px, 6vw, 80px)',
               fontWeight: 800,
@@ -1648,19 +1501,46 @@ function App() {
             }}>
               RRSRCH
             </h1>
+            <p style={{ color: 'white', margin: '8px 0 0 0', fontSize: '13px', lineHeight: '1.5', fontWeight: 'bold', fontFamily: theme.fonts.main, letterSpacing: '0.12em' }}>
+            : REGENERATIVE RESEARCH
+            </p>
           </div>
 
-          <p style={{ color: '#666', marginTop: '18px', fontSize: '18px', maxWidth: '520px', lineHeight: '1.5', fontWeight: 'bold', fontFamily: theme.fonts.main }}>
-          {TAGLINES[route][0]} <br />
-          {TAGLINES[route][1]}
+          <HeroSearch
+            isMobile={isMobile}
+            onSearch={() => {
+              const el = scrollContainerRef.current;
+              const target = contentRef.current;
+              if (el && target) {
+                el.scrollTo({ top: target.offsetTop - 24, behavior: 'smooth' });
+              }
+            }}
+          />
+
+          <p style={{ color: '#888', marginTop: '22px', fontSize: isMobile ? '15px' : '17px', maxWidth: '480px', lineHeight: '1.55', fontWeight: 500, fontFamily: theme.fonts.main, letterSpacing: '-0.01em' }}>
+          {TAGLINES[route === 'account' ? 'account' : 'home'][0]} <br />
+          {TAGLINES[route === 'account' ? 'account' : 'home'][1]}
           </p>
+
+          <div style={{
+            position: 'absolute',
+            right: isMobile ? '16px' : '40px',
+            bottom: isMobile ? '20px' : '32px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '5px 10px',
+            background: 'rgba(255,255,255,0.05)',
+            borderRadius: '100px',
+            backdropFilter: 'blur(5px)'
+          }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff00', boxShadow: '0 0 8px #00ff00' }}></div>
+            <span style={{ color: '#888', fontSize: '11px', fontFamily: theme.fonts.mono }}>SYSTEM ONLINE</span>
+          </div>
         </div>
         )}
 
-        {/* Home is a single screen: hero + product cards, no scroll content */}
-        {route !== 'home' && (<>
-
-        {/* Spacer: below the hero on product pages; just clears the fixed nav on account */}
+        {/* Spacer: below the hero on the product page; just clears the fixed nav on account */}
         <div style={{ height: route === 'account' ? (isMobile ? '72px' : '96px') : '13vh' }}></div>
 
         {/* Main Content Layout with Background Panel */}
@@ -1679,8 +1559,7 @@ function App() {
           boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)'
         }}>
 
-          {route === 'backpack' && <ProductExplainer isMobile={isMobile} />}
-          {route === 'account' && <AccountPage isMobile={isMobile} />}
+          {route === 'account' ? <AccountPage isMobile={isMobile} /> : <ProductExplainer isMobile={isMobile} />}
 
           {/* Footer */}
           <div style={{
@@ -1714,8 +1593,6 @@ function App() {
         </div>
 
         <div style={{ height: '100px' }}></div>
-
-        </>)}
       </div>
 
       {/* Modal Layer */}
