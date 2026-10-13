@@ -16,7 +16,7 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
 }));
-app.use(express.json({ limit: '1mb' }));  // atlas graphs can exceed the 100kb default
+app.use(express.json());
 app.use(session({
   secret: process.env.SESSION_SECRET || 'rrsrch-secret-key-2025',
   resave: false,
@@ -735,7 +735,6 @@ app.post('/api/account/projects', async (req, res) => {
     id: String(p.id || crypto.randomUUID()).slice(0, 40),
     name: String(p.name || 'untitled').slice(0, 60),
     backpack_url: String(p.backpack_url || '').slice(0, 200),
-    atlas_url: String(p.atlas_url || '').slice(0, 200),
   }));
   const users = await readUsers();
   const u = users.find((x) => x.id === user.id);
@@ -743,121 +742,6 @@ app.post('/api/account/projects', async (req, res) => {
   u.active_project_id = String(active_project_id || clean[0].id).slice(0, 40);
   await writeUsers(users);
   res.json({ projects: clean, active_project_id: u.active_project_id });
-});
-
-// ---- atlas attestations: published by `atlas-probe` from a paired machine, ----
-// ---- read back by the dashboard — so the Atlas tab never touches localhost ----
-// Same versioned-write discipline as the users store (same-pathname overwrites
-// serve stale from the CDN for ~a minute).
-const ATLAS_PREFIX = 'atlas-' + crypto.createHash('sha256')
-  .update('rrsrch-atlas:' + AUTH_SECRET).digest('hex').slice(0, 40) + '/';
-const ATLAS_DIR = path.join(__dirname, 'atlas-graphs');   // dev fallback
-
-const atlasSlug = (s) => String(s || '').toLowerCase()
-  .replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
-
-async function latestAtlasBlob(userId, slug) {
-  const { list } = require('@vercel/blob');
-  const { blobs } = await list({ prefix: `${ATLAS_PREFIX}${userId}/${slug}/` });
-  if (!blobs.length) return null;
-  return blobs.reduce((a, b) => (a.pathname > b.pathname ? a : b));
-}
-
-app.post('/api/atlas', async (req, res) => {
-  const user = await requireUser(req, res);
-  if (!user) return;
-  const slug = atlasSlug((req.body || {}).target);
-  const graph = (req.body || {}).graph;
-  if (!slug || !graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) {
-    return res.status(400).json({ error: 'Need target (slug) + graph {nodes, edges}.' });
-  }
-  const payload = JSON.stringify(graph);
-  if (useBlob) {
-    const { put, del, list } = require('@vercel/blob');
-    const key = `${ATLAS_PREFIX}${user.id}/${slug}/v-${String(Date.now()).padStart(16, '0')}.json`;
-    await put(key, payload, { access: 'public', contentType: 'application/json',
-                              addRandomSuffix: false });
-    try {   // best-effort prune of superseded versions
-      const { blobs } = await list({ prefix: `${ATLAS_PREFIX}${user.id}/${slug}/` });
-      const old = blobs.filter((b) => b.pathname < key).map((b) => b.url);
-      if (old.length) await del(old);
-    } catch (err) {
-      console.error('atlas prune failed (harmless):', err.message);
-    }
-  } else {
-    await fs.mkdir(path.join(ATLAS_DIR, user.id), { recursive: true });
-    await fs.writeFile(path.join(ATLAS_DIR, user.id, `${slug}.json`), payload);
-  }
-  res.json({ ok: true, target: slug });
-});
-
-app.get('/api/account/atlas', async (req, res) => {
-  const user = await requireUser(req, res);
-  if (!user) return;
-  if (useBlob) {
-    const { list } = require('@vercel/blob');
-    const { blobs } = await list({ prefix: `${ATLAS_PREFIX}${user.id}/` });
-    const targets = {};
-    for (const b of blobs) {
-      const slug = b.pathname.slice(`${ATLAS_PREFIX}${user.id}/`.length).split('/')[0];
-      const at = b.uploadedAt || null;
-      if (!targets[slug] || (at && at > targets[slug])) targets[slug] = at;
-    }
-    return res.json({ targets });
-  }
-  try {
-    const files = await fs.readdir(path.join(ATLAS_DIR, user.id));
-    return res.json({ targets: Object.fromEntries(
-      files.filter((f) => f.endsWith('.json')).map((f) => [f.slice(0, -5), null])) });
-  } catch {
-    return res.json({ targets: {} });
-  }
-});
-
-app.get('/api/account/atlas/:slug', async (req, res) => {
-  const user = await requireUser(req, res);
-  if (!user) return;
-  const slug = atlasSlug(req.params.slug);
-  if (useBlob) {
-    const match = await latestAtlasBlob(user.id, slug);
-    if (!match) return res.status(404).json({ error: 'No attestation published for this target.' });
-    const r = await fetch(match.url, { cache: 'no-store' });
-    if (!r.ok) return res.status(404).json({ error: 'No attestation published for this target.' });
-    return res.json(await r.json());
-  }
-  try {
-    return res.json(JSON.parse(
-      await fs.readFile(path.join(ATLAS_DIR, user.id, `${slug}.json`), 'utf8')));
-  } catch {
-    return res.status(404).json({ error: 'No attestation published for this target.' });
-  }
-});
-
-// Drop a target for good: every published version of it, not just the latest.
-// A renamed project leaves its old slug behind (the probe names the attestation
-// from the repo, so `ora` outlives a rename to `dromo`) and until now nothing
-// could clear it. Scoped to prefix + user.id + slug + '/', so it can never
-// reach another account's targets, and `dromo` can't be caught by `dromo-web`.
-app.delete('/api/account/atlas/:slug', async (req, res) => {
-  const user = await requireUser(req, res);
-  if (!user) return;
-  const slug = atlasSlug(req.params.slug);
-  if (!slug) return res.status(400).json({ error: 'Need a target slug.' });
-  if (useBlob) {
-    const { list, del } = require('@vercel/blob');
-    const { blobs } = await list({ prefix: `${ATLAS_PREFIX}${user.id}/${slug}/` });
-    if (!blobs.length) {
-      return res.status(404).json({ error: 'No attestation published for this target.' });
-    }
-    await del(blobs.map((b) => b.url));
-    return res.json({ deleted: true, target: slug, versions: blobs.length });
-  }
-  try {
-    await fs.unlink(path.join(ATLAS_DIR, user.id, `${slug}.json`));
-    return res.json({ deleted: true, target: slug, versions: 1 });
-  } catch {
-    return res.status(404).json({ error: 'No attestation published for this target.' });
-  }
 });
 
 // self-delete (also how probe/test accounts get cleaned up)
