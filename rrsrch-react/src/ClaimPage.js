@@ -80,7 +80,7 @@ function Composer({ placeholder, onSend, onCancel, autoFocus, defaultKind = 'com
     if (e) setErr(e); else { setBody(''); setErr(''); }
   };
   return (
-    <div style={{ display: 'grid', gap: 6 }}>
+    <div style={{ display: 'grid', gap: 6, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <textarea rows={3} autoFocus={autoFocus} value={body} onChange={(e) => setBody(e.target.value)} placeholder={placeholder}
         style={{ ...inputStyle, resize: 'vertical' }} />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -180,7 +180,7 @@ function ChallengeForm({ claimId, apiKey, onChanged }) {
     if (r.ok) { setOpen(false); setStatement(''); onChanged(); } else setErr(r.error);
   };
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
+    <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <select value={kind} onChange={(e) => setKind(e.target.value)} style={inputStyle}>
         {['contradiction', 'missing_assumption', 'evidence_problem', 'scope', 'other'].map((k) => <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>)}
       </select>
@@ -206,7 +206,7 @@ function ReviewBox({ claimId, state, apiKey, onChanged }) {
     if (r.ok) onChanged();
   };
   return (
-    <div style={{ display: 'grid', gap: 8 }}>
+    <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <input value={findings} onChange={(e) => setFindings(e.target.value)} placeholder="What you checked (optional)"
           style={{ ...inputStyle, flex: 1, minWidth: 180 }} />
@@ -227,7 +227,7 @@ export default function ClaimPage({ claimId, isMobile }) {
   const { claim, formal, informal } = fb.data;
   const target = `claim:${claimId}`;
   return (
-    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20 }}>
+    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13 }}>
         <a href="#/agents" style={{ color: '#888' }}>← Agents</a>
         <a href={`#/agents?tab=atlas&repo=${encodeURIComponent(claim.repository)}&claim=${claimId}`} style={{ color: '#888' }}>
@@ -246,7 +246,7 @@ export default function ClaimPage({ claimId, isMobile }) {
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.15fr) minmax(0, 1fr)', gap: 20,
         alignItems: 'start' }}>
         <Panel title="Evidence and standing" right={<Chip color={GREEN}>formal</Chip>}>
-          <div style={{ display: 'grid', gap: 16 }}>
+          <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0, 1fr)' }}>
             <div style={{ border: `1px solid ${(STATE_COLOR[formal.state] || '#888')}55`, borderRadius: 10, padding: '10px 12px' }}>
               <div style={{ color: STATE_COLOR[formal.state] || '#ddd', fontWeight: 700, fontSize: 14 }}>
                 {formal.state.replace(/_/g, ' ')}</div>

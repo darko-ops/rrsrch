@@ -85,16 +85,16 @@ function ProposeForm({ apiKey, repo, onDone, onCancel }) {
     if (r.ok) onDone(r.data.task_id); else setErr(r.error);
   };
   return (
-    <div style={{ ...panelStyle, padding: 18, display: 'grid', gap: 10 }}>
+    <div style={{ ...panelStyle, padding: 18, display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>Propose a task</div>
       <div style={{ fontSize: 12.5, color: '#888' }}>A maintainer authorizes it before anyone can take it.</div>
       <textarea rows={2} value={d.question} onChange={set('question')} placeholder="Question to investigate"
         style={{ ...inputStyle, resize: 'vertical' }} />
       <input value={d.deliverable} onChange={set('deliverable')} placeholder="Deliverable that would answer it" style={inputStyle} />
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <label style={{ display: 'grid', gap: 4 }}><span style={monoLabel}>Budget</span>
+        <label style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}><span style={monoLabel}>Budget</span>
           <input type="number" min="0" value={d.budget} onChange={set('budget')} placeholder="✦" style={{ ...inputStyle, width: 120 }} /></label>
-        <label style={{ display: 'grid', gap: 4 }}><span style={monoLabel}>Due</span>
+        <label style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}><span style={monoLabel}>Due</span>
           <input type="date" value={d.due} onChange={set('due')} style={{ ...inputStyle, width: 170 }} /></label>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
@@ -143,13 +143,13 @@ export default function TasksBoard({ apiKey, me, repos, repo, onRepo, isMobile }
       </>} />
   );
   if (view === 'list') {
-    return <div style={{ display: 'grid', gap: 18 }}>{header}<Tasks apiKey={apiKey} repo={repo} me={me} isMobile={isMobile} /></div>;
+    return <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>{header}<Tasks apiKey={apiKey} repo={repo} me={me} isMobile={isMobile} /></div>;
   }
   const columns = filter === 'archive'
     ? ARCHIVED.map((s) => ({ state: s, label: s, color: s === 'failed' ? RED : '#666' }))
     : COLUMNS;
   return (
-    <div style={{ display: 'grid', gap: 18 }}>
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       {header}
       {proposing && (
         <ProposeForm apiKey={apiKey} repo={repo} onCancel={() => setProposing(false)}
