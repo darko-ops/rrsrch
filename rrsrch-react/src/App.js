@@ -7,6 +7,7 @@ import SearchExperience from './SearchExperience';
 import Dashboard from './Dashboard';
 import ClaimPage from './ClaimPage';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
+import { passwordChecks, passwordOk } from './passwordRules';
 
 // Theme Configuration
 const theme = {
@@ -848,14 +849,23 @@ function AccountPage({ isMobile }) {
             <Field label="Name" type="text" value={name} onChange={setName} autoComplete="name" />
           )}
           <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
-          <Field label={mode === 'signup' ? 'Password (8+ characters)' : 'Password'} type="password"
+          <Field label="Password" type="password"
                  value={password} onChange={setPassword}
                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} />
+          {mode === 'signup' && (
+            <ul aria-label="password requirements" style={{ listStyle: 'none', padding: 0, margin: '-6px 0 16px',
+              display: 'grid', gap: '4px', fontSize: '12px' }}>
+              {passwordChecks(password, { name, email }).map((c) => (
+                <li key={c.label} style={{ color: c.ok ? '#00ff88' : '#777' }}>{c.ok ? '✓' : '○'} {c.label}</li>
+              ))}
+            </ul>
+          )}
           {err && <div style={{ color: '#e07070', fontSize: '13px', marginBottom: '14px' }}>{err}</div>}
-          <button onClick={submit} disabled={busy} style={{
+          <button onClick={submit} disabled={busy || (mode === 'signup' && !passwordOk(password, { name, email }))} style={{
             width: '100%', background: '#00ff88', color: '#000', border: 'none',
             borderRadius: '8px', padding: '13px 0', fontSize: '14px', fontWeight: 800,
-            cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1,
+            cursor: busy ? 'wait' : 'pointer',
+            opacity: busy || (mode === 'signup' && !passwordOk(password, { name, email })) ? 0.5 : 1,
             fontFamily: theme.fonts.main
           }}>
             {busy ? 'Working…' : (mode === 'signin' ? 'Sign in' : 'Create account')}
