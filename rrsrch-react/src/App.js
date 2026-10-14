@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { MessageCircle, X, Twitter, Database, Terminal as TerminalIcon } from 'lucide-react';
 import SearchExperience from './SearchExperience';
 import Dashboard from './Dashboard';
+import ClaimPage from './ClaimPage';
 
 // Theme Configuration
 const theme = {
@@ -1003,6 +1004,7 @@ function App() {
   // hash routing — #/agents (the dashboard), #/account (its account tab, kept for pairing links); else home
   const routeFromHash = () => {
     const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
+    if (/^claims\/\d+$/.test(h)) return h;                    // #/claims/N: one claim and its feedback
     return h === 'account' || h === 'agents' ? h : 'home';
   };
   const [route, setRoute] = useState(routeFromHash());
@@ -1170,11 +1172,15 @@ function App() {
               border: '1px solid rgba(255, 255, 255, 0.05)',
               boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
             }}>
-              <Dashboard
-                isMobile={isMobile}
-                initialTab={route === 'account' ? 'account' : null}
-                accountPanel={<AccountPage isMobile={isMobile} />}
-              />
+              {route.startsWith('claims/')
+                ? <ClaimPage key={route} claimId={Number(route.split('/')[1])} isMobile={isMobile} />
+                : (
+                  <Dashboard
+                    isMobile={isMobile}
+                    initialTab={route === 'account' ? 'account' : null}
+                    accountPanel={<AccountPage isMobile={isMobile} />}
+                  />
+                )}
               <SiteFooter isMobile={isMobile} onDisclaimer={() => setActiveModal('disclaimer')} />
             </div>
             <div style={{ height: '100px' }} />
