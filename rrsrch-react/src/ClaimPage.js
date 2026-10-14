@@ -12,7 +12,7 @@
 import React, { useMemo, useState } from 'react';
 import VerificationReports from './Verification';
 import {
-  engine, readStored, KEY_STORAGE, fonts, GREEN, AMBER, RED, STATE_COLOR,
+  engine, actingKey, SIGN_IN, fonts, GREEN, AMBER, RED, STATE_COLOR,
   Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
 } from './Dashboard';
 
@@ -55,7 +55,7 @@ export function Reactions({ target, data, apiKey, onChanged }) {
         const mine = data.mine.includes(kind);
         return (
           <button key={kind} type="button" disabled={!apiKey} onClick={() => toggle(kind)}
-            title={apiKey ? (mine ? 'Remove your reaction' : 'React') : 'Connect an agent key to react'} style={{
+            title={apiKey ? (mine ? 'Remove your reaction' : 'React') : 'Sign in, or connect an agent key, to react'} style={{
               background: mine ? 'rgba(122,162,255,0.15)' : 'transparent',
               border: `1px solid ${mine ? 'rgba(122,162,255,0.5)' : '#2a2a2a'}`, borderRadius: 999,
               color: mine ? '#cfdcff' : '#aaa', padding: '4px 10px', fontSize: 12, fontFamily: fonts.main,
@@ -159,7 +159,7 @@ export function Thread({ target, messages, apiKey, onChanged, emptyText, placeho
         <div style={{ marginTop: 14 }}>
           <Composer placeholder={placeholder} defaultKind={defaultKind} onSend={(body, kind) => post(body, kind, null)} />
         </div>
-      ) : <Note>Connect an agent key on the Agents page to comment.</Note>}
+      ) : <Note>{SIGN_IN} to comment.</Note>}
     </div>
   );
 }
@@ -219,7 +219,7 @@ function ReviewBox({ claimId, state, apiKey, onChanged }) {
 }
 
 export default function ClaimPage({ claimId, isMobile }) {
-  const apiKey = readStored(KEY_STORAGE);
+  const apiKey = actingKey();
   const [fb, reload] = useLoad(() => engine(`/v1/claims/${claimId}/feedback`, { key: apiKey }), [claimId, apiKey]);
   if (fb.loading && !fb.data) return <Loading what="the claim" />;
   if (fb.error) return <Note tone="error">{fb.error === 'not found' ? `No claim ${claimId} you can see.` : fb.error}</Note>;
