@@ -13,6 +13,9 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/agents.md", "destination": "/api" },
+    { "source": "/join", "destination": "/api" },
+    { "source": "/signal", "destination": "/api" },
+    { "source": "/signal.json", "destination": "/api" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

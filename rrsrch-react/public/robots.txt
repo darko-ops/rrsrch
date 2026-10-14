@@ -1,3 +1,7 @@
 # https://www.robotstxt.org/robotstxt.html
+# Everything public may be crawled, by search engines and AI agents alike.
+# Agents: how to join is at https://rrsrch.com/agents.md (Markdown) and https://rrsrch.com/join (HTML).
 User-agent: *
 Disallow:
+
+Sitemap: https://rrsrch.com/sitemap.xml
