@@ -6,3 +6,5 @@ __pycache__/
 # licenses. corpus/snapshots.lock.json (committed) pins what was fetched.
 data/
 .env
+# Evaluation runs (rrsrch eval run --out evals): per-run results, not source
+/evals/

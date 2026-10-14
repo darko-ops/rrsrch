@@ -55,7 +55,14 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
 
     @app.middleware("http")
     async def bounded_body(request: Request, call_next):
-        if int(request.headers.get("content-length") or 0) > MAX_BODY:
+        length = request.headers.get("content-length")
+        if length is None:
+            # a body without a declared length (chunked) can't be bounded before it's read
+            if request.method in ("POST", "PUT", "PATCH") and request.headers.get("transfer-encoding"):
+                return _error(411, "send a Content-Length")
+        elif not length.strip().isdigit():
+            return _error(400, "invalid Content-Length")
+        elif int(length) > MAX_BODY:
             return _error(413, f"request body over {MAX_BODY // 1024} KB")
         return await call_next(request)
 

@@ -24,6 +24,8 @@
   rrsrch repo member SLUG HANDLE ROLE      grant a repository role (or `none` to remove)
   rrsrch audit verify                      check every audit event's hash and link
   rrsrch mcp [--api URL] [--read-only]     MCP server (stdio) over the API, as RRSRCH_API_KEY
+  rrsrch eval run --db URL [...]           run conditions A/B/C on the benchmark (needs RRSRCH_LLM_URL)
+  rrsrch eval report RESULT.json           score a run and print the comparison table
 """
 from __future__ import annotations
 
@@ -488,6 +490,69 @@ def cmd_mcp(args) -> int:
     return 0
 
 
+def cmd_eval_run(args) -> int:
+    import json
+    import os
+    from pathlib import Path
+
+    import psycopg
+
+    from .bench import questions
+    from .evals import run as ev
+    from .evals import scoring
+    from .evals.agent import LLMAgent
+    from .evals.budget import Budget
+    from .ledger import db
+    from .reader.llm import LLM
+    ledger = os.environ.get("RRSRCH_DATABASE_URL", db.DEFAULT_URL)
+    if ev.same_database(args.db, ledger):
+        print("error: --db is the ledger database, or one of the two couldn't be reached to tell them apart\n"
+              "(check --db and RRSRCH_DATABASE_URL). Run evaluations on a copy, e.g.\n"
+              "  createdb -T rrsrch rrsrch_eval   (or pg_dump rrsrch | psql rrsrch_eval)", file=sys.stderr)
+        return 2
+    conditions = tuple(c.strip().upper() for c in args.conditions.split(",") if c.strip())
+    if not conditions or set(conditions) - set(ev.CONDITIONS):
+        print(f"error: --conditions must be some of {','.join(ev.CONDITIONS)}", file=sys.stderr)
+        return 2
+    if args.model:
+        os.environ["RRSRCH_READER_MODEL"] = args.model
+    try:
+        llm = LLM.from_env()                  # URL, model and RRSRCH_LLM_TIMEOUT, validated
+    except RuntimeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    import httpx
+    model_client = httpx.Client(timeout=llm.timeout)
+    tasks = ev.tasks_from_benchmark(questions.load(), args.only)
+    cfg = ev.Config(conditions=conditions, agents=args.agents, repeats=args.repeats,
+                    seeded_errors=args.seeded_errors,
+                    budget=Budget(max_tool_calls=args.max_tool_calls, max_tokens=args.max_tokens))
+    harness = ev.Harness(lambda: psycopg.connect(args.db), cfg)
+    try:
+        result = harness.run(tasks, lambda cond, i, handle: LLMAgent(handle, llm.base_url, llm.model,
+                                                                     client=model_client), progress=print)
+    finally:
+        model_client.close()
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    raw = out / f"eval-{cfg.run_id}.json"
+    raw.write_text(json.dumps(result, indent=1, default=str))
+    scored = scoring.score(result)
+    (out / f"eval-{cfg.run_id}.md").write_text(scoring.markdown(scored))
+    print(scoring.markdown(scored))
+    print(f"wrote {raw}")
+    return 0
+
+
+def cmd_eval_report(args) -> int:
+    import json
+    from pathlib import Path
+
+    from .evals import scoring
+    print(scoring.markdown(scoring.score(json.loads(Path(args.result).read_text()))))
+    return 0
+
+
 def cmd_audit_verify(args) -> int:
     from .ledger import db
     from .trust import audit
@@ -590,6 +655,22 @@ def main(argv: list[str] | None = None) -> int:
     mc.add_argument("--api", help="API base URL (default $RRSRCH_API_URL or http://127.0.0.1:8787)")
     mc.add_argument("--read-only", action="store_true", help="offer only the read tools")
     mc.set_defaults(fn=cmd_mcp)
+    ev = sub.add_parser("eval").add_subparsers(dest="cmd", required=True)
+    er = ev.add_parser("run", help="run the A/B/C experiment on the benchmark questions")
+    er.add_argument("--db", required=True, help="a dedicated evaluation database (a copy of the ledger)")
+    er.add_argument("--conditions", default="A,B,C")
+    er.add_argument("--agents", type=int, default=3)
+    er.add_argument("--repeats", type=int, default=1)
+    er.add_argument("--seeded-errors", type=int, default=2)
+    er.add_argument("--max-tool-calls", type=int, default=30)
+    er.add_argument("--max-tokens", type=int, default=60_000)
+    er.add_argument("--model", help="model name (default $RRSRCH_READER_MODEL)")
+    er.add_argument("--only", nargs="+", help="benchmark question ids")
+    er.add_argument("--out", default="evals")
+    er.set_defaults(fn=cmd_eval_run)
+    ep = ev.add_parser("report", help="score a saved run")
+    ep.add_argument("result")
+    ep.set_defaults(fn=cmd_eval_report)
     args = p.parse_args(argv)
     return args.fn(args)
 
