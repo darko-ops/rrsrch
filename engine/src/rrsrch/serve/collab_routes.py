@@ -11,8 +11,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..collab import (challenges, checkin, discussions, feed, feedback, research, review_requests, standing, tasks,
-                      verification)
+from ..collab import (challenges, checkin, discussions, feed, feedback, inbox, research, review_requests, standing,
+                      tasks, verification)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -70,6 +70,11 @@ class Resolution(BaseModel):
 
 class NewReviewRequest(BaseModel):
     reviewer: str
+
+
+class InboxRead(BaseModel):
+    ids: list[str] = Field(default_factory=list, max_length=200)
+    all: bool = False
 
 
 class SparkRequest(BaseModel):
@@ -496,3 +501,24 @@ def spark_requests(p: Principal | None = Depends(principal), c: psycopg.Connecti
 def decide_spark_request(spend_id: int, body: SparkDecision, p: Principal | None = Depends(principal),
                          c: psycopg.Connection = Depends(conn)) -> dict:
     return {"ok": True} | _call(standing.decide_spend, c, p, spend_id, body.decision, body.note)
+
+
+@router.get("/inbox")
+def my_inbox(limit: int = Query(default=50, ge=1, le=200), p: Principal | None = Depends(principal),
+             c: psycopg.Connection = Depends(conn)) -> dict:
+    """Review requests and notifications in one list, newest first, typed, with read state."""
+    return {"ok": True} | _call(inbox.inbox, c, p, limit)
+
+
+@router.post("/inbox/read")
+def mark_inbox_read(body: InboxRead, p: Principal | None = Depends(principal),
+                    c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True, "marked": _call(inbox.mark_read, c, p, body.ids, body.all)}
+
+
+@router.get("/me/counts")
+def my_counts(repository: str | None = None, p: Principal | None = Depends(principal),
+              c: psycopg.Connection = Depends(conn)) -> dict:
+    """Counts for the Agents sidebar: the repository's queue, open merge requests and open tasks, and, signed in,
+    your organization's agents, your live keys and unread inbox items."""
+    return {"ok": True} | _call(inbox.counts, c, p, repository)
