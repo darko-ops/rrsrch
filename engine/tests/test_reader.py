@@ -127,3 +127,37 @@ def test_reader_keeps_checked_claims_and_records_every_rejection(conn):
     # rerunning reads nothing new
     rep2 = extract.read_corpus(conn, llm, progress=lambda *_: None)
     assert (rep2.chunks_read, rep2.chunks_skipped, rep2.claims) == (0, 1, 0)
+
+
+@pytest.mark.db
+def test_a_crashed_run_keeps_every_chunk_it_finished(conn, monkeypatch):
+    from rrsrch import cli
+    from rrsrch.reader import llm as llm_mod
+    conn.execute("INSERT INTO sources (id, title, has_full_text, snapshot_sha256) VALUES "
+                 "('MED:2', 'Bone marrow MSCs versus hyaluronic acid for knee osteoarthritis', false, 'x')")
+    conn.execute("INSERT INTO documents (source_id, part, text, sha256) VALUES ('MED:2', 'abstract', %s, %s)",
+                 (ABSTRACT, hashlib.sha256(ABSTRACT.encode()).hexdigest()))
+    conn.commit()
+    quote = ("At 12 months, WOMAC scores improved more with MSCs than with hyaluronic acid (p = 0.01), "
+             "while VAS pain did not differ (p = 0.41).")
+
+    class DiesOnSecondSource(ScriptedLLM):
+        calls = 0
+
+        def json_chat(self, system, user):
+            DiesOnSecondSource.calls += 1
+            if DiesOnSecondSource.calls > 1:
+                raise RuntimeError("model server went away")
+            return super().json_chat(system, user)
+
+    monkeypatch.setattr(llm_mod.LLM, "from_env", classmethod(lambda cls: DiesOnSecondSource([
+        {"quote": quote, "claim": "At 12 months, WOMAC improved more with MSCs than hyaluronic acid (p = 0.01)."}])))
+    info = conn.info
+    monkeypatch.setenv("RRSRCH_DATABASE_URL",
+                       f"postgresql://{info.user}:{info.password}@{info.host}:{info.port}/{info.dbname}")
+    with pytest.raises(RuntimeError, match="went away"):
+        cli.main(["read", "run"])
+    conn.rollback()
+    # the first source's chunk was committed when it finished, so a rerun starts after it
+    assert conn.execute("SELECT count(*) FROM claims").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM read_chunks").fetchone()[0] == 1
