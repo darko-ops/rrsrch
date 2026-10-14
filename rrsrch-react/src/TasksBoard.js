@@ -172,7 +172,7 @@ export default function TasksBoard({ apiKey, me, repos, repo, onRepo, isMobile }
             const cards = shown.filter((t) => t.state === c.state);
             return (
               <section key={c.state} aria-label={c.label} style={{ background: 'rgba(10,10,10,0.45)', border: '1px solid #1e1e1e',
-                borderRadius: 12, padding: 10, minHeight: 440, display: 'grid', gap: 8, alignContent: 'start' }}>
+                borderRadius: 12, padding: 10, minHeight: 440, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, alignContent: 'start' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 2px 4px' }}>
                   <span style={{ width: 7, height: 7, borderRadius: 999, background: c.color }} />
                   <span style={{ ...monoLabel, color: '#aaa', whiteSpace: 'nowrap' }}>{c.label}</span>

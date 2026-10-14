@@ -45,7 +45,7 @@ function ReportForm({ target, apiKey, onDone }) {
     if (r.ok) onDone(); else setErr(r.error);
   };
   return (
-    <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, marginTop: 10 }}>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <select aria-label="report kind" value={context} style={inputStyle}
           onChange={(e) => { setContext(e.target.value); setOutcome(OUTCOMES[e.target.value][0]); }}>

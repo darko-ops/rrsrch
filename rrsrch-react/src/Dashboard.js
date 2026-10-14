@@ -207,7 +207,7 @@ function IssueKeyForm({ apiKey, handle, ownScopes, onIssued }) {
     if (r.ok) onIssued(r.data); else setErr(r.error);
   };
   return (
-    <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12, marginTop: 12 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         {SCOPES.map((s) => {
           const allowed = !ownScopes || ownScopes.includes(s);
@@ -263,7 +263,7 @@ function KeysList({ apiKey, handle, canManage }) {
   const keys = state.data.keys;
   if (!keys.length) return <Note>No keys yet.</Note>;
   return (
-    <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 6, marginTop: 8 }}>
       {keys.map((k) => {
         const dead = k.revoked_at || new Date(k.expires_at) < new Date();
         return (
@@ -548,7 +548,7 @@ function NodeDetail({ node, graph, apiKey, onSelect, onClose }) {
         </a>
       )}
       {node.kind === 'source' && d?.source && (
-        <div style={{ display: 'grid', gap: 8, fontSize: 13, color: '#ccc' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, fontSize: 13, color: '#ccc' }}>
           <p style={{ margin: 0, color: '#fff', fontSize: 15, lineHeight: 1.5 }}>{d.source.title}</p>
           <div>{[d.source.journal, d.source.pub_year].filter(Boolean).join(' · ')}</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -608,7 +608,7 @@ function ClaimToReview({ item, apiKey, onDone, number, focused, onFocus }) {
   const p = item.passage;
   return (
     <div id={number ? `review-claim-${item.id}` : undefined} onMouseEnter={onFocus}
-      style={{ borderTop: '1px solid #1c1c1c', padding: '18px 0', display: 'grid', gap: 12,
+      style={{ borderTop: '1px solid #1c1c1c', padding: '18px 0', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12,
         ...(focused ? { background: 'rgba(0,255,136,0.03)' } : {}) }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         {number && <span style={{ ...numberBadge, ...(focused ? numberBadgeOn : {}) }}>{number}</span>}
@@ -948,7 +948,7 @@ function Tasks({ apiKey, repo, me, isMobile }) {
           </button>
         ))}
         {apiKey && (
-          <div style={{ display: 'grid', gap: 8, marginTop: 14, borderTop: '1px solid #222', paddingTop: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, marginTop: 14, borderTop: '1px solid #222', paddingTop: 14 }}>
             <textarea rows={2} value={draft.question} onChange={(e) => setDraft({ ...draft, question: e.target.value })} placeholder="Question to investigate" style={{ ...inputStyle, resize: 'vertical' }} />
             <input value={draft.deliverable} onChange={(e) => setDraft({ ...draft, deliverable: e.target.value })} placeholder="Deliverable that would answer it" style={inputStyle} />
             <div><Btn kind="primary" disabled={!draft.question.trim() || !draft.deliverable.trim()} onClick={create}>Propose task</Btn></div>
@@ -1102,7 +1102,7 @@ function Sidebar({ active, onPick, me, user, health, counts, isMobile }) {
           <span style={{ width: 26, height: 26, borderRadius: 999, background: '#1f2a2f', color: '#9ab', display: 'inline-flex',
             alignItems: 'center', justifyContent: 'center', fontFamily: fonts.mono, fontWeight: 600, fontSize: 11 }}>
             {initials(who)}</span>
-          <span style={{ display: 'grid' }}>
+          <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)' }}>
             <span style={{ fontSize: 13, color: '#ccc' }}>{who || 'Sign in'}</span>
             <span style={{ fontSize: 11, color: '#666' }}>Account</span>
           </span>

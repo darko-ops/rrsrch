@@ -49,7 +49,7 @@ function Details({ node, apiKey }) {
   if (d.error) return <Note tone="error">{d.error}</Note>;
   const x = d.data || {};
   return (
-    <div style={{ display: 'grid', gap: 8, borderTop: '1px solid #1c1c1c', paddingTop: 12, fontSize: 12.5, color: '#ccc' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, borderTop: '1px solid #1c1c1c', paddingTop: 12, fontSize: 12.5, color: '#ccc' }}>
       {x.claim?.evidence?.map((ev) => (
         <blockquote key={`${ev.id}-${ev.relation}`} style={{ margin: 0, borderLeft: `3px solid ${EDGE[ev.relation] || '#555'}`,
           padding: '4px 10px', lineHeight: 1.5 }}>
@@ -86,7 +86,7 @@ function Drawer({ node, graph, apiKey, onSelect }) {
     trial: [`https://clinicaltrials.gov/study/${node.label}`, `${node.label} on ClinicalTrials.gov →`],
   }[node.kind];
   return (
-    <div style={{ ...panelStyle, padding: 18, display: 'grid', gap: 12, alignContent: 'start' }}>
+    <div style={{ ...panelStyle, padding: 18, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12, alignContent: 'start' }}>
       <div style={{ display: 'flex', alignItems: 'center' }}>
         <span style={monoLabel}>{node.kind}{node.kind === 'claim' ? ` ${node.claim_id}` : ''}</span>
         <span style={{ marginLeft: 'auto', fontSize: 11, color: '#666', fontFamily: fonts.mono }}>esc to close</span>
@@ -101,7 +101,7 @@ function Drawer({ node, graph, apiKey, onSelect }) {
       )}
       <div>
         <div style={{ ...monoLabel, marginBottom: 8 }}>Connected · {linked.length}</div>
-        <div style={{ display: 'grid', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
           {linked.slice(0, 40).map((l) => (
             <button key={`${l.rel}-${l.other.id}-${l.out}`} type="button" onClick={() => onSelect(l.other)}
               style={{ display: 'flex', gap: 8, alignItems: 'baseline', textAlign: 'left', background: '#111',
@@ -173,7 +173,7 @@ export default function AtlasPage({ apiKey, repos, repo, onRepo, isMobile, focus
   const shownClaims = layout ? layout.nodes.filter((n) => n.kind === 'claim').length : 0;
 
   return (
-    <div style={{ display: 'grid', gap: 16, fontFamily: fonts.main }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, fontFamily: fonts.main }}>
       <PageHeader title="Atlas" subtitle="How the repository's knowledge connects. Select anything to trace it."
         right={<RepoPill repos={repos} repo={repo} onRepo={onRepo} />} />
       {g && (

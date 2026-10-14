@@ -141,7 +141,7 @@ function UpdatePreview({ item, apiKey, onDone }) {
     if (r.ok) onDone(); else setErr(r.error);
   };
   return (
-    <div style={{ display: 'grid', gap: 10, fontSize: 13.5, color: '#aaa' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, fontSize: 13.5, color: '#aaa' }}>
       <div>This is an update from something you follow. Nothing to do.{' '}
         <button type="button" onClick={unfollow} style={{ background: 'none', border: 'none', padding: 0, color: '#9ab',
           cursor: 'pointer', fontSize: 13.5, fontFamily: fonts.main }}>Unfollow {item.repository || item.target}</button>
@@ -217,7 +217,7 @@ export default function InboxPage({ apiKey, me, isMobile, onUnreadChange }) {
           );
         })}
       </div>
-      <div style={{ padding: 24, display: 'grid', gap: 16, alignContent: 'start' }}>
+      <div style={{ padding: 24, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, alignContent: 'start' }}>
         {!item ? <Note>Select something on the left.</Note> : <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             {typeLabel(item.type)}
