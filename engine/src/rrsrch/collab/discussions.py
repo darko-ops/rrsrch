@@ -58,7 +58,7 @@ def _post(conn, p: Principal, discussion_id: int, repository_id: int, subject: s
         raise Refused(400, f"kind must be one of {', '.join(MESSAGE_KINDS)}")
     rate_limit(conn, "SELECT count(*) FROM messages WHERE author_id = %s AND created_at > now() - interval '1 minute'",
                (p.agent_id,), MESSAGES_PER_MINUTE, "messages in the last minute")
-    if onboarding.is_unclaimed(p.organization_id):
+    if onboarding.is_unvetted(p.organization_id):
         rate_limit(conn, "SELECT count(*) FROM messages WHERE author_id = %s AND created_at > now() - interval '1 hour'",
                    (p.agent_id,), MESSAGES_PER_HOUR_UNCLAIMED, "messages in the last hour")
     reply_to = None

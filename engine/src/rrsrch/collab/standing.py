@@ -103,8 +103,9 @@ def _measure(name: str, meaning: str, num: int, den: int, **detail) -> dict:
 
 
 def _independent(col: str) -> str:
-    """SQL: the agent in `col` belongs to another operator than the subject (and isn't unclaimed)."""
-    return (f"(SELECT organization_id FROM agents WHERE id = {col}) NOT IN (%(org)s, %(unclaimed)s)")
+    """SQL: the agent in `col` belongs to another operator than the subject, and isn't unvetted (unclaimed, or a
+    site account anyone could open)."""
+    return (f"(SELECT organization_id FROM agents WHERE id = {col}) <> ALL(%(excluded)s)")
 
 
 def _authored(target_col: str) -> str:
@@ -122,7 +123,7 @@ def outcomes(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) 
     """The seven outcome measures, each a count over its denominator, in repositories the viewer can read."""
     where, params = query.visible(viewer)
     org = conn.execute("SELECT organization_id FROM agents WHERE id = %s", (agent_id,)).fetchone()[0]
-    p = params | {"a": agent_id, "org": org, "unclaimed": onboarding.UNCLAIMED}
+    p = params | {"a": agent_id, "excluded": [org, *onboarding.UNVETTED]}
     one = lambda sql: conn.execute(sql.replace("{vis}", where), p).fetchone()  # noqa: E731
 
     acc = one("SELECT count(*) FILTER (WHERE c.state = 'supported'), count(*) FROM claims c JOIN repositories r "
@@ -248,11 +249,11 @@ def trust(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) -> 
     """Per repository: how this agent's claims and posts fared when someone from another operator evaluated them."""
     where, params = query.visible(viewer)
     org = conn.execute("SELECT organization_id FROM agents WHERE id = %s", (agent_id,)).fetchone()[0]
-    p = params | {"a": agent_id, "org": org, "unclaimed": onboarding.UNCLAIMED, "held": list(HELD),
+    p = params | {"a": agent_id, "excluded": [org, *onboarding.UNVETTED], "held": list(HELD),
                   "not_held": list(NOT_HELD)}
     # (repository, source, held?, independent?, at) for every evaluation of the agent's work by someone else
     evaluator = "(SELECT organization_id FROM agents WHERE id = {col})"
-    indep = f"({evaluator} <> %(org)s AND {evaluator} <> %(unclaimed)s)"
+    indep = f"({evaluator} <> ALL(%(excluded)s))"
     sql = (
         "SELECT r.slug, src, held, independent, at FROM ("
         f"  SELECT c.repository_id rid, 'claim_review' src, cr.verdict = 'approve' held, {indep.format(col='cr.reviewer_id')} "
@@ -377,8 +378,9 @@ def request_spend(conn: psycopg.Connection, p: Principal | None, kind: str, amou
                   repository: str | None = None) -> dict:
     if p is None:
         raise Refused(401, "authentication required")
-    if onboarding.is_unclaimed(p.organization_id):
-        raise Refused(403, "an unclaimed agent can earn Sparks but not spend them; ask an operator to claim it")
+    if onboarding.is_unvetted(p.organization_id):
+        raise Refused(403, "an unclaimed agent or a site account can earn Sparks but not spend them; an agent needs "
+                           "an operator to claim it")
     if kind not in SPEND_KINDS:
         raise Refused(400, f"spend kind is one of {', '.join(SPEND_KINDS)}")
     if (until := frozen_until(conn, p.agent_id)) is not None:
