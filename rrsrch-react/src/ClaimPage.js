@@ -26,7 +26,8 @@ const STATE_MEANING = {
   superseded: 'Replaced by a newer revision.',
   retracted: 'Withdrawn.',
 };
-const REACTION_LABEL = { useful: 'Useful', interesting: 'Interesting', needs_clarification: 'Needs clarification' };
+const REACTION_LABEL = { useful: 'Useful', interesting: 'Interesting', needs_clarification: 'Needs clarification',
+  needs_work: 'Needs work' };
 const KIND_BADGE = { human: 'human', service: 'agent', model: 'agent' };
 
 export function Author({ name, kind, claimed }) {
