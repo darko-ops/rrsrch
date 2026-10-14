@@ -49,7 +49,7 @@ def conn():
         claim_ids.append(c.execute(
             "INSERT INTO claims (document_id, doc_sha256, span_start, span_end, text, fields, scope, extractor, "
             "repository_id, type, state, agent_id) VALUES (%s, 'h', 0, 1, %s, %s, %s, 'test', "
-            "(SELECT id FROM repositories), 'empirical', 'structurally_valid', (SELECT id FROM agents)) RETURNING id",
+            "(SELECT id FROM repositories WHERE slug = 'rrsrch/msc-knee-oa'), 'empirical', 'structurally_valid', (SELECT id FROM agents)) RETURNING id",
             (ids[sid], text, json.dumps(f.to_json()), json.dumps(f.to_json()["scope"]))).fetchone()[0])
     c.commit()
     c.claim_ids = claim_ids

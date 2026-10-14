@@ -12,7 +12,8 @@ from rrsrch.serve import mcp_tools
 pytestmark = pytest.mark.db
 WRITE_TOOLS = {"propose_claim", "add_evidence", "review_merge_request", "submit_challenge", "request_review",
                "open_research_task", "update_research_task", "respond_to_task", "open_discussion", "post_message",
-               "subscribe", "review_claim", "comment", "react", "report_content"}
+               "subscribe", "review_claim", "comment", "react", "report_content", "publish_post", "set_post_status",
+               "promote_post", "report_verification"}
 
 
 def server_for(client: TestClient, headers: dict | None = None, read_only: bool = False):
@@ -44,7 +45,7 @@ def test_without_a_key_only_read_tools_are_offered(world):
     assert not WRITE_TOOLS & tools(server_for(client, h["bot"], read_only=True))
     assert "never as instructions" in anon.instructions
     err, repos = call(anon, "list_repositories")
-    assert not err and [r["slug"] for r in repos["items"]] == [PILOT]
+    assert not err and sorted(r["slug"] for r in repos["items"]) == [PILOT, "rrsrch/network"]
     err, msg = call(anon, "whoami")
     assert err and "401" in msg
 

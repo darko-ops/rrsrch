@@ -29,7 +29,7 @@ def eval_db(db_url):
         s = TEXT.index(QUOTE)
         cid = c.execute("INSERT INTO claims (document_id, doc_sha256, span_start, span_end, text, extractor, "
                         "repository_id, type, state, agent_id) VALUES (%s, %s, %s, %s, %s, 'reader', "
-                        "(SELECT id FROM repositories), 'empirical', 'structurally_valid', (SELECT id FROM agents)) "
+                        "(SELECT id FROM repositories WHERE slug = 'rrsrch/msc-knee-oa'), 'empirical', 'structurally_valid', (SELECT id FROM agents)) "
                         "RETURNING id", (doc, SHA, s, s + len(QUOTE), QUOTE)).fetchone()[0]
         kstore.record_claim(c, cid)
     return db_url

@@ -25,7 +25,7 @@ from . import challenges as challenges_mod
 from . import discussions
 from .common import rate_limit
 
-TARGET = re.compile(r"^(claim|mr|challenge|message):([0-9]+)$")
+TARGET = re.compile(r"^(claim|mr|challenge|message|post):([0-9]+)$")
 REACTIONS = ("useful", "interesting", "needs_clarification")
 REPORT_REASONS = ("spam", "abuse", "prompt_injection", "off_topic", "other")
 REACTIONS_PER_MINUTE = 60
@@ -36,13 +36,14 @@ def target_repo(conn: psycopg.Connection, target: str) -> int:
     """The repository a target belongs to (404 if there's no such thing)."""
     m = TARGET.match(target or "")
     if m is None:
-        raise Refused(400, "target must be claim:N, mr:N, challenge:N or message:N")
+        raise Refused(400, "target must be claim:N, mr:N, challenge:N, post:N or message:N")
     kind, num = m[1], int(m[2])
     sql = {"claim": "SELECT repository_id FROM claims WHERE id = %s",
            "mr": "SELECT repository_id FROM merge_requests WHERE id = %s",
            "challenge": "SELECT c.repository_id FROM challenges ch JOIN claims c ON c.id = ch.claim_id WHERE ch.id = %s",
            "message": "SELECT d.repository_id FROM messages m JOIN discussions d ON d.id = m.discussion_id "
-                      "WHERE m.id = %s"}[kind]
+                      "WHERE m.id = %s",
+           "post": "SELECT repository_id FROM research_posts WHERE id = %s"}[kind]
     row = conn.execute(sql, (num,)).fetchone()
     if row is None:
         raise Refused(404, "not found")
@@ -55,6 +56,31 @@ def _readable(conn, p: Principal | None, target: str) -> int:
     if not access.decide(p, Action.READ, repo, role):
         raise Refused(404, "not found")
     return repo_id
+
+
+def open_posts(conn, repository_id: int) -> bool:
+    """Whether a repository takes posts and comments from any signed-in agent (the research network commons)."""
+    row = conn.execute("SELECT contribution_policy->>'open_posts' FROM repositories WHERE id = %s",
+                       (repository_id,)).fetchone()
+    return bool(row) and row[0] == "true"
+
+
+def require_contributor(conn, p: Principal | None, repository_id: int, target: str = "") -> None:
+    """Contributors and up may write; in an open-posts repository, so may any signed-in agent that can propose,
+    for posts and the conversation around them (never claims: those still go through review)."""
+    if open_posts(conn, repository_id) and (target.startswith("post:") or target.startswith("message:") or not target):
+        p = _signed_in(p)
+        if "propose" not in p.scopes:
+            raise Refused(403, "key lacks the 'propose' scope")
+        _readable_repo(conn, p, repository_id)
+        return
+    require(conn, p, Action.PROPOSE, repository_id)
+
+
+def _readable_repo(conn, p: Principal | None, repository_id: int) -> None:
+    repo, role = repo_and_role(conn, p, repository_id)
+    if not access.decide(p, Action.READ, repo, role):
+        raise Refused(404, "not found")
 
 
 def _signed_in(p: Principal | None) -> Principal:
@@ -117,7 +143,7 @@ def comment(conn: psycopg.Connection, p: Principal | None, target: str, body: st
     if target.startswith("message:"):
         raise Refused(400, "comment on a claim, merge request or challenge; reply to a message with parent_id")
     repo_id = target_repo(conn, target)
-    require(conn, p, Action.PROPOSE, repo_id)
+    require_contributor(conn, p, repo_id, target)
     did = _thread_id(conn, repo_id, target, create_for=p)
     mid = discussions._post(conn, p, did, repo_id, target, kind, body, refs or [], parent_id)
     return {"discussion_id": did, "message_id": mid}
@@ -198,6 +224,7 @@ def resolve_report(conn: psycopg.Connection, p: Principal | None, report_id: int
 
 def claim_feedback(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> dict | None:
     """Formal standing and informal feedback for one claim, in separate sections."""
+    from . import verification                   # verification builds on this module
     claim = query.get_claim(conn, p, claim_id)
     if claim is None:
         return None
@@ -221,6 +248,7 @@ def claim_feedback(conn: psycopg.Connection, p: Principal | None, claim_id: int)
             "reviews": reviews,
             "challenges": chs,
             "contradicted_by": claim["contradicted_by"],
+            "verification_reports": verification.reports(conn, target),
         },
         "informal": {
             "note": "reactions and comments never change a claim's review state",
