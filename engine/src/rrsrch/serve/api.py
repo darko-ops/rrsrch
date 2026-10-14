@@ -13,11 +13,12 @@ block other requests while it does.
 """
 from __future__ import annotations
 
+import hmac
 import os
 from collections.abc import Callable
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
@@ -25,6 +26,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 
+from ..identity.access import Principal
 from ..ledger import db
 from ..reader.llm import LLM
 from . import answer as answer_mod
@@ -39,8 +41,21 @@ class AnswerRequest(BaseModel):
     question: str | None = None
 
 
-def _error(code: int, message: str) -> JSONResponse:
-    return JSONResponse({"ok": False, "error": message}, status_code=code)
+def _error(code: int, message: str, headers: dict | None = None) -> JSONResponse:
+    return JSONResponse({"ok": False, "error": message}, status_code=code, headers=headers)
+
+
+def client_of(request: Request, p: Principal | None) -> tuple[str, bool]:
+    """Who is asking, for answer limits: an agent by key, otherwise a visitor by IP. The site's proxy passes the
+    visitor's IP (every request it makes comes from Vercel), proven by a secret it shares with the engine; a
+    header without the secret is ignored, so nobody can claim another visitor's IP."""
+    if p is not None:
+        return f"agent:{p.agent_id}", True
+    secret = os.environ.get("RRSRCH_PROXY_SECRET", "")
+    given = request.headers.get("x-rrsrch-proxy-secret", "")
+    if secret and hmac.compare_digest(given, secret) and request.headers.get("x-rrsrch-client-ip"):
+        return f"ip:{request.headers['x-rrsrch-client-ip'].strip()}", False
+    return f"ip:{request.client.host if request.client else 'unknown'}", False
 
 
 def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM.from_env,
@@ -94,21 +109,33 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
             return _error(503, str(e)[:200])
         return JSONResponse({"ok": True, "claims": n, "model": os.environ.get("RRSRCH_READER_MODEL")})
 
+    def _submit(question: str, request: Request, p: Principal | None):
+        client, agent = client_of(request, p)
+        try:
+            return app.state.jobs.submit(question, client=client, agent=agent), None
+        except jobs_mod.RateLimited as e:
+            return None, _error(429, str(e), {"Retry-After": "120"})
+        except jobs_mod.QueueFull as e:
+            return None, _error(429, str(e), {"Retry-After": "60"})
+
     @app.post("/v1/answer")
     @app.post("/answer", include_in_schema=False)
-    def answer_route(req: AnswerRequest | None = None) -> JSONResponse:
+    def answer_route(request: Request, req: AnswerRequest | None = None,
+                     p: Principal | None = Depends(identity_routes.principal)) -> JSONResponse:
+        """One request, one answer: the same queue and limits as /v1/answers, but it waits for the result.
+        Fine for the CLI and MCP; behind a proxy with a short timeout, use /v1/answers instead."""
         question = " ".join((req.question or "").split()) if req else ""
         if not question:
             return _error(400, "question required")
         if len(question) > MAX_QUESTION:
             return _error(400, "question too long")
-        try:
-            llm = make_llm()
-            with connect() as conn:
-                db.migrate(conn)
-                return JSONResponse(answer(conn, llm, question))
-        except Exception as e:  # noqa: BLE001
-            return _error(500, str(e)[:400])
+        submitted, refused = _submit(question, request, p)
+        if refused:
+            return refused
+        job = app.state.jobs.wait(submitted[0]["id"])
+        if job["status"] == "done":
+            return JSONResponse(jsonable_encoder(job["result"]))
+        return _error(500, job["error"] or "the answer is still being written; ask /v1/answers/" + str(job["id"]))
 
     def _job_view(job: dict) -> dict:
         out = {"ok": True, "job_id": str(job["id"]), "question": job["question"], "status": job["status"],
@@ -120,17 +147,18 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
         return out
 
     @app.post("/v1/answers", status_code=202)
-    def start_answer(req: AnswerRequest | None = None) -> JSONResponse:
+    def start_answer(request: Request, req: AnswerRequest | None = None,
+                     p: Principal | None = Depends(identity_routes.principal)) -> JSONResponse:
         """Start answering; returns at once with a job to poll. Repeats of a question share one job."""
         question = " ".join((req.question or "").split()) if req else ""
         if not question:
             return _error(400, "question required")
         if len(question) > MAX_QUESTION:
             return _error(400, "question too long")
-        try:
-            job, created = app.state.jobs.submit(question)
-        except jobs_mod.QueueFull as e:
-            return _error(429, str(e))
+        submitted, refused = _submit(question, request, p)
+        if refused:
+            return refused
+        job, created = submitted
         body = jsonable_encoder(_job_view(job)) | {"reused": not created}
         return JSONResponse(body, status_code=202 if job["status"] in ("queued", "running") else 200)
 

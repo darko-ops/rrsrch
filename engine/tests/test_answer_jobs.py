@@ -77,7 +77,7 @@ def test_the_waiting_line_is_bounded_and_bad_requests_refused(make):
     def stuck(conn, llm, question, progress):
         block.wait(5)
         return {"ok": True}
-    client, _ = make(stuck, max_waiting=2)
+    client, _ = make(stuck, max_waiting=2, anonymous_waiting=2, per_client=50)   # the queue cap, not the visitor limit
     first = client.post("/v1/answers", json={"question": "first"}).json()
     wait_for(client, first["job_id"], "running")
     assert client.post("/v1/answers", json={"question": "second"}).status_code == 202
