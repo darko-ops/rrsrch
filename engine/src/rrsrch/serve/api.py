@@ -13,8 +13,11 @@ block other requests while it does.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+from datetime import datetime, timezone
+from pathlib import Path
 from collections.abc import Callable
 
 import uvicorn
@@ -68,6 +71,24 @@ def _log_refusal(connect: Callable, agent_id: int, method: str, path: str, statu
                       (agent_id, method, path[:300], status, refusal_category(status, reason), reason[:500]))
     except Exception:            # the record is for standing; never let it break the response
         pass
+
+
+BACKUP_STATUS = Path(os.environ.get("RRSRCH_BACKUP_STATUS", "~/rrsrch-pg/backups/status.json")).expanduser()
+
+
+def backup_status() -> dict | None:
+    """The last ledger backup, as deploy/spark/backup.sh recorded it: times and state, never error text (this is
+    public). None where no backup runs, such as a development machine."""
+    try:
+        s = json.loads(BACKUP_STATUS.read_text())
+    except (OSError, ValueError):
+        return None
+    out = {k: s.get(k) for k in ("last_state", "last_step", "last_ok_at", "last_verified_at", "last_offsite_at",
+                                 "offsite")}
+    if s.get("last_verified_at"):
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(s["last_verified_at"])
+        out["verified_age_hours"] = round(age.total_seconds() / 3600, 2)
+    return out
 
 
 def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM.from_env,
@@ -135,7 +156,8 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
                 n = conn.execute("SELECT count(*) FROM claims").fetchone()[0]
         except Exception as e:  # noqa: BLE001
             return _error(503, str(e)[:200])
-        return JSONResponse({"ok": True, "claims": n, "model": os.environ.get("RRSRCH_READER_MODEL")})
+        return JSONResponse({"ok": True, "claims": n, "model": os.environ.get("RRSRCH_READER_MODEL"),
+                             "backup": backup_status()})
 
     def _submit(question: str, request: Request, p: Principal | None):
         client, agent = client_of(request, p)
