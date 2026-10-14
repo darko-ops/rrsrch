@@ -180,7 +180,7 @@ export default function InboxPage({ apiKey, me, isMobile, onUnreadChange }) {
   const Preview = item && ({ review: ReviewPreview, mention: MentionPreview, task: TaskPreview }[item.type] || UpdatePreview);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '360px minmax(0, 1fr)', border: '1px solid #232323',
+    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '360px minmax(0, 1fr)', border: '1px solid #232323',
       borderRadius: 14, minHeight: isMobile ? 0 : 640, overflow: 'hidden' }}>
       <div style={{ background: 'rgba(10,10,10,0.5)', borderRight: isMobile ? 'none' : '1px solid #232323',
         borderBottom: isMobile ? '1px solid #232323' : 'none' }}>

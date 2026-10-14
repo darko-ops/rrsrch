@@ -210,6 +210,10 @@ async function engineProblems() {
   if (String(b.offsite || '').startsWith('r2:') && !(hours(b.last_offsite_at) < BACKUP_MAX_HOURS)) {
     problems.push('no off-site copy in the last 13 hours');
   }
+  if (b.accounts_state === 'failed') problems.push('the site account store was not backed up on the last run');
+  else if (b.last_accounts_at && !(hours(b.last_accounts_at) < BACKUP_MAX_HOURS)) {
+    problems.push('no off-site copy of the site account store in the last 13 hours');
+  }
   return problems;
 }
 
@@ -221,6 +225,23 @@ async function sendAlert(subject, text) {
     body: JSON.stringify({ from: MAIL_FROM, to: [to], subject, text }) }).catch(() => null);
   return !!(r && r.ok);
 }
+
+// The account store, for the ledger backup on Spark (deploy/spark/backup.sh), which encrypts it and keeps it in R2.
+// Only a caller holding the proxy secret the site shares with the engine gets it; nothing is cached.
+app.get('/api/backup/accounts', async (req, res) => {
+  const given = String(req.headers['x-rrsrch-proxy-secret'] || '');
+  if (!ENGINE_PROXY_SECRET || given.length !== ENGINE_PROXY_SECRET.length
+      || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(ENGINE_PROXY_SECRET))) {
+    return res.status(401).json({ ok: false });
+  }
+  try {
+    res.set('Cache-Control', 'no-store');
+    return res.json(await readUsers());
+  } catch (err) {
+    console.error('accounts export failed:', err);
+    return res.status(503).json({ ok: false, error: 'account store unavailable' });
+  }
+});
 
 app.get('/api/cron/health', async (req, res) => {
   const secret = process.env.CRON_SECRET || '';

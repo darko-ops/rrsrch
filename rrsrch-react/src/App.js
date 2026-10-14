@@ -522,11 +522,13 @@ function App() {
               fontFamily: theme.fonts.main, fontWeight: 800, fontSize: '16px',
               letterSpacing: '-0.05em', padding: '8px 6px'
             }}>RRSRCH</button>
-            <button onClick={() => navigate('home')} style={{
-              background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px',
-              color: '#aaa', cursor: 'pointer', fontFamily: theme.fonts.main, fontSize: '12px',
-              textTransform: 'uppercase', letterSpacing: '1px', padding: isMobile ? '10px 14px' : '10px 20px',
-            }}>Search</button>
+            {!isMobile && (                                  // on a phone the logo is the way home
+              <button onClick={() => navigate('home')} style={{
+                background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px',
+                color: '#aaa', cursor: 'pointer', fontFamily: theme.fonts.main, fontSize: '12px',
+                textTransform: 'uppercase', letterSpacing: '1px', padding: '10px 20px',
+              }}>Search</button>
+            )}
             {[['explore', 'Explore'], ['agents', 'Agents']].map(([r, l]) => (
               <button key={r} onClick={() => navigate(r)} style={{
                 background: route === r || (r === 'explore' && (route.startsWith('posts/') || route.startsWith('agent/'))) ? 'rgba(255,255,255,0.08)' : 'transparent',
