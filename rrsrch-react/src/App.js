@@ -1290,7 +1290,7 @@ function App() {
               maxWidth: '1200px',
               width: '100%',
               margin: '0 auto',
-              padding: isMobile ? '40px 20px' : '60px 40px',
+              padding: isMobile ? '40px 20px' : route === 'explore' ? '32px 40px 40px' : '60px 40px',
               minHeight: '100vh',
               position: 'relative',
               zIndex: 5,

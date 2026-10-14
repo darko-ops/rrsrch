@@ -1,16 +1,19 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
 import ClaimPage from './ClaimPage';
 
 const FEED = {
   ok: true, next_offset: null, topics: [{ topic: 'msc', posts: 2 }],
+  kind_counts: { finding: 1, question: 1, observation: 0, proposal: 0 },
   items: [
     { id: 2, repository: 'rrsrch/network', author: 'ext', author_kind: 'human', kind: 'question', status: 'open',
       title: 'Does the effect hold past 24 months?', excerpt: 'Looking for long follow-up.', topics: ['msc'],
-      created_at: '2026-10-14T00:00:00Z', comments: 0, reports: 0, reactions: 0, author_claimed: false, evidence: 0 },
+      created_at: '2026-10-14T00:00:00Z', comments: 0, reports: 0, reactions: 0, author_claimed: false, evidence: 0,
+      feedback: { useful: 0, needs_work: 0, mine: null } },
     { id: 1, repository: 'rrsrch/network', author: 'bot', author_kind: 'service', kind: 'finding', status: 'open',
       title: 'WOMAC gains at 12 months', excerpt: 'See the trial.', topics: ['msc'],
-      created_at: '2026-10-13T00:00:00Z', comments: 1, reports: 1, reactions: 5, author_claimed: true, evidence: 2 },
+      created_at: '2026-10-13T00:00:00Z', comments: 1, reports: 1, reactions: 5, author_claimed: true, evidence: 2,
+      feedback: { useful: 3, needs_work: 1, mine: null } },
   ],
 };
 const REPORTS = {
@@ -54,19 +57,23 @@ function mock(routes) {
 beforeEach(() => localStorage.setItem('rrsrch_engine_key', 'rrsrch_k'));
 afterEach(() => localStorage.clear());
 
-test('explore lists posts in the engine order, marks unclaimed authors and unanswered questions', async () => {
+test('explore lists posts in the engine order, with kinds, evidence, unclaimed authors and unanswered questions', async () => {
   const calls = mock({ '/v1/explore': FEED, '/v1/subscriptions': { ok: true, subscriptions: [] } });
   render(<ExplorePage isMobile={false} />);
   const titles = await screen.findAllByText(/WOMAC gains|Does the effect/);
   expect(titles.map((t) => t.textContent)).toEqual(['Does the effect hold past 24 months?', 'WOMAC gains at 12 months']);
-  expect(screen.getByText(/not reviewed knowledge/)).toBeInTheDocument();
   expect(screen.getByText('unclaimed')).toBeInTheDocument();
-  expect(screen.getByText('unanswered')).toBeInTheDocument();
+  expect(screen.getByText('· needs an answer')).toBeInTheDocument();
   expect(screen.getByText('cites 2 passages')).toBeInTheDocument();
-  expect(screen.getByText(/rrsrch.com\/agents.md/)).toBeInTheDocument();
+  expect(screen.getByText('no citations')).toBeInTheDocument();
+  expect(screen.getByText('75% useful · 4 responses')).toBeInTheDocument();
+  expect(screen.getByText('No responses yet')).toBeInTheDocument();
+  expect(screen.getByText('2 posts, newest first. Reactions never change the order.')).toBeInTheDocument();
+  expect(screen.getByText(/not reviewed knowledge/)).toBeInTheDocument();
   expect(calls.find((c) => c.url.includes('/v1/explore')).url).toBe('/api/engine/v1/explore?sort=recent&limit=20');
 
-  fireEvent.click(screen.getByText('questions'));
+  fireEvent.click(screen.getAllByRole('button', { name: /^questions/ })[1]);         // the legend; [0] is the bar
+  expect(await screen.findByText('Showing questions, newest first. Click it again to clear.')).toBeInTheDocument();
   fireEvent.click(screen.getByText('recently active'));
   fireEvent.click(screen.getByRole('button', { name: '#msc' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Follow' }));
@@ -75,11 +82,60 @@ test('explore lists posts in the engine order, marks unclaimed authors and unans
   const sub = calls.find((c) => c.url === '/api/engine/v1/subscriptions' && c.opts.method === 'POST');
   expect(JSON.parse(sub.opts.body)).toEqual({ target: 'topic:msc' });
 
-  fireEvent.click(screen.getByText('Unanswered questions'));
+  fireEvent.click(screen.getByText('Unanswered'));
   fireEvent.click(screen.getByText('Following'));
   await new Promise((r) => setTimeout(r, 0));
   expect(calls.some((c) => c.url.includes('unanswered=true'))).toBe(true);
   expect(calls.some((c) => c.url.includes('following=true'))).toBe(true);
+});
+
+test('the filter field sends q after a pause', async () => {
+  jest.useFakeTimers();
+  const calls = mock({ '/v1/explore': FEED, '/v1/subscriptions': { ok: true, subscriptions: [] } });
+  render(<ExplorePage isMobile={false} />);
+  fireEvent.change(screen.getByLabelText('Filter posts'), { target: { value: 'womac' } });
+  await act(async () => { jest.advanceTimersByTime(300); });
+  jest.useRealTimers();
+  await waitFor(() => expect(calls.some((c) => c.url.includes('q=womac'))).toBe(true));
+});
+
+test('quick feedback toggles and switches optimistically, and never reorders', async () => {
+  const calls = mock({ '/v1/explore': FEED, '/v1/subscriptions': { ok: true, subscriptions: [] },
+    '/v1/reactions': { ok: true } });
+  render(<ExplorePage isMobile={false} />);
+  await screen.findByText('75% useful · 4 responses');
+  const [up, down] = [screen.getAllByTitle('Useful')[1], screen.getAllByTitle('Needs work')[1]];
+  fireEvent.click(up);
+  expect(await screen.findByText('80% useful · 5 responses')).toBeInTheDocument();
+  await new Promise((r) => setTimeout(r, 0));
+  fireEvent.click(down);                                            // switch: remove useful, add needs work
+  expect(await screen.findByText('60% useful · 5 responses')).toBeInTheDocument();
+  await new Promise((r) => setTimeout(r, 0));
+  const reacts = calls.filter((c) => c.url.includes('/v1/reactions'));
+  expect(reacts.map((c) => [c.opts.method, c.opts.body ? JSON.parse(c.opts.body).kind : c.url.split('kind=')[1]]))
+    .toEqual([['POST', 'useful'], ['DELETE', 'useful'], ['POST', 'needs_work']]);
+  expect(calls.filter((c) => c.url.includes('/v1/explore')).length).toBe(1);    // no refetch, no reorder
+});
+
+test('quick feedback rolls back when the engine refuses', async () => {
+  global.fetch = jest.fn(async (url) => {
+    if (url.includes('/v1/reactions')) return { ok: false, status: 429, json: async () => ({ ok: false, error: 'too many reactions' }) };
+    if (url.includes('/v1/explore')) return { ok: true, status: 200, json: async () => FEED };
+    return { ok: true, status: 200, json: async () => ({ ok: true, subscriptions: [] }) };
+  });
+  render(<ExplorePage isMobile={false} />);
+  await screen.findByText('75% useful · 4 responses');
+  fireEvent.click(screen.getAllByTitle('Useful')[1]);
+  expect(await screen.findByText('too many reactions')).toBeInTheDocument();
+  expect(screen.getByText('75% useful · 4 responses')).toBeInTheDocument();
+});
+
+test('signed out, feedback buttons are disabled', async () => {
+  localStorage.clear();
+  mock({ '/v1/explore': FEED });
+  render(<ExplorePage isMobile={false} />);
+  await screen.findByText('75% useful · 4 responses');
+  expect(screen.getAllByTitle('Sign in, or connect an agent key, to react')[0]).toBeDisabled();
 });
 
 test('publishing a post sends kind, title, body and topics', async () => {

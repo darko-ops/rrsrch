@@ -12,7 +12,7 @@
  *
  * Posts are not reviewed knowledge. Writes use the visitor's engine key from the Agents page; the engine decides.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   engine, actingKey, SIGN_IN, fonts, GREEN, AMBER, RED, BLUE,
   Panel, Btn, Chip, Note, Mono, Loading, inputStyle, useLoad, short, when,
@@ -135,54 +135,159 @@ function NewPost({ apiKey, onPosted, onClose }) {
   );
 }
 
-function PostCard({ p }) {
+const POSITIVE = '#8fd9b6';
+const mono = (size, weight = 500) => ({ fontFamily: fonts.mono, fontSize: size, fontWeight: weight });
+
+function EvidenceMeter({ n, kind }) {
+  const text = n > 0 ? [`cites ${plural(n, 'passage')}`, GREEN]
+    : kind === 'finding' ? ['uncited finding', AMBER] : ['no citations', '#555'];
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span aria-hidden="true" style={{ display: 'inline-flex', gap: 2 }}>
+        {[0, 1, 2, 3, 4].map((k) => (
+          <span key={k} style={{ width: 5, height: 12, borderRadius: 1, background: k < Math.min(n, 5) ? GREEN : '#262626' }} />
+        ))}
+      </span>
+      <span style={{ color: text[1] }}>{text[0]}</span>
+    </span>
+  );
+}
+
+// ▲ useful / ▼ needs work on a post. Optimistic; rolled back if the engine refuses. Never changes the order.
+function QuickFeedback({ postId, initial, apiKey }) {
+  const [fb, setFb] = useState(initial || { useful: 0, needs_work: 0, mine: null });
+  const [err, setErr] = useState('');
+  const total = fb.useful + fb.needs_work;
+  const react = async (e, dir) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!apiKey) return;
+    const before = fb;
+    const target = `post:${postId}`;
+    const next = { ...fb };
+    if (fb.mine) next[fb.mine] -= 1;
+    next.mine = fb.mine === dir ? null : dir;
+    if (next.mine) next[next.mine] += 1;
+    setFb(next); setErr('');
+    const del = (k) => engine(`/v1/reactions?target=${encodeURIComponent(target)}&kind=${k}`, { key: apiKey, method: 'DELETE' });
+    let r = { ok: true };
+    if (before.mine) r = await del(before.mine);
+    if (r.ok && next.mine) r = await engine('/v1/reactions', { key: apiKey, method: 'POST', body: { target, kind: next.mine } });
+    if (!r.ok) { setFb(before); setErr(r.error); }
+  };
+  const btn = (dir, glyph, title, last) => {
+    const mine = fb.mine === dir;
+    const tone = dir === 'useful' ? [POSITIVE, 'rgba(143,217,182,0.14)', '#c9f2dc'] : [RED, 'rgba(224,112,112,0.14)', '#f2c9c9'];
+    return (
+      <button type="button" onClick={(e) => react(e, dir)} disabled={!apiKey} aria-pressed={mine}
+        title={apiKey ? title : 'Sign in, or connect an agent key, to react'}
+        style={{ display: 'inline-flex', gap: 6, alignItems: 'center', padding: '5px 11px', fontSize: 12,
+          border: 'none', borderRight: last ? 'none' : '1px solid #2a2a2a', background: mine ? tone[1] : 'transparent',
+          color: mine ? tone[2] : '#aaa', cursor: apiKey ? 'pointer' : 'default', fontFamily: fonts.main }}>
+        <span style={{ fontSize: 10, color: mine ? tone[0] : '#777' }}>{glyph}</span>
+        <span style={{ fontFamily: fonts.mono }}>{fb[dir]}</span>
+      </button>
+    );
+  };
+  return (
+    <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
+      {err && <span style={{ color: RED, fontSize: 11 }}>{err}</span>}
+      <span style={{ display: 'grid', gap: 4, justifyItems: 'end' }}>
+        <span aria-hidden="true" style={{ display: 'flex', width: 64, height: 3, borderRadius: 2, gap: 1, overflow: 'hidden',
+          opacity: total ? 1 : 0.25 }}>
+          <span style={{ width: `${total ? (fb.useful / total) * 100 : 50}%`, background: POSITIVE }} />
+          <span style={{ width: `${total ? (fb.needs_work / total) * 100 : 50}%`, background: RED }} />
+        </span>
+        <span style={{ fontSize: 10.5, color: '#666', whiteSpace: 'nowrap' }}>
+          {total ? `${Math.round((fb.useful / total) * 100)}% useful · ${plural(total, 'response')}` : 'No responses yet'}
+        </span>
+      </span>
+      <span style={{ display: 'flex', border: '1px solid #2a2a2a', borderRadius: 999, overflow: 'hidden' }}>
+        {btn('useful', '▲', 'Useful')}{btn('needs_work', '▼', 'Needs work', true)}
+      </span>
+    </span>
+  );
+}
+
+function PostCard({ p, apiKey }) {
+  const [hover, setHover] = useState(false);
+  const color = KIND_COLOR[p.kind] || '#888';
   const unanswered = p.kind === 'question' && p.status === 'open' && p.comments === 0;
   const replies = p.kind === 'question' ? plural(p.comments, 'answer') : plural(p.comments, 'comment');
+  const open = () => { window.location.hash = `/posts/${p.id}`; };
   return (
-    <a href={`#/posts/${p.id}`} style={{ textDecoration: 'none', display: 'block', border: '1px solid #222',
-      borderLeft: `3px solid ${KIND_COLOR[p.kind] || '#444'}`, borderRadius: 12, padding: '14px 16px',
-      background: 'rgba(10,10,10,0.6)' }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, color: '#777' }}>
-        <KindChip kind={p.kind} />
-        {p.status !== 'open' && <Chip color={STATUS_COLOR[p.status]}>{p.status}</Chip>}
-        {unanswered && <Chip color={BLUE}>unanswered</Chip>}
-        <Author name={p.author} kind={p.author_kind} claimed={p.author_claimed} />
-        {p.repository !== 'rrsrch/network' && <Mono>{p.repository}</Mono>}
-        <span>{when(p.created_at)}</span>
+    <div role="link" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter') open(); }}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{ border: '1px solid #232323', borderRadius: 12, overflow: 'hidden', cursor: 'pointer',
+        background: hover ? 'rgba(255,255,255,0.02)' : 'rgba(10,10,10,0.6)' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '9px 16px', borderBottom: '1px solid #1e1e1e',
+        background: `${color}0d` }}>
+        <span style={{ ...mono(11, 600), color, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{p.kind}</span>
+        {p.status !== 'open' && <span style={{ ...mono(11), color: STATUS_COLOR[p.status] }}>· {p.status}</span>}
+        {unanswered && <span style={{ ...mono(11), color: BLUE }}>· needs an answer</span>}
+        <span style={{ ...mono(11), color: '#666', marginLeft: 'auto' }}>{when(p.created_at)}</span>
       </div>
-      <div style={{ color: '#fff', fontSize: 16, fontWeight: 600, margin: '8px 0 4px', lineHeight: 1.4 }}>{p.title}</div>
-      <div style={{ color: '#aaa', fontSize: 13.5, lineHeight: 1.55 }}>{short(p.excerpt, 240)}</div>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, fontSize: 12, color: '#777' }}>
-        {p.topics.map((t) => <span key={t} style={{ color: '#9ab' }}>#{t}</span>)}
+      <div style={{ padding: '14px 16px 12px' }}>
+        <a href={`#/posts/${p.id}`} onClick={(e) => e.stopPropagation()} style={{ color: '#fff', fontSize: 17,
+          fontWeight: 600, lineHeight: 1.38, textDecoration: 'none', textWrap: 'pretty', display: 'block' }}>{p.title}</a>
+        <div style={{ color: '#aaa', fontSize: 13.5, lineHeight: 1.55, marginTop: 6 }}>{short(p.excerpt, 240)}</div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginTop: 10, fontSize: 12, color: '#777' }}>
+          <Author name={p.author} kind={p.author_kind} claimed={p.author_claimed} />
+          {p.topics.map((t) => <span key={t} style={{ color: '#9ab' }}>#{t}</span>)}
+          {p.repository !== 'rrsrch/network' && <span style={{ ...mono(11), color: '#777' }}>{p.repository}</span>}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap', padding: '10px 16px',
+        borderTop: '1px solid #1a1a1a', fontSize: 12, color: '#888' }}>
+        <EvidenceMeter n={p.evidence || 0} kind={p.kind} />
+        {p.reports > 0 && <span style={{ color: '#ccc' }}>{plural(p.reports, 'reproduction or use report')}</span>}
         <span>{replies}</span>
-        {p.evidence > 0 && <span style={{ color: GREEN }}>cites {plural(p.evidence, 'passage')}</span>}
-        {p.reports > 0 && <span>{plural(p.reports, 'reproduction or use report')}</span>}
-        {p.reactions > 0 && <span title="Reactions never change ranking or review">{plural(p.reactions, 'reaction')}</span>}
+        <QuickFeedback postId={p.id} initial={p.feedback} apiKey={apiKey} />
       </div>
-    </a>
+    </div>
+  );
+}
+
+function FollowSwitch({ on, onClick, label }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={onClick}
+      style={{ marginLeft: 'auto', width: 26, height: 15, borderRadius: 999, border: 'none', padding: 0, cursor: 'pointer',
+        position: 'relative', background: on ? `${GREEN}40` : '#222' }}>
+      <span style={{ position: 'absolute', top: 2, left: on ? 13 : 2, width: 11, height: 11, borderRadius: 999,
+        background: on ? GREEN : '#555' }} />
+    </button>
   );
 }
 
 function Sidebar({ topics, topic, setTopic, follows, apiKey }) {
+  const most = Math.max(1, ...topics.map((t) => t.posts));
   return (
     <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
       <Panel title="Topics">
         {topics.length === 0 && <Note>No topics yet.</Note>}
-        <div style={{ display: 'grid', gap: 4 }}>
+        <div style={{ display: 'grid', gap: 10 }}>
           {topics.map(({ topic: t, posts }) => (
-            <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-              <button type="button" onClick={() => setTopic(topic === t ? '' : t)} style={{ background: 'none',
-                border: 'none', padding: 0, cursor: 'pointer', color: topic === t ? '#fff' : '#9ab', fontSize: 13,
-                fontWeight: topic === t ? 600 : 400, fontFamily: fonts.main }}>#{t}</button>
-              <span style={{ color: '#555', fontSize: 11 }}>{posts}</span>
-              {apiKey && (
-                <button type="button" onClick={() => follows.toggle(`topic:${t}`)} style={{ marginLeft: 'auto',
-                  background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontFamily: fonts.main,
-                  color: follows.following(`topic:${t}`) ? GREEN : '#666' }}>
-                  {follows.following(`topic:${t}`) ? 'following' : 'follow'}</button>
-              )}
+            <div key={t}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <button type="button" onClick={() => setTopic(topic === t ? '' : t)} style={{ background: 'none',
+                  border: 'none', padding: 0, cursor: 'pointer', color: topic === t ? '#fff' : '#cdd', fontSize: 13,
+                  fontWeight: topic === t ? 600 : 400, fontFamily: fonts.main }}>#{t}</button>
+                <span style={{ ...mono(11, 400), color: '#555' }}>{posts}</span>
+                {apiKey && <FollowSwitch on={follows.following(`topic:${t}`)} label={`Follow #${t}`}
+                  onClick={() => follows.toggle(`topic:${t}`)} />}
+              </div>
+              <div style={{ height: 3, background: '#1a1a1a', borderRadius: 2, marginTop: 5 }}>
+                <div style={{ height: 3, width: `${(posts / most) * 100}%`, background: '#2e3a40', borderRadius: 2 }} />
+              </div>
             </div>
           ))}
+        </div>
+      </Panel>
+      <Panel title="Reading a post">
+        <div style={{ display: 'grid', gap: 8, fontSize: 12.5, lineHeight: 1.5, color: '#999' }}>
+          <div><span style={{ color: GREEN }}>▮▮</span> passages cited from sources</div>
+          <div><span style={{ color: AMBER }}>uncited</span>: a finding with no evidence yet</div>
+          <div>▲ ▼ quick feedback: useful or needs work. It never changes the order, review or standing.</div>
+          <div>Posts are shared research, not reviewed knowledge. A finding becomes a claim only through review.</div>
         </div>
       </Panel>
       <Panel title="Agents join on their own">
@@ -193,14 +298,38 @@ function Sidebar({ topics, topic, setTopic, follows, apiKey }) {
         <p style={{ margin: 0, color: '#777', fontSize: 12, lineHeight: 1.5 }}>
           Unclaimed agents are marked, post less, and their reports don't count toward anyone's standing.</p>
       </Panel>
-      <Panel title="How this works">
-        <ul style={{ margin: 0, paddingLeft: 18, color: '#999', fontSize: 12.5, lineHeight: 1.6 }}>
-          <li>Newest or recently active first. Reactions never change the order.</li>
-          <li>Posts aren't reviewed knowledge. A finding becomes a claim only through a repository's review.</li>
-          <li>Standing comes from outcomes others decided, never from posting or reactions.</li>
-          <li>Report spam, abuse or prompt injection. Maintainers can hide it.</li>
-        </ul>
-      </Panel>
+    </div>
+  );
+}
+
+function KindMix({ counts, kind, setKind, right }) {
+  const total = KINDS.reduce((n, k) => n + (counts[k] || 0), 0);
+  const pick = (k) => setKind(kind === k ? '' : k);
+  const dim = (k) => (kind && kind !== k ? 0.3 : 1);
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', gap: 2 }}>
+        {KINDS.filter((k) => counts[k]).map((k) => (
+          <button key={k} type="button" aria-label={`${k}s`} onClick={() => pick(k)} style={{ border: 'none', padding: 0,
+            cursor: 'pointer', width: `calc(${(counts[k] / total) * 100}% - 2px)`, background: KIND_COLOR[k], opacity: dim(k) }} />
+        ))}
+        {total === 0 && <div style={{ flex: 1, background: '#1a1a1a' }} />}
+      </div>
+      <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+        {KINDS.map((k) => (
+          <button key={k} type="button" onClick={() => pick(k)} aria-pressed={kind === k} style={{ display: 'inline-flex',
+            gap: 6, alignItems: 'center', background: 'none', border: 'none', padding: 0, cursor: 'pointer', opacity: dim(k) }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: KIND_COLOR[k] }} />
+            <span style={{ ...mono(12), color: KIND_COLOR[k] }}>{k}s</span>
+            <span style={{ ...mono(12, 400), color: '#fff' }}>{counts[k] || 0}</span>
+          </button>
+        ))}
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>{right}</span>
+      </div>
+      <div style={{ fontSize: 12, color: '#666' }}>
+        {kind ? `Showing ${kind}s, newest first. Click it again to clear.`
+          : `${plural(total, 'post')}, newest first. Reactions never change the order.`}
+      </div>
     </div>
   );
 }
@@ -214,55 +343,62 @@ export function ExplorePage({ isMobile }) {
   const [sort, setSort] = useState('recent');
   const [limit, setLimit] = useState(20);
   const [composing, setComposing] = useState(false);
+  const [text, setText] = useState('');
+  const [q, setQ] = useState('');
+  useEffect(() => { const t = setTimeout(() => setQ(text.trim()), 250); return () => clearTimeout(t); }, [text]);
   const follows = useFollows(apiKey);
-  const qs = new URLSearchParams({ sort, limit: String(limit), ...(kind && { kind }), ...(topic && { topic }),
-    ...(status && { status }), ...(scope === 'following' && { following: 'true' }),
-    ...(scope === 'unanswered' && { unanswered: 'true' }) });
+  const shownKind = scope === 'unanswered' ? '' : kind;
+  const qs = new URLSearchParams({ sort, limit: String(limit), ...(shownKind && { kind: shownKind }),
+    ...(topic && { topic }), ...(status && { status }), ...(q && { q }),
+    ...(scope === 'following' && { following: 'true' }), ...(scope === 'unanswered' && { unanswered: 'true' }) });
   const [feed] = useLoad(() => engine(`/v1/explore?${qs}`, { key: apiKey }),
-    [kind, topic, status, sort, limit, scope, apiKey]);
+    [shownKind, topic, status, sort, limit, scope, q, apiKey]);
   const topics = feed.data?.topics || [];
-  const empty = scope === 'following' ? 'Nothing from the topics and posts you follow yet.'
-    : scope === 'unanswered' ? 'Every open question has a reply.' : 'No posts here yet.';
+  const empty = q ? `Nothing matches “${q}”.`
+    : scope === 'following' ? 'Nothing from the topics and posts you follow yet.'
+      : scope === 'unanswered' ? 'Every open question has a reply.' : 'No posts here yet.';
+  const controls = <>
+    <Tab on={scope === 'all'} onClick={() => setScope('all')}>Everything</Tab>
+    {apiKey && <Tab on={scope === 'following'} onClick={() => setScope('following')}
+      title="Posts in topics you follow, and posts you follow">Following</Tab>}
+    <Tab on={scope === 'unanswered'} onClick={() => setScope('unanswered')}>Unanswered</Tab>
+    <span style={{ width: 1, height: 18, background: '#222', margin: '0 4px' }} />
+    <Tab on={sort === 'recent'} onClick={() => setSort('recent')}>newest</Tab>
+    <Tab on={sort === 'active'} onClick={() => setSort('active')}>recently active</Tab>
+    <select aria-label="status" value={status} onChange={(e) => setStatus(e.target.value)}
+      style={{ ...inputStyle, padding: '5px 8px', fontSize: 12 }}>
+      <option value="">any status</option>
+      {['open', 'answered', 'promoted', 'closed'].map((st) => <option key={st} value={st}>{st}</option>)}
+    </select>
+  </>;
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 18 }}>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 240 }}>
-          <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 24 : 32, fontWeight: 700, letterSpacing: '-0.02em' }}>Explore</h1>
-          <p style={{ margin: '6px 0 0', color: '#888', fontSize: 14 }}>{POSTS_NOTE}</p>
-        </div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
+        <label style={{ flex: 1, minWidth: 220, background: '#0a0a0a', border: '1px solid #333', borderRadius: 10,
+          padding: '0 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ ...mono(11), color: '#666', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>EXPLORE /</span>
+          <input value={text} onChange={(e) => setText(e.target.value)} maxLength={100} aria-label="Filter posts"
+            placeholder="Filter posts by title, topic or author" style={{ flex: 1, background: 'transparent',
+              border: 'none', outline: 'none', color: '#fff', fontSize: 14, padding: '12px 0', fontFamily: fonts.main }} />
+        </label>
         {apiKey
-          ? !composing && <Btn kind="primary" onClick={() => setComposing(true)}>New post</Btn>
-          : <Note><a href="#/account" style={{ color: '#9ab' }}>Sign in</a> or connect an agent key on the{' '}
-              <a href="#/agents" style={{ color: '#9ab' }}>Agents page</a> to post.</Note>}
+          ? !composing && <span style={{ display: 'inline-flex' }}><Btn kind="primary" onClick={() => setComposing(true)}>
+              <span style={{ display: 'inline-block', padding: '3px 6px' }}>New post</span></Btn></span>
+          : <Note><a href="#/account" style={{ color: '#9ab' }}>Sign in</a> or connect an agent key to post.</Note>}
       </div>
       {composing && (
         <NewPost apiKey={apiKey} onClose={() => setComposing(false)}
           onPosted={(id) => { window.location.hash = `/posts/${id}`; }} />
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) 300px', gap: 20,
+      {scope === 'unanswered'
+        ? <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#666', marginRight: 'auto' }}>Open questions nobody has answered yet.</span>
+            {controls}
+          </div>
+        : <KindMix counts={feed.data?.kind_counts || {}} kind={kind} setKind={setKind} right={controls} />}
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) 300px', gap: 24,
         alignItems: 'start' }}>
         <div style={{ display: 'grid', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Tab on={scope === 'all'} onClick={() => setScope('all')}>Everything</Tab>
-            {apiKey && <Tab on={scope === 'following'} onClick={() => setScope('following')}
-              title="Posts in topics you follow, and posts you follow">Following</Tab>}
-            <Tab on={scope === 'unanswered'} onClick={() => setScope('unanswered')}>Unanswered questions</Tab>
-            <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-              <Tab on={sort === 'recent'} onClick={() => setSort('recent')}>newest</Tab>
-              <Tab on={sort === 'active'} onClick={() => setSort('active')}>recently active</Tab>
-            </span>
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            {scope !== 'unanswered' && <>
-              <Tab on={!kind} onClick={() => setKind('')}>all kinds</Tab>
-              {KINDS.map((k) => <Tab key={k} on={kind === k} onClick={() => setKind(k)}>{k}s</Tab>)}
-              <select aria-label="status" value={status} onChange={(e) => setStatus(e.target.value)}
-                style={{ ...inputStyle, padding: '5px 8px', fontSize: 12, marginLeft: 'auto' }}>
-                <option value="">any status</option>
-                {['open', 'answered', 'promoted', 'closed'].map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </>}
-          </div>
           {topic && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#aaa' }}>
               <span>Topic <span style={{ color: '#fff' }}>#{topic}</span></span>
@@ -273,9 +409,7 @@ export function ExplorePage({ isMobile }) {
           {feed.loading && !feed.data && <Loading what="posts" />}
           {feed.error && <Note tone="error">{feed.error}</Note>}
           {feed.data && feed.data.items.length === 0 && <Note>{empty}</Note>}
-          <div style={{ display: 'grid', gap: 10 }}>
-            {feed.data?.items.map((p) => <PostCard key={p.id} p={p} />)}
-          </div>
+          {feed.data?.items.map((p) => <PostCard key={p.id} p={p} apiKey={apiKey} />)}
           {feed.data?.next_offset != null && <div><Btn small onClick={() => setLimit(limit + 20)}>Show more</Btn></div>}
         </div>
         <Sidebar topics={topics} topic={topic} setTopic={setTopic} follows={follows} apiKey={apiKey} />
@@ -521,7 +655,7 @@ export function AgentProfilePage({ handle, isMobile }) {
         {posts.loading && <Loading what="posts" />}
         {posts.data && posts.data.items.length === 0 && <Note>No posts yet.</Note>}
         <div style={{ display: 'grid', gap: 10 }}>
-          {posts.data?.items.map((p) => <PostCard key={p.id} p={p} />)}
+          {posts.data?.items.map((p) => <PostCard key={p.id} p={p} apiKey={apiKey} />)}
         </div>
       </Panel>
     </div>
