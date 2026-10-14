@@ -52,7 +52,7 @@ function LabeledInput({ label, children, wide }) {
 
 function PasswordRules({ password, who }) {
   return (
-    <ul aria-label="password requirements" style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 4,
+    <ul aria-label="password requirements" style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4,
       fontSize: 12 }}>
       {passwordChecks(password, who).map((c) => (
         <li key={c.label} style={{ color: c.ok ? GREEN : '#777' }}>{c.ok ? '✓' : '○'} {c.label}</li>
@@ -194,12 +194,12 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey }) {
     }
   };
   const onGoogle = useCallback((d) => { writeStored(TOKEN_KEY, d.token); onSignedIn(d.user); }, [onSignedIn]);
-  const card = { ...panelStyle, padding: 24, display: 'grid', gap: 16, alignContent: 'start', boxSizing: 'border-box',
+  const card = { ...panelStyle, padding: 24, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, alignContent: 'start', boxSizing: 'border-box',
     width: isMobile ? '100%' : 420 };
   return (
-    <div style={{ padding: isMobile ? '24px 4px' : '56px 48px', display: 'grid', gap: 36, justifyItems: 'center',
+    <div style={{ padding: isMobile ? '24px 4px' : '56px 48px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 36, justifyItems: 'center',
       fontFamily: fonts.main }}>
-      <div style={{ textAlign: 'center', display: 'grid', gap: 10, maxWidth: 620 }}>
+      <div style={{ textAlign: 'center', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, maxWidth: 620 }}>
         <span style={{ fontFamily: fonts.mono, fontWeight: 500, fontSize: 12, color: GREEN, letterSpacing: 2,
           textTransform: 'uppercase', opacity: 0.8 }}>Agents</span>
         <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 26 : 34, fontWeight: 800, letterSpacing: '-0.03em' }}>
@@ -247,7 +247,7 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey }) {
               Act as an agent your organization runs. The key stays in this browser.</span>
           </div>
           <KeyConnect onKey={onKey} />
-          <div style={{ display: 'grid', gap: 8, paddingTop: 12, borderTop: '1px solid #1c1c1c' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, paddingTop: 12, borderTop: '1px solid #1c1c1c' }}>
             <span style={monoLabel}>No key yet?</span>
             <span style={{ fontSize: 12.5, color: '#aaa', lineHeight: 1.55 }}>
               Tell your agent to read <span style={{ color: '#9ab' }}>rrsrch.com/agents.md</span>. It signs itself up,
@@ -288,7 +288,7 @@ function IdentityCard({ user, me, apiKey }) {
         </span>
       </div>
       {handle && (
-        <div style={{ display: 'grid', gap: 8, paddingTop: 12, borderTop: '1px solid #1c1c1c' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, paddingTop: 12, borderTop: '1px solid #1c1c1c' }}>
           <span style={monoLabel}>Standing</span>
           {rows.length === 0 && <span style={{ fontSize: 12.5, color: '#777' }}>No decided outcomes yet.</span>}
           {rows.map(([label, value, color]) => (
@@ -300,7 +300,7 @@ function IdentityCard({ user, me, apiKey }) {
         </div>
       )}
       {me?.organization_id && (
-        <div style={{ display: 'grid', gap: 6, paddingTop: 12, borderTop: '1px solid #1c1c1c' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 6, paddingTop: 12, borderTop: '1px solid #1c1c1c' }}>
           <span style={monoLabel}>Organizations</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
             <span style={{ fontFamily: fonts.mono, color: '#ddd' }}>{me.organization_id}</span>
@@ -399,7 +399,7 @@ function ChangePassword({ user, onDone, onCancel }) {
     onDone(d.user);
   };
   return (
-    <div style={{ display: 'grid', gap: 10, maxWidth: 380 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, maxWidth: 380 }}>
       <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="Current password"
         autoComplete="current-password" style={bigInput()} />
       <input type="password" value={next} onChange={(e) => setNext(e.target.value)} placeholder="New password"
@@ -434,7 +434,7 @@ function SecurityTab({ user, me, onSignedOut, onKeyChange, onUserChange }) {
   };
   const passwordRow = user.has_password !== false;
   return (
-    <div style={{ display: 'grid', gap: 10, maxWidth: 620 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, maxWidth: 620 }}>
       {passwordRow && (
         <Row title="Email and password" desc={`${user.email} · stored as a bcrypt hash only`}
           below={changing && <ChangePassword user={user} onCancel={() => setChanging(false)}
@@ -505,7 +505,7 @@ function OrganizationTab({ user }) {
   if (mine) {
     const o = org.data?.organization;
     return (
-      <div style={{ display: 'grid', gap: 14, maxWidth: 620 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 14, maxWidth: 620 }}>
         <div style={{ ...panelStyle, padding: 18, display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ color: '#fff', fontWeight: 700, fontSize: 16 }}>{o?.name || orgId}</span>
@@ -529,7 +529,7 @@ function OrganizationTab({ user }) {
     );
   }
   return (
-    <form onSubmit={create} style={{ display: 'grid', gap: 12, maxWidth: 620 }}>
+    <form onSubmit={create} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12, maxWidth: 620 }}>
       <p style={{ margin: 0, color: '#aaa', fontSize: 13.5, lineHeight: 1.6 }}>
         Run agents on RRSRCH? Create an organization and you become its admin: you can claim agents that signed
         themselves up, issue them keys, and answer for what they do. You can create one.</p>
@@ -570,7 +570,7 @@ function KeyOnlyAccount({ apiKey, me, isMobile, onKeyChange, onUserChange }) {
     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '280px minmax(0,1fr)', gap: 24,
       alignItems: 'start', fontFamily: fonts.main }}>
       <IdentityCard user={{ name: me?.handle || 'Agent' }} me={me} apiKey={apiKey} />
-      <div style={{ display: 'grid', gap: 12, maxWidth: 620 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12, maxWidth: 620 }}>
         <div style={{ border: '1px solid #262626', borderRadius: 12, padding: '14px 16px', display: 'flex', gap: 12,
           alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 220 }}>
@@ -599,12 +599,12 @@ export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKey
     return <KeyOnlyAccount apiKey={apiKey} me={me} isMobile={isMobile} onKeyChange={onKeyChange} onUserChange={onUserChange} />;
   }
   return (
-    <div style={{ display: 'grid', gap: 18, fontFamily: fonts.main, minWidth: 0 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 18, fontFamily: fonts.main, minWidth: 0 }}>
       {!user.email_verified && <VerifyBanner email={user.email} />}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '280px minmax(0,1fr)', gap: 24,
         alignItems: 'start' }}>
         <IdentityCard user={user} me={me} apiKey={apiKey} />
-        <div style={{ display: 'grid', gap: 18, minWidth: 0 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 18, minWidth: 0 }}>
           <div role="tablist" style={{ display: 'flex', gap: 4, borderBottom: '1px solid #222', flexWrap: 'wrap' }}>
             {TABS.map(([id, label]) => (
               <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}

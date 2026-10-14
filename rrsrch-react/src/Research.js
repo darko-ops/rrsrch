@@ -191,7 +191,7 @@ function QuickFeedback({ postId, initial, apiKey }) {
   return (
     <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
       {err && <span style={{ color: RED, fontSize: 11 }}>{err}</span>}
-      <span style={{ display: 'grid', gap: 4, justifyItems: 'end' }}>
+      <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, justifyItems: 'end' }}>
         <span aria-hidden="true" style={{ display: 'flex', width: 64, height: 3, borderRadius: 2, gap: 1, overflow: 'hidden',
           opacity: total ? 1 : 0.25 }}>
           <span style={{ width: `${total ? (fb.useful / total) * 100 : 50}%`, background: POSITIVE }} />
@@ -261,7 +261,7 @@ function FollowSwitch({ on, onClick, label }) {
 function Sidebar({ topics, topic, setTopic, follows, apiKey }) {
   const most = Math.max(1, ...topics.map((t) => t.posts));
   return (
-    <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, alignContent: 'start' }}>
       <Panel title="Topics">
         {topics.length === 0 && <Note>No topics yet.</Note>}
         <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
@@ -283,7 +283,7 @@ function Sidebar({ topics, topic, setTopic, follows, apiKey }) {
         </div>
       </Panel>
       <Panel title="Reading a post">
-        <div style={{ display: 'grid', gap: 8, fontSize: 12.5, lineHeight: 1.5, color: '#999' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, fontSize: 12.5, lineHeight: 1.5, color: '#999' }}>
           <div><span style={{ color: GREEN }}>▮▮</span> passages cited from sources</div>
           <div><span style={{ color: AMBER }}>uncited</span>: a finding with no evidence yet</div>
           <div>▲ ▼ quick feedback: useful or needs work. It never changes the order, review or standing.</div>
@@ -436,7 +436,7 @@ function Promote({ post, promoted, apiKey, onChanged }) {
     if (r.ok) { setOpen(false); onChanged(); }
   };
   return (
-    <div style={{ display: 'grid', gap: 8, width: '100%' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, width: '100%' }}>
       <Note>Opens a merge request in a repository you contribute to. Its checks and independent review decide whether
         it becomes knowledge.</Note>
       <input value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="Repository, e.g. rrsrch/msc-knee-oa"
@@ -500,7 +500,7 @@ function AuthorCard({ author, repository, apiKey }) {
         )}
         {s.loading && <Loading what="standing" />}
         {imp && (
-          <div style={{ display: 'grid', gap: 4, fontSize: 12.5, color: '#aaa' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12.5, color: '#aaa' }}>
             <div style={sectionLabel}>Standing</div>
             <div>Trust in <Mono>{repository}</Mono>: {trust ? trust.label : 'no independent evaluations yet'}</div>
             {measured.length === 0
@@ -600,7 +600,7 @@ export function PostPage({ postId, isMobile }) {
             <VerificationReports target={target} data={verification} apiKey={apiKey} onChanged={reload} />
           </Panel>
         </div>
-        <div style={{ display: 'grid', gap: 20, alignContent: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 20, alignContent: 'start' }}>
           {author && <AuthorCard author={author} repository={post.repository} apiKey={apiKey} />}
           <Panel title="Formal and informal">
             <ul style={{ margin: 0, paddingLeft: 18, color: '#999', fontSize: 12.5, lineHeight: 1.6 }}>
