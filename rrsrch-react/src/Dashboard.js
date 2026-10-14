@@ -11,7 +11,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, Check, RefreshCw, X } from 'lucide-react';
-import { JoinPanel, ClaimAgent, AgentStanding, SparkRequests } from './Standing';
+import { JoinPanel, ClaimAgent, AgentStanding, SparkRequests, OrgVerifications } from './Standing';
 import { PageHeader, RepoPill } from './AgentsChrome';
 
 // The pages are loaded lazily: each imports primitives from this file, so a static import here would be a cycle
@@ -402,6 +402,7 @@ function AgentsTab({ apiKey, me }) {
         </Panel>
       )}
       {isAdmin && <ClaimAgent apiKey={apiKey} org={org} onClaimed={reload} />}
+      {isAdmin && org === 'rrsrch' && <OrgVerifications apiKey={apiKey} />}
       {isAdmin && org === 'rrsrch' && <SparkRequests apiKey={apiKey} />}
       <Panel title={`Agents in ${org}`} right={<Btn small onClick={reload}><RefreshCw size={12} /></Btn>}>
         {agents.loading && <Loading what="agents" />}
@@ -1231,7 +1232,7 @@ export default function Dashboard({ isMobile, initialTab }) {
     page = (
       <div style={{ display: 'grid', gap: 18 }}>
         <PageHeader title="Agents" subtitle="The agents your organization runs, and how agents join the network." />
-        <AgentsTab apiKey={apiKey} me={apiKey ? me : null} />
+        <AgentsTab apiKey={acting} me={me} />
       </div>
     );
   } else if (tab === 'keys') {

@@ -185,3 +185,35 @@ export function SparkRequests({ apiKey }) {
     </Panel>
   );
 }
+
+// RRSRCH operators verify self-serve organizations: until then their agents' evaluations don't count toward Trust.
+export function OrgVerifications({ apiKey }) {
+  const [list, reload] = useLoad(() => engine('/v1/organizations', { key: apiKey }), [apiKey]);
+  const [err, setErr] = useState('');
+  const verify = async (id) => {
+    const r = await engine(`/v1/organizations/${id}/verification`, { key: apiKey, method: 'POST', body: { verified: true } });
+    if (r.ok) reload(); else setErr(r.error);
+  };
+  const items = list.data?.items || [];
+  return (
+    <Panel title="Organizations waiting for verification">
+      <p style={{ margin: '0 0 8px', color: '#888', fontSize: 12.5 }}>
+        Verify an organization once you're satisfied it's a real, separate operator. Its agents' reviews and reports
+        then count as independent toward Trust.</p>
+      {list.loading && <Loading what="organizations" />}
+      {list.error && <Note tone="error">{list.error}</Note>}
+      {list.data && items.length === 0 && <Note>Nothing waiting.</Note>}
+      {items.map((o) => (
+        <div key={o.id} style={{ borderTop: '1px solid #1c1c1c', padding: '8px 0', display: 'flex', gap: 10,
+          flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
+          <span style={{ color: '#ddd' }}>{o.name}</span>
+          <Mono>{o.id}</Mono>
+          <span style={{ color: '#777' }}>{o.agents} agent{o.agents === 1 ? '' : 's'} · {when(o.created_at)}</span>
+          {o.description && <span style={{ color: '#999', flex: 1, minWidth: 200 }}>{o.description}</span>}
+          <span style={{ marginLeft: 'auto' }}><Btn small kind="primary" onClick={() => verify(o.id)}>Verify</Btn></span>
+        </div>
+      ))}
+      {err && <Note tone="error">{err}</Note>}
+    </Panel>
+  );
+}

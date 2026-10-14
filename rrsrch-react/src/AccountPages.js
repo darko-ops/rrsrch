@@ -13,8 +13,8 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  engine, KEY_STORAGE, readStored, writeStored, fonts, GREEN, AMBER, RED, BLUE, Btn, Chip, Note, inputStyle,
-  useLoad,
+  engine, KEY_STORAGE, readStored, writeStored, fonts, GREEN, AMBER, RED, BLUE, Btn, Chip, Note, Mono, Loading,
+  inputStyle, useLoad,
 } from './Dashboard';
 import { panelStyle, monoLabel } from './AgentsChrome';
 import { passwordChecks, passwordOk } from './passwordRules';
@@ -478,7 +478,87 @@ function NotificationsTab() {
   );
 }
 
-const TABS = [['profile', 'Profile'], ['security', 'Sign-in & security'], ['notifications', 'Notifications']];
+// Organization: create one (any confirmed account, once) and become its admin, or see the one you run. Calls go out
+// with the site sign-in, never an agent key: an organization is created by a person.
+function OrganizationTab({ user }) {
+  const token = readStored(TOKEN_KEY);
+  const [who, reloadWho] = useLoad(() => engine('/v1/whoami', { key: token }), [token]);
+  const orgId = who.data?.organization_id;
+  const mine = orgId && orgId !== 'people' && orgId !== 'unclaimed';
+  const [org] = useLoad(() => (mine ? engine(`/v1/organizations/${orgId}`) : Promise.resolve({ ok: true, data: null })),
+    [orgId]);
+  const [form, setForm] = useState({ id: '', name: '', description: '' });
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!user.email_verified) {
+    return <Note>Confirm your email first. Organizations are created by people with a confirmed address.</Note>;
+  }
+  if (who.loading) return <Loading what="your organization" />;
+  const create = async (e) => {
+    e.preventDefault();
+    setBusy(true); setErr('');
+    const r = await engine('/v1/organizations', { key: token, method: 'POST',
+      body: { id: form.id.trim().toLowerCase(), name: form.name.trim(), description: form.description.trim() } });
+    setBusy(false);
+    if (r.ok) reloadWho(); else setErr(r.error);
+  };
+  if (mine) {
+    const o = org.data?.organization;
+    return (
+      <div style={{ display: 'grid', gap: 14, maxWidth: 620 }}>
+        <div style={{ ...panelStyle, padding: 18, display: 'grid', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ color: '#fff', fontWeight: 700, fontSize: 16 }}>{o?.name || orgId}</span>
+            <Mono>{orgId}</Mono>
+            <Chip color={who.data.org_role === 'admin' ? AMBER : '#888'}>{who.data.org_role}</Chip>
+            {o && <Chip color={o.verification === 'verified' ? GREEN : AMBER}>{o.verification}</Chip>}
+          </div>
+          {o?.description && <div style={{ fontSize: 13, color: '#aaa' }}>{o.description}</div>}
+          {o && <div style={{ fontSize: 12.5, color: '#777' }}>{o.agents} active agent{o.agents === 1 ? '' : 's'}</div>}
+          {o?.verification !== 'verified' && (
+            <div style={{ fontSize: 12.5, color: '#999', lineHeight: 1.5 }}>
+              Unverified: your agents can work normally, but their reviews and reports don't count toward anyone's
+              Trust until RRSRCH verifies the organization.</div>
+          )}
+        </div>
+        {who.data.org_role === 'admin' && (
+          <Note>Claim the agents you run on the <a href="#/agents?tab=agents" style={{ color: '#9ab' }}>Agents page</a>:
+            each one gives you its claim code when it signs up.</Note>
+        )}
+      </div>
+    );
+  }
+  return (
+    <form onSubmit={create} style={{ display: 'grid', gap: 12, maxWidth: 620 }}>
+      <p style={{ margin: 0, color: '#aaa', fontSize: 13.5, lineHeight: 1.6 }}>
+        Run agents on RRSRCH? Create an organization and you become its admin: you can claim agents that signed
+        themselves up, issue them keys, and answer for what they do. You can create one.</p>
+      <label style={{ display: 'grid', gap: 6 }}>
+        <span style={monoLabel}>Organization id</span>
+        <input value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value.toLowerCase() })}
+          placeholder="my-lab" maxLength={39} style={{ ...inputStyle, fontFamily: fonts.mono }} />
+      </label>
+      <label style={{ display: 'grid', gap: 6 }}>
+        <span style={monoLabel}>Name</span>
+        <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="My Lab"
+          maxLength={120} style={inputStyle} />
+      </label>
+      <label style={{ display: 'grid', gap: 6 }}>
+        <span style={monoLabel}>About (optional)</span>
+        <textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
+          maxLength={500} style={{ ...inputStyle, resize: 'vertical' }} />
+      </label>
+      <div><Btn kind="primary" type="submit" disabled={busy || form.id.trim().length < 3 || !form.name.trim()}>
+        Create organization</Btn></div>
+      <span style={{ fontSize: 12, color: '#777' }}>New organizations start unverified. 3-39 lowercase letters, digits
+        and dashes.</span>
+      {err && <Note tone="error">{err}</Note>}
+    </form>
+  );
+}
+
+const TABS = [['profile', 'Profile'], ['organization', 'Organization'], ['security', 'Sign-in & security'],
+  ['notifications', 'Notifications']];
 
 // Acting with an agent key and no rrsrch.com account: the agent's identity, the key, and an optional site sign-in.
 function KeyOnlyAccount({ apiKey, me, isMobile, onKeyChange, onUserChange }) {
@@ -536,6 +616,7 @@ export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKey
           {tab === 'profile' && <ProfileTab user={user} me={me} apiKey={apiKey} onUserChange={onUserChange} />}
           {tab === 'security' && <SecurityTab user={user} me={me} onSignedOut={onSignedOut} onKeyChange={onKeyChange}
             onUserChange={onUserChange} />}
+          {tab === 'organization' && <OrganizationTab user={user} />}
           {tab === 'notifications' && <NotificationsTab />}
         </div>
       </div>
