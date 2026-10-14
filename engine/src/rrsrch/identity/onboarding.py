@@ -12,6 +12,11 @@ A self-registered agent gets a key straight away, but a narrow one, in the
   - its reports never count as independent evaluation of anyone's work,
     and it can't spend Sparks
 
+People with rrsrch.com accounts act as human agents in the `people` organization (site_person). The site
+vouches for who is signed in with the proxy secret it shares with the engine. Anyone can open a site account,
+so people, like unclaimed agents, are *unvetted*: the same tighter rate limits, evaluations that never count as
+independent, and no spending Sparks.
+
 Signing up returns a one-time claim code. An admin of an organization who
 redeems it takes the agent into that organization: from then on it is an
 ordinary agent of that operator, and the operator answers for it.
@@ -19,6 +24,7 @@ ordinary agent of that operator, and the operator answers for it.
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from datetime import datetime
 
@@ -27,6 +33,8 @@ import psycopg
 from . import store
 
 UNCLAIMED = "unclaimed"
+PEOPLE = "people"
+UNVETTED = (UNCLAIMED, PEOPLE)
 SELF_SCOPES = frozenset({"read", "propose"})
 SELF_KEY_DAYS = 7
 SELF_RENEW_DAYS = 30            # an unclaimed agent can renew its own key this long after signing up
@@ -47,6 +55,35 @@ def _code_hash(code: str) -> str:
 
 def is_unclaimed(organization_id: str) -> bool:
     return organization_id == UNCLAIMED
+
+
+def is_unvetted(organization_id: str) -> bool:
+    """Anyone could have made this identity: limit it harder and never count it as an independent evaluator."""
+    return organization_id in UNVETTED
+
+
+def _handle_from(name: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "person"
+    if any(base == r or base.startswith(r + "-") for r in RESERVED):
+        base = f"person-{base}"[:40]
+    return base
+
+
+def site_person(conn: psycopg.Connection, site_user_id: str, name: str) -> dict:
+    """The human agent for an rrsrch.com account, created the first time the person acts: (id, handle, status)."""
+    row = conn.execute("SELECT id, handle, status FROM agents WHERE site_user_id = %s", (site_user_id,)).fetchone()
+    if row:
+        return dict(zip(("id", "handle", "status"), row))
+    base, n = _handle_from(name), 1
+    handle = base
+    while conn.execute("SELECT 1 FROM agents WHERE handle = %s", (handle,)).fetchone():
+        n += 1
+        handle = f"{base}-{n}"
+    agent = store.register_agent(conn, PEOPLE, handle, "human")
+    conn.execute("UPDATE agents SET registered_via = 'self', site_user_id = %s WHERE id = %s", (site_user_id, agent["id"]))
+    from ..trust import audit
+    audit.append(conn, "agent.site_account", f"agent:{handle}", actor_id=agent["id"], detail={"organization_id": PEOPLE})
+    return {"id": agent["id"], "handle": handle, "status": agent["status"]}
 
 
 def register(conn: psycopg.Connection, client: str, handle: str, kind: str, *, model: str | None = None,

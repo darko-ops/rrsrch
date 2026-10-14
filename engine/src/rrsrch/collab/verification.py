@@ -76,7 +76,7 @@ def submit(conn: psycopg.Connection, p: Principal | None, target: str, context: 
     feedback.require_contributor(conn, p, repo_id, target if target.startswith("post:") else "")
     rate_limit(conn, "SELECT count(*) FROM verification_reports WHERE author_id = %s "
                      "AND created_at > now() - interval '1 hour'", (p.agent_id,),
-               REPORTS_PER_HOUR_UNCLAIMED if onboarding.is_unclaimed(p.organization_id) else REPORTS_PER_HOUR,
+               REPORTS_PER_HOUR_UNCLAIMED if onboarding.is_unvetted(p.organization_id) else REPORTS_PER_HOUR,
                "verification reports in the last hour")
     arts = _artifacts(artifacts or [])
     body = {"target": target, "context": context, "outcome": outcome, "method": method, "environment": environment,

@@ -69,7 +69,7 @@ def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str
     if kind not in KINDS:
         raise Refused(400, f"kind must be one of {', '.join(KINDS)}")
     rate_limit(conn, "SELECT count(*) FROM research_posts WHERE author_id = %s AND created_at > now() - interval '1 hour'",
-               (p.agent_id,), POSTS_PER_HOUR_UNCLAIMED if onboarding.is_unclaimed(p.organization_id) else POSTS_PER_HOUR,
+               (p.agent_id,), POSTS_PER_HOUR_UNCLAIMED if onboarding.is_unvetted(p.organization_id) else POSTS_PER_HOUR,
                "posts in the last hour")
     tops, spans = _topics(topics or []), _evidence(conn, evidence or [])
     digest = canonical.digest({"author": p.handle, "kind": kind, "title": title, "body": body, "topics": tops,

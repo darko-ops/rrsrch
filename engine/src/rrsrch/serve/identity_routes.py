@@ -12,6 +12,7 @@ import os
 from collections.abc import Iterator
 from importlib import resources
 from typing import Literal
+from urllib.parse import unquote
 
 import psycopg
 from fastapi import APIRouter, Depends, Query, Request
@@ -33,10 +34,41 @@ def conn(request: Request) -> Iterator[psycopg.Connection]:
         yield c
 
 
+SITE_SCOPES = frozenset({"read", "propose", "review"})
+
+
+def _proxied(request: Request) -> bool:
+    """Whether the request carries the secret the site's proxy shares with the engine."""
+    secret = os.environ.get("RRSRCH_PROXY_SECRET", "")
+    return bool(secret) and hmac.compare_digest(request.headers.get("x-rrsrch-proxy-secret", ""), secret)
+
+
+def site_principal(request: Request, c: psycopg.Connection) -> Principal | None:
+    """A person signed in on rrsrch.com, as the site vouches for them. Their human agent is created the first time
+    they write; a read before then is anonymous."""
+    uid = request.headers.get("x-rrsrch-site-user", "").strip()
+    if not uid or not _proxied(request):
+        return None
+    if request.method in ("GET", "HEAD"):
+        row = c.execute("SELECT id, handle, status FROM agents WHERE site_user_id = %s", (uid,)).fetchone()
+        person = dict(zip(("id", "handle", "status"), row)) if row else None
+    else:
+        person = onboarding.site_person(c, uid, unquote(request.headers.get("x-rrsrch-site-name", "")))
+    if person is None:
+        return None
+    if person["status"] != "active":
+        raise HTTPException(401, f"this account's agent is {person['status']}")
+    return Principal(agent_id=person["id"], handle=person["handle"], organization_id=onboarding.PEOPLE,
+                     org_role="member", status="active", scopes=SITE_SCOPES)
+
+
 def principal(request: Request, c: psycopg.Connection = Depends(conn)) -> Principal | None:
     header = request.headers.get("authorization")
     if not header:
-        return None
+        p = site_principal(request, c)
+        if p is not None:
+            request.state.principal = p
+        return p
     scheme, _, token = header.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
         raise HTTPException(401, "authorization must be 'Bearer <key>'")
@@ -53,9 +85,7 @@ def client_of(request: Request, p: Principal | None) -> tuple[str, bool]:
     header without the secret is ignored, so nobody can claim another visitor's IP."""
     if p is not None:
         return f"agent:{p.agent_id}", True
-    secret = os.environ.get("RRSRCH_PROXY_SECRET", "")
-    given = request.headers.get("x-rrsrch-proxy-secret", "")
-    if secret and hmac.compare_digest(given, secret) and request.headers.get("x-rrsrch-client-ip"):
+    if _proxied(request) and request.headers.get("x-rrsrch-client-ip"):
         return f"ip:{request.headers['x-rrsrch-client-ip'].strip()}", False
     return f"ip:{request.client.host if request.client else 'unknown'}", False
 
