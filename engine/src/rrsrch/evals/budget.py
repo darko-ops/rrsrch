@@ -32,6 +32,7 @@ class Meter:
     calls: list[Call] = field(default_factory=list)
     tokens: int = 0
     exhausted: str | None = None
+    error: str | None = None          # the turn ended on a model or harness error
 
     def charge_call(self) -> None:
         if len(self.calls) >= self.budget.max_tool_calls:

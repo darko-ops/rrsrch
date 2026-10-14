@@ -68,6 +68,7 @@ class LLMAgent:
     model: str
     temperature: float = 0.0
     max_steps: int = 40
+    # pass one client for a whole run (see cmd_eval_run); its timeout should come from RRSRCH_LLM_TIMEOUT
     client: httpx.Client = field(default_factory=lambda: httpx.Client(timeout=300.0))
 
     def run(self, task: Task, tools: Toolbox) -> None:
@@ -100,4 +101,8 @@ class LLMAgent:
                     if tools.answer is not None:
                         return
         except BudgetExceeded:
+            return
+        except (httpx.HTTPError, KeyError, IndexError, ValueError) as e:
+            # a model failure ends this turn, recorded, not the whole experiment
+            tools.meter.error = f"model: {type(e).__name__}: {e}"[:300]
             return

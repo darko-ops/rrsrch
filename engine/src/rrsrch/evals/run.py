@@ -37,12 +37,16 @@ from .budget import Budget, Meter
 from .tools import Toolbox
 
 EVAL_ORG = "eval"
+CONDITIONS = ("A", "B", "C")
 POLICIES = {
     "B": {"allowed_types": ["empirical"], "evidence_gate": True, "required_approvals": 0},
     "C": {"allowed_types": ["empirical"], "evidence_gate": True, "required_approvals": 1},
 }
 # turn a finding around: the first rule that matches is applied once
-FLIPS = [(r"\bdid not differ\b", "differed significantly"), (r"\bno significant\b", "a significant"),
+FLIPS = [(r"\bdid not differ\b", "differed significantly"),
+         (r"\bwere not significantly different\b", "were significantly different"),
+         (r"\bwas not significantly different\b", "was significantly different"),
+         (r"\bnot significant(ly)?\b", "significant\\1"), (r"\bno significant\b", "a significant"),
          (r"\bimproved\b", "worsened"), (r"\bimprovement\b", "worsening"), (r"\breduced\b", "increased"),
          (r"\bdecreased\b", "increased"), (r"\bincreased\b", "decreased"), (r"\bhigher\b", "lower"),
          (r"\blower\b", "higher"), (r"\bbetter\b", "worse"), (r"\bsignificant(ly)?\b", "no significant")]
@@ -73,6 +77,7 @@ class Turn:
     tool_calls: int
     tokens: int
     exhausted: str | None
+    error: str | None
     calls: list[dict]
 
 
@@ -96,6 +101,9 @@ def flip(text: str) -> str | None:
 
 class Harness:
     def __init__(self, connect: Callable[[], psycopg.Connection], cfg: Config):
+        unknown = [c for c in cfg.conditions if c not in CONDITIONS]
+        if unknown or not cfg.conditions:
+            raise ValueError(f"conditions must be some of {', '.join(CONDITIONS)}; got {list(cfg.conditions)}")
         self.connect, self.cfg = connect, cfg
         self.app = api_mod.create_app(connect=connect)
         with connect() as c:
@@ -108,7 +116,8 @@ class Harness:
         self.steward = self._client(token)
 
     def _client(self, token: str) -> TestClient:
-        return TestClient(self.app, headers={"Authorization": f"Bearer {token}"})
+        # a server error is an answer the agent sees (a 500), never an exception that ends the run
+        return TestClient(self.app, headers={"Authorization": f"Bearer {token}"}, raise_server_exceptions=False)
 
     def _agents(self, condition: str, repeat: int, repo: str | None) -> list[TestClient]:
         clients = []
@@ -190,7 +199,7 @@ class Harness:
                         turns.append(Turn(condition, repeat, task.id, handle, order, turn, task.expected,
                                           ans.verdict if ans else None, ans.spans if ans else [],
                                           ans.claim_ids if ans else [], len(meter.calls), meter.tokens,
-                                          meter.exhausted, [asdict(x) for x in meter.calls]))
+                                          meter.exhausted, meter.error, [asdict(x) for x in meter.calls]))
                         if slug:
                             self._merge_ready(slug)
                             self._note_challenges(run_seeds, turn)
@@ -201,9 +210,11 @@ class Harness:
                     for s in run_seeds:
                         s.final_state = c.execute("SELECT state FROM claims WHERE id = %s", (s.claim_id,)).fetchone()[0]
         with self.connect() as c:
-            authors = dict(c.execute(
-                "SELECT c.id, a.handle FROM claims c JOIN agents a ON a.id = c.agent_id JOIN repositories r "
-                "ON r.id = c.repository_id WHERE r.organization_id = %s", (EVAL_ORG,)).fetchall())
+            # only this run's repositories: a claim from an earlier run is never "reuse"
+            claims = {str(cid): {"author": h, "state": st, "repository": slug} for cid, h, st, slug in c.execute(
+                "SELECT c.id, a.handle, c.state, r.slug FROM claims c JOIN agents a ON a.id = c.agent_id "
+                "JOIN repositories r ON r.id = c.repository_id WHERE r.slug LIKE %s",
+                (f"{EVAL_ORG}/{self.cfg.run_id}-%",))}
             reviews = c.execute(
                 "SELECT count(*), count(*) FILTER (WHERE v.reviewer_id <> m.author_id), "
                 "count(*) FILTER (WHERE v.verdict = 'approve') FROM reviews v JOIN merge_requests m "
@@ -211,7 +222,7 @@ class Harness:
                 "WHERE r.slug LIKE %s", (f"{EVAL_ORG}/{self.cfg.run_id}-%",)).fetchone()
         return {"run_id": self.cfg.run_id, "config": {**asdict(self.cfg), "budget": asdict(self.cfg.budget)},
                 "turns": [asdict(t) for t in turns], "seeds": [asdict(s) for s in seeds],
-                "claim_authors": {str(k): v for k, v in authors.items()},
+                "claims": claims,
                 "reviews": {"total": reviews[0], "independent": reviews[1], "approvals": reviews[2]}}
 
     def _note_challenges(self, run_seeds: list[Seed], turn: int) -> None:
@@ -231,8 +242,24 @@ def tasks_from_benchmark(bench: dict, only: list[str] | None = None) -> list[Tas
             if not only or q["id"] in only]
 
 
+def _identity(conn: psycopg.Connection) -> tuple:
+    """What a connection actually reached: the cluster and the database in it, however it was spelled."""
+    db_name = conn.execute("SELECT current_database()").fetchone()[0]
+    try:
+        cluster = conn.execute("SELECT system_identifier FROM pg_control_system()").fetchone()[0]
+    except psycopg.Error:                 # not allowed to read it: fall back to where the server says it is
+        conn.rollback()
+        cluster = conn.execute("SELECT inet_server_addr()::text, inet_server_port(), "
+                               "current_setting('cluster_name')").fetchone()
+    return cluster, db_name
+
+
 def same_database(a: str, b: str) -> bool:
-    """Whether two Postgres URLs name the same database (host, port and database name)."""
-    from urllib.parse import urlparse
-    pa, pb = urlparse(a), urlparse(b)
-    return (pa.hostname, pa.port or 5432, pa.path.strip("/")) == (pb.hostname, pb.port or 5432, pb.path.strip("/"))
+    """Whether two connection strings reach the same database. Asks the servers rather than comparing
+    the strings: localhost vs 127.0.0.1, URL vs keyword DSN, or a socket path all name the same place.
+    If either can't be reached, they're treated as the same, so the guard fails closed."""
+    try:
+        with psycopg.connect(a, connect_timeout=5) as ca, psycopg.connect(b, connect_timeout=5) as cb:
+            return _identity(ca) == _identity(cb)
+    except psycopg.Error:
+        return True

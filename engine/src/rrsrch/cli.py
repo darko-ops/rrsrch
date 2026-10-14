@@ -503,21 +503,36 @@ def cmd_eval_run(args) -> int:
     from .evals.agent import LLMAgent
     from .evals.budget import Budget
     from .ledger import db
+    from .reader.llm import LLM
     ledger = os.environ.get("RRSRCH_DATABASE_URL", db.DEFAULT_URL)
     if ev.same_database(args.db, ledger):
-        print("error: --db is the ledger database. Run evaluations on a copy, e.g.\n"
+        print("error: --db is the ledger database, or one of the two couldn't be reached to tell them apart\n"
+              "(check --db and RRSRCH_DATABASE_URL). Run evaluations on a copy, e.g.\n"
               "  createdb -T rrsrch rrsrch_eval   (or pg_dump rrsrch | psql rrsrch_eval)", file=sys.stderr)
         return 2
-    url, model = os.environ.get("RRSRCH_LLM_URL"), args.model or os.environ.get("RRSRCH_READER_MODEL")
-    if not url or not model:
-        print("error: set RRSRCH_LLM_URL and RRSRCH_READER_MODEL (or --model)", file=sys.stderr)
+    conditions = tuple(c.strip().upper() for c in args.conditions.split(",") if c.strip())
+    if not conditions or set(conditions) - set(ev.CONDITIONS):
+        print(f"error: --conditions must be some of {','.join(ev.CONDITIONS)}", file=sys.stderr)
         return 2
+    if args.model:
+        os.environ["RRSRCH_READER_MODEL"] = args.model
+    try:
+        llm = LLM.from_env()                  # URL, model and RRSRCH_LLM_TIMEOUT, validated
+    except RuntimeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    import httpx
+    model_client = httpx.Client(timeout=llm.timeout)
     tasks = ev.tasks_from_benchmark(questions.load(), args.only)
-    cfg = ev.Config(conditions=tuple(args.conditions.split(",")), agents=args.agents, repeats=args.repeats,
+    cfg = ev.Config(conditions=conditions, agents=args.agents, repeats=args.repeats,
                     seeded_errors=args.seeded_errors,
                     budget=Budget(max_tool_calls=args.max_tool_calls, max_tokens=args.max_tokens))
     harness = ev.Harness(lambda: psycopg.connect(args.db), cfg)
-    result = harness.run(tasks, lambda cond, i, handle: LLMAgent(handle, url, model), progress=print)
+    try:
+        result = harness.run(tasks, lambda cond, i, handle: LLMAgent(handle, llm.base_url, llm.model,
+                                                                     client=model_client), progress=print)
+    finally:
+        model_client.close()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     raw = out / f"eval-{cfg.run_id}.json"

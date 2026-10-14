@@ -87,3 +87,16 @@ def test_cors_preflight_and_headers(calls):
     assert r.status_code == 200 and r.headers["access-control-allow-origin"] == "*"
     r = c.post("/v1/answer", json={"question": "q"}, headers={"Origin": "https://rrsrch.com"})
     assert r.headers["access-control-allow-origin"] == "*"
+
+
+def test_request_bodies_must_declare_a_sane_length(calls):
+    c = client(calls)
+    r = c.post("/v1/answer", content=b'{"question": "q"}', headers={"Content-Type": "application/json",
+                                                                  "Content-Length": "abc"})
+    assert (r.status_code, r.json()) == (400, {"ok": False, "error": "invalid Content-Length"})
+
+    def chunks():
+        yield b'{"question": '
+        yield b'"q"}'
+    r = c.post("/v1/answer", content=chunks(), headers={"Content-Type": "application/json"})
+    assert (r.status_code, r.json()["error"]) == (411, "send a Content-Length")

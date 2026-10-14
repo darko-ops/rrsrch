@@ -79,6 +79,8 @@ def test_flips_and_intervals():
     assert ev.flip("WOMAC scores improved more with MSCs") == "WOMAC scores worsened more with MSCs"
     assert ev.flip("Pain did not differ (p = 0.41)") == "Pain differed significantly (p = 0.41)"
     assert ev.flip("40 patients were enrolled") is None
+    assert ev.flip("Pain scores were not significantly different") == "Pain scores were significantly different"
+    assert ev.flip("The change was not significant") == "The change was significant"
     assert scoring.wilson(0, 0) is None
     lo, hi = scoring.wilson(8, 10)
     assert lo < 0.8 < hi and 0 <= lo and hi <= 1
@@ -133,7 +135,8 @@ def test_refused_actions_are_counted(eval_db):
         tools.call("submit_answer", {"verdict": "harm", "summary": "x"})
     h = harness(eval_db, conditions=("A", "C"), agents=1, seeded_errors=0)
     m = scoring.score(h.run([TASK], lambda cond, i, handle: ScriptedAgent(handle, overreach)))["by_condition"]
-    assert m["A"]["unauthorized_rate"] == 1.0
+    assert m["A"]["unauthorized_rate"] is None                       # a withheld tool isn't a platform refusal
+    assert m["A"]["api_calls"] == 0
     assert m["C"]["unauthorized_rate"] == pytest.approx(1 / 3, abs=1e-3)
     assert m["C"]["accuracy"] == 0.0
 
@@ -165,9 +168,60 @@ def test_llm_agent_runs_a_tool_calling_loop(eval_db):
     assert seen[0]["messages"][1] == {"role": "user", "content": f"Question: {TASK.question}"}   # nothing else
 
 
-def test_refuses_to_run_on_the_ledger(monkeypatch):
+def test_refuses_to_run_on_the_ledger_however_it_is_spelled(eval_db, monkeypatch):
     from rrsrch import cli
-    monkeypatch.setenv("RRSRCH_DATABASE_URL", "postgresql://u:p@localhost:5433/rrsrch")
-    assert ev.same_database("postgresql://x@localhost:5433/rrsrch", "postgresql://u:p@localhost:5433/rrsrch")
-    assert not ev.same_database("postgresql://x@localhost:5433/rrsrch_eval", "postgresql://u:p@localhost:5433/rrsrch")
-    assert cli.main(["eval", "run", "--db", "postgresql://other@localhost:5433/rrsrch"]) == 2
+    other = eval_db.replace("localhost", "127.0.0.1")
+    name = eval_db.rsplit("/", 1)[1]
+    dsn = f"host=localhost port=5433 dbname={name} user=rrsrch password=rrsrch"
+    assert ev.same_database(eval_db, other) and ev.same_database(eval_db, dsn)
+    assert not ev.same_database(eval_db, eval_db.rsplit("/", 1)[0] + "/postgres")
+    assert ev.same_database(eval_db, "postgresql://nobody:wrong@localhost:5433/x")      # unreachable: fail closed
+    monkeypatch.setenv("RRSRCH_DATABASE_URL", eval_db)                # pretend this database is the ledger
+    monkeypatch.setenv("RRSRCH_LLM_URL", "http://model/v1")
+    monkeypatch.setenv("RRSRCH_READER_MODEL", "m")
+    assert cli.main(["eval", "run", "--db", other]) == 2
+    with psycopg.connect(eval_db) as c:                               # and it touched nothing
+        assert c.execute("SELECT count(*) FROM organizations WHERE id = 'eval'").fetchone()[0] == 0
+
+
+def test_bad_conditions_are_refused_before_anything_changes(eval_db, monkeypatch):
+    from rrsrch import cli
+    monkeypatch.setenv("RRSRCH_LLM_URL", "http://model/v1")
+    monkeypatch.setenv("RRSRCH_READER_MODEL", "m")
+    assert cli.main(["eval", "run", "--db", eval_db, "--conditions", "A,D"]) == 2
+    with pytest.raises(ValueError, match="conditions"):
+        ev.Harness(lambda: psycopg.connect(eval_db), ev.Config(conditions=("X",)))
+    with psycopg.connect(eval_db) as c:
+        assert c.execute("SELECT count(*) FROM organizations WHERE id = 'eval'").fetchone()[0] == 0
+
+
+def test_one_bad_call_or_model_failure_ends_only_that_turn(eval_db):
+    def clumsy(task, tools):
+        assert "bad arguments" in tools.call("submit_answer", {"verdict": "benefit", "summary": "x",
+                                                               "claim_ids": ["abc"]})["error"]
+        assert "bad arguments" in tools.call("propose_claim", {"proposition": "x", "spans": ["MED:1"]})["error"]
+        assert "error" in tools.call("get_claim", {"claim_id": 10 ** 20})     # a 500 from the API, not a crash
+        tools.call("submit_answer", {"verdict": "benefit", "summary": "recovered"})
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "overloaded"})
+    broken = LLMAgent("llm", "http://model/v1", "m", client=httpx.Client(transport=httpx.MockTransport(flaky)))
+
+    h = harness(eval_db, conditions=("B",), agents=2, seeded_errors=0)
+    agents = {0: ScriptedAgent("s", clumsy), 1: broken}
+    result = h.run([TASK], lambda cond, i, handle: agents[i])
+    turns = {t["order"]: t for t in result["turns"]}
+    assert turns[0]["verdict"] == "benefit" and turns[0]["error"] is None
+    assert turns[1]["verdict"] is None and "503" in turns[1]["error"]
+    assert scoring.score(result)["by_condition"]["B"]["errors"] == 1
+
+
+def test_reuse_counts_only_accepted_claims_from_this_run(eval_db):
+    result = {"run_id": "r", "seeds": [], "reviews": {"total": 0, "independent": 0, "approvals": 0},
+              "claims": {"5": {"author": "x", "state": "supported", "repository": "eval/r-b0"},
+                         "6": {"author": "x", "state": "contested", "repository": "eval/r-b0"}},
+              "turns": [{"condition": "B", "repeat": 0, "task": "t", "agent": "y", "order": o, "turn": o,
+                         "expected": "benefit", "verdict": "benefit", "spans": [], "claim_ids": ids, "tool_calls": 1,
+                         "tokens": 0, "exhausted": None, "error": None, "calls": []}
+                        for o, ids in enumerate([[5], [6], [99]])]}
+    assert scoring.score(result)["by_condition"]["B"]["reuse_rate"] == round(1 / 3, 4)

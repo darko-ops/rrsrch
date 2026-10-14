@@ -40,7 +40,8 @@ def _ratio(k: float, n: float) -> float | None:
 
 def score(result: dict) -> dict:
     seeds = {s["claim_id"] for s in result["seeds"]}
-    authors = {int(k): v for k, v in result["claim_authors"].items()}
+    # reusable = a claim from this run, accepted (supported) at the end, by someone else
+    claims = {int(k): v for k, v in result["claims"].items()}
     by_cond: dict[str, list[dict]] = defaultdict(list)
     for t in result["turns"]:
         by_cond[t["condition"]].append(t)
@@ -53,8 +54,8 @@ def score(result: dict) -> dict:
         calls = sum(t["tool_calls"] for t in turns)
         tokens = sum(t["tokens"] for t in turns)
 
-        reused = sum(any(c not in seeds and c in authors and authors[c] != t["agent"] for c in t["claim_ids"])
-                     for t in answered)
+        reused = sum(any(c not in seeds and c in claims and claims[c]["state"] == "supported"
+                         and claims[c]["author"] != t["agent"] for c in t["claim_ids"]) for t in answered)
         contaminated = sum(any(c in seeds for c in t["claim_ids"]) for t in answered)
 
         reads = dup = 0
@@ -75,6 +76,7 @@ def score(result: dict) -> dict:
             "accuracy": _ratio(correct, n), "accuracy_ci95": wilson(correct, n), "correct": correct,
             "no_answer": n - len(answered),
             "budget_exhausted": sum(t["exhausted"] is not None for t in turns),
+            "errors": sum(t.get("error") is not None for t in turns),
             "tool_calls": calls, "tokens": tokens,
             "tool_calls_per_correct": _ratio(calls, correct), "tokens_per_correct": _ratio(tokens, correct),
             "reuse_rate": _ratio(reused, len(answered)) if cond != "A" else None,
@@ -91,7 +93,7 @@ def score(result: dict) -> dict:
             "note": "accuracy is against draft expected verdicts awaiting domain review"}
 
 
-ROWS = [("accuracy", "Accuracy"), ("accuracy_ci95", "  95% CI"), ("no_answer", "No answer"),
+ROWS = [("accuracy", "Accuracy"), ("accuracy_ci95", "  95% CI"), ("no_answer", "No answer"), ("errors", "Turns ended by an error"),
         ("tool_calls_per_correct", "Tool calls / correct"), ("tokens_per_correct", "Tokens / correct"),
         ("reuse_rate", "Reuse rate"), ("duplication", "Duplicated reads"), ("contamination", "Cited a seeded error"),
         ("error_detection", "Seeded errors challenged"), ("false_acceptance", "Seeded errors left supported"),

@@ -103,17 +103,27 @@ class Toolbox:
         """Run a tool. Unknown or withheld tools are refused like any other bad call, and still cost a call."""
         self.meter.charge_call()
         if name not in self.names:
-            self.meter.record(name, "", 403)
+            # refused by the harness, not the platform: kept apart from the unauthorized-action metric
+            self.meter.record(f"withheld:{name}", "", 0)
             return {"error": f"no tool {name} in this condition"}
         try:
             return getattr(self, f"_{name}")(**args)
-        except TypeError as e:
+        except (TypeError, ValueError, AttributeError, KeyError) as e:
             self.meter.record(name, "", 400)
             return {"error": f"bad arguments: {e}"}
+        except Exception as e:  # noqa: BLE001  one bad call ends nothing but itself
+            self.meter.record(name, "", 0)
+            return {"error": f"tool failed: {type(e).__name__}: {e}"[:300]}
 
     # -- HTTP, recorded for the unauthorized-action metric
     def _http(self, tool: str, key: str, method: str, path: str, **kw) -> dict:
-        r = self.api.request(method, path, **kw)
+        if "params" in kw:
+            kw["params"] = {k: v for k, v in kw["params"].items() if v is not None}
+        try:
+            r = self.api.request(method, path, **kw)
+        except httpx.HTTPError as e:
+            self.meter.record(tool, key, 0)
+            return {"error": f"API unreachable: {e}"}
         self.meter.record(tool, key, r.status_code)
         body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
         if r.status_code >= 400:
