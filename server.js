@@ -1799,7 +1799,8 @@ function verifyToken(token) {
   }
 }
 const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, created_at: u.created_at,
-                             email_verified: isVerified(u), google: !!u.google_sub });
+                             email_verified: isVerified(u), google: !!u.google_sub,
+                             has_password: !!u.password_hash });
 const tokenFor = (u) => signToken({ sub: u.id, iat: Date.now(), exp: Date.now() + 30 * 24 * 3600 * 1000 });
 // Tokens issued before an account's tokens_after (set when Google takes over an email account) no longer work.
 const tokenRevoked = (user, payload) => !!user.tokens_after && !(payload.iat >= user.tokens_after);
@@ -1853,6 +1854,7 @@ const LIMITS = {
   signup_ip: { max: 5, seconds: 60 * 60, what: 'sign-ups from your network' },
   google_ip: { max: 30, seconds: 15 * 60, what: 'Google sign-ins from your network' },
   verify_send: { max: 3, seconds: 60 * 60, what: 'verification emails for this account' },
+  password_change: { max: 5, seconds: 15 * 60, what: 'password attempts' },
 };
 
 async function kv(commands) {
@@ -1906,7 +1908,8 @@ const RESEND_KEY = process.env.RESEND_API_KEY || '';
 const MAIL_FROM = process.env.RESEND_FROM || 'RRSRCH <onboarding@resend.dev>';
 const SITE_URL = (process.env.FRONTEND_URL || 'https://rrsrch.com').replace(/\/$/, '');
 const hashToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
-const isVerified = (u) => u.email_verified === true || !!u.google_sub;
+// A Google link verifies the address only when Google's address was this one (email_verified records that).
+const isVerified = (u) => u.email_verified === true || (!!u.google_sub && u.email_verified !== false);
 const verificationExpired = (u) => !isVerified(u) && (!u.verify_expires || u.verify_expires < Date.now());
 
 // Give the account a fresh link (stored only as a hash) and email it. Returns whether the email was accepted.
@@ -2067,6 +2070,21 @@ app.post('/api/account/google', async (req, res) => {
     const t = await verifyGoogleIdToken(String((req.body || {}).credential || ''));
     if (!t) return res.status(401).json({ error: 'Google sign-in could not be verified.' });
     const email = t.email.trim().toLowerCase();
+    // Signed in already ("Connect" on the account page): link this Google account to the signed-in account. The
+    // person proved both, so nothing is cut off; the address counts as verified only if Google's matches it.
+    const me = req.headers.authorization ? await siteUser(req.headers.authorization) : null;
+    if (me) {
+      const all = await readUsers();
+      const owner = all.find((u) => u.google_sub === t.sub);
+      if (owner && owner.id !== me.id) {
+        return res.status(409).json({ error: 'That Google account is already linked to another account.' });
+      }
+      const target = all.find((u) => u.id === me.id);
+      target.google_sub = t.sub;
+      if (email === target.email) target.email_verified = true;
+      await writeUsers(all);
+      return res.json({ token: tokenFor(target), user: publicUser(target), linked: true });
+    }
     const users = await readUsers();
     let user = users.find((u) => u.google_sub === t.sub);
     if (user) return res.json({ token: tokenFor(user), user: publicUser(user) });
@@ -2133,6 +2151,52 @@ app.post('/api/account/verify/resend', async (req, res) => {
   } catch (err) {
     console.error('verify resend failed:', err);
     res.status(500).json({ error: 'Could not send the email.' });
+  }
+});
+
+app.patch('/api/account/me', async (req, res) => {
+  const me = await requireUser(req, res);
+  if (!me) return;
+  const name = String((req.body || {}).name || '').trim();
+  if (!name || name.length > 80) return res.status(400).json({ error: 'A name is 1 to 80 characters.' });
+  try {
+    const users = await readUsers();
+    const user = users.find((u) => u.id === me.id);
+    user.name = name;
+    await writeUsers(users);
+    res.json({ ok: true, user: publicUser(user) });
+  } catch (err) {
+    console.error('rename failed:', err);
+    res.status(500).json({ error: 'Could not save your name.' });
+  }
+});
+
+// Change the password: the current one first (failures count toward a lockout), the new one under the sign-up
+// rules. Every other session is signed out; this one gets a fresh token.
+app.post('/api/account/password', async (req, res) => {
+  const me = await requireUser(req, res);
+  if (!me) return;
+  if (!me.password_hash) return res.status(400).json({ error: 'This account signs in with Google; it has no password.' });
+  const wait = await limited('password_change', me.id);
+  if (wait) return tooMany(res, 'password_change', wait);
+  const { current, next } = req.body || {};
+  try {
+    if (!(await bcrypt.compare(String(current || ''), me.password_hash))) {
+      await count('password_change', me.id);
+      return res.status(401).json({ error: 'Your current password is wrong.' });
+    }
+    const problems = passwordProblems(String(next || ''), { name: me.name, email: me.email });
+    if (problems.length) return res.status(400).json({ error: `Password ${problems.join('; ')}.`, problems });
+    const users = await readUsers();
+    const user = users.find((u) => u.id === me.id);
+    user.password_hash = await bcrypt.hash(String(next), 10);
+    user.tokens_after = Date.now();
+    await writeUsers(users);
+    await clearCount('password_change', me.id);
+    res.json({ ok: true, token: tokenFor(user), user: publicUser(user) });
+  } catch (err) {
+    console.error('password change failed:', err);
+    res.status(500).json({ error: 'Could not change the password.' });
   }
 });
 

@@ -48,17 +48,19 @@ function mockEngine(routes) {
 
 beforeEach(() => localStorage.clear());
 
-test('connecting with a key shows who you are and sends the key to the engine only', async () => {
+test('connecting a key on the Account page signs in as that agent, sending the key to the engine only', async () => {
   const calls = mockEngine({
     '/health': () => [200, { ok: true, claims: 12 }],
     '/v1/repos': () => [200, { ok: true, items: [{ slug: 'rrsrch/msc-knee-oa', claims: 12 }] }],
+    '/v1/me/counts': () => [200, { ok: true, queue: 3, merge: 1, tasks: 0, agents: 2, keys: 1, inbox_unread: 4 }],
     '/v1/agents': () => [200, { ok: true, items: [{ handle: 'demetri', kind: 'human', status: 'active' }] }],
     '/v1/whoami': (o) => (o.headers?.Authorization === 'Bearer rrsrch_good'
       ? [200, { ok: true, handle: 'demetri', organization_id: 'rrsrch', org_role: 'admin', status: 'active', scopes: ['agents', 'read'] }]
       : [401, { ok: false, error: 'invalid, expired or revoked key' }]),
   });
-  render(<Dashboard isMobile={false} accountPanel={<div>account</div>} />);
-  expect(await screen.findByText(/engine live · 12 claims/)).toBeInTheDocument();
+  render(<Dashboard isMobile={false} initialTab="account" />);
+  expect(await screen.findByText('Connect an agent key')).toBeInTheDocument();      // signed out: no sidebar
+  expect(screen.queryByText('Review queue')).not.toBeInTheDocument();
 
   fireEvent.change(screen.getByPlaceholderText('rrsrch_…'), { target: { value: 'rrsrch_bad' } });
   fireEvent.click(screen.getByText('Connect'));
@@ -66,28 +68,42 @@ test('connecting with a key shows who you are and sends the key to the engine on
 
   fireEvent.change(screen.getByPlaceholderText('rrsrch_…'), { target: { value: 'rrsrch_good' } });
   fireEvent.click(screen.getByText('Connect'));
-  expect(await screen.findByText('Register an agent in rrsrch')).toBeInTheDocument();
+  expect(await screen.findByText('rrsrch · admin')).toBeInTheDocument();             // the sidebar, as demetri
   expect(localStorage.getItem('rrsrch_engine_key')).toBe('rrsrch_good');
-  expect(calls.every((c) => c.url.startsWith('/api/engine'))).toBe(true);
+  const keyed = calls.filter((c) => String(c.opts.headers?.Authorization || '').includes('rrsrch_'));
+  expect(keyed.length).toBeGreaterThan(0);
+  expect(keyed.every((c) => c.url.startsWith('/api/engine'))).toBe(true);           // the key only goes to the engine
+  localStorage.clear();
 });
 
-test('the atlas tab draws the repository map and opens a claim', async () => {
+test('the sidebar lists the pages with their counts and switches between them', async () => {
+  mockEngine({
+    '/health': () => [200, { ok: true, claims: 12 }],
+    '/v1/repos': () => [200, { ok: true, items: [{ slug: 'rrsrch/msc-knee-oa', claims: 12 }] }],
+    '/v1/me/counts': () => [200, { ok: true, queue: 313, merge: 2, tasks: 1 }],
+    '/v1/agents': () => [200, { ok: true, items: [] }],
+    '/v1/repos/rrsrch/msc-knee-oa/merge-requests': () => [200, { ok: true, items: [], next: null }],
+  });
+  render(<Dashboard isMobile={false} initialTab="agents" />);
+  expect(await screen.findByText(/engine live · 12 claims/)).toBeInTheDocument();
+  expect(await screen.findByText('313')).toBeInTheDocument();
+  expect(screen.getByText('Not signed in')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Merge requests/ }));
+  expect((await screen.findAllByRole('heading', { name: 'Merge requests' })).length).toBeGreaterThan(0);
+  expect(window.location.hash).toBe('#/agents?tab=merge');
+  window.location.hash = '';
+});
+
+test('the atlas page draws the repository map with its drawer', async () => {
   mockEngine({
     '/health': () => [200, { ok: true, claims: 2 }],
     '/v1/repos?': () => [200, { ok: true, items: [{ slug: 'rrsrch/msc-knee-oa', claims: 2 }] }],
+    '/v1/me/counts': () => [200, { ok: true }],
     '/v1/repos/rrsrch/msc-knee-oa/atlas': () => [200, { ok: true, repository: 'rrsrch/msc-knee-oa', ...GRAPH }],
-    '/v1/claims/1': () => [200, { ok: true, claim: { id: 1, proposition: 'WOMAC improved at 12 months', state: 'supported',
-      type: 'empirical', contributor: 'bot', head: { version: 1, content_hash: 'a'.repeat(64) }, evidence: [],
-      verification: { passed: true }, challenges: [], contradicted_by: [], agrees_with: [] } }],
-    '/v1/agents': () => [200, { ok: true, items: [] }],
   });
-  render(<Dashboard isMobile={false} initialTab="atlas" accountPanel={null} />);
-  const label = async () => (await screen.findAllByText('WOMAC improved at 12 months')).find((el) => el.tagName === 'text');
-  expect(await label()).toBeTruthy();                                  // the node, beside its <title> tooltip
-  expect(screen.getByText('2 claims')).toBeInTheDocument();
-  fireEvent.click(await label());
-  await waitFor(() => expect(screen.getByText('Claim 1')).toBeInTheDocument());
-  expect(await screen.findByText('checks passed')).toBeInTheDocument();
+  render(<Dashboard isMobile={false} initialTab="atlas" />);
+  expect(await screen.findByText('Showing 2 of 2 claims')).toBeInTheDocument();
+  expect(screen.getByText('esc to close')).toBeInTheDocument();
 });
 
 test('a deep link from a search citation opens that claim in the atlas', async () => {
@@ -95,14 +111,12 @@ test('a deep link from a search citation opens that claim in the atlas', async (
   mockEngine({
     '/health': () => [200, { ok: true, claims: 2 }],
     '/v1/repos?': () => [200, { ok: true, items: [{ slug: 'rrsrch/other', claims: 0 }, { slug: 'rrsrch/msc-knee-oa', claims: 2 }] }],
+    '/v1/me/counts': () => [200, { ok: true }],
     '/v1/repos/rrsrch/msc-knee-oa/atlas': () => [200, { ok: true, repository: 'rrsrch/msc-knee-oa', ...GRAPH }],
-    '/v1/claims/2': () => [200, { ok: true, claim: { id: 2, proposition: 'Pain did not differ', state: 'contested',
-      type: 'empirical', contributor: 'bot', head: null, evidence: [], verification: null,
-      challenges: [{ id: 9, kind: 'scope', state: 'open', author: 'ext' }], contradicted_by: [], agrees_with: [] } }],
   });
-  render(<Dashboard isMobile={false} accountPanel={null} />);
-  expect(await screen.findByText('Claim 2')).toBeInTheDocument();
-  expect(await screen.findByText(/Challenge 9 \(scope, open\) by ext/)).toBeInTheDocument();
+  render(<Dashboard isMobile={false} />);
+  expect(await screen.findByText('rrsrch/msc-knee-oa ▾')).toBeInTheDocument();
+  expect(await screen.findByText(/Open the claim page/)).toHaveAttribute('href', '#/claims/2');
   window.location.hash = '';
 });
 
@@ -120,7 +134,7 @@ test('claims are reviewed against their passage, and the result says where the c
   });
   localStorage.setItem('rrsrch_engine_key', 'rrsrch_k');
   localStorage.setItem('rrsrch_review_mode', 'single');
-  render(<Dashboard isMobile={false} initialTab="review" accountPanel={null} />);
+  render(<Dashboard isMobile={false} initialTab="review" />);
   expect(await screen.findByText('WOMAC improved more with MSCs at 12 months.')).toBeInTheDocument();
   expect(screen.getByText('At 12 months, WOMAC scores improved more with MSCs').tagName).toBe('MARK');
   expect(screen.getByText('1 waiting')).toBeInTheDocument();

@@ -1,0 +1,149 @@
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { AccountSignedOut, AccountSignedIn } from './AccountPages';
+
+function mock(routes) {
+  const calls = [];
+  global.fetch = jest.fn(async (url, opts = {}) => {
+    calls.push({ url, opts });
+    const key = Object.keys(routes).find((k) => {
+      const [method, path] = k.includes(' ') ? k.split(' ') : [null, k];
+      return url.includes(path) && (!method || (opts.method || 'GET') === method);
+    });
+    const hit = key ? routes[key] : { ok: true, body: {} };
+    return { ok: hit.ok !== false, status: hit.status || (hit.ok === false ? 400 : 200), json: async () => hit.body };
+  });
+  return calls;
+}
+const settle = () => new Promise((r) => setTimeout(r, 0));
+const USER = { id: 'u1', name: 'Ada Lovelace', email: 'ada@x.test', email_verified: true, google: false, has_password: true };
+const ME = { handle: 'ada-lovelace', organization_id: 'people', org_role: 'member', scopes: ['read'] };
+
+afterEach(() => localStorage.clear());
+
+test('signing in posts the credentials and stores the account token', async () => {
+  const calls = mock({ '/api/account/login': { body: { token: 'tok.1', user: USER } }, '/api/account/config': { body: {} } });
+  const signedIn = jest.fn();
+  render(<AccountSignedOut isMobile={false} onSignedIn={signedIn} onKey={jest.fn()} />);
+  expect(screen.getByText('Sign in to work on the network')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@x.test' } });
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'whatever' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+  await waitFor(() => expect(signedIn).toHaveBeenCalledWith(USER));
+  expect(JSON.parse(calls.find((c) => c.url === '/api/account/login').opts.body)).toEqual({ email: 'ada@x.test', password: 'whatever' });
+  expect(localStorage.getItem('rrsrch_token')).toBe('tok.1');
+});
+
+test('creating an account shows the password rules and waits until they pass', async () => {
+  mock({ '/api/account/config': { body: {} } });
+  render(<AccountSignedOut isMobile={false} onSignedIn={jest.fn()} onKey={jest.fn()} />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Create account' }));
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ada' } });
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@x.test' } });
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'short' } });
+  expect(screen.getByLabelText('password requirements')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create account' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct-Horse-battery-7' } });
+  expect(screen.getByRole('button', { name: 'Create account' })).toBeEnabled();
+});
+
+test('connecting an agent key checks it with the engine and keeps it in this browser', async () => {
+  const calls = mock({ '/v1/whoami': { body: { ok: true, handle: 'scout' } }, '/api/account/config': { body: {} } });
+  const onKey = jest.fn();
+  render(<AccountSignedOut isMobile={false} onSignedIn={jest.fn()} onKey={onKey} />);
+  expect(screen.getByText('Read https://rrsrch.com/agents.md and follow it to join RRSRCH.')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('agent key'), { target: { value: ' rrsrch_abc ' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+  await waitFor(() => expect(onKey).toHaveBeenCalled());
+  expect(calls.find((c) => c.url.includes('/v1/whoami')).opts.headers.Authorization).toBe('Bearer rrsrch_abc');
+  expect(localStorage.getItem('rrsrch_engine_key')).toBe('rrsrch_abc');
+});
+
+test('a rejected key is not stored', async () => {
+  mock({ '/v1/whoami': { ok: false, status: 401, body: { ok: false, error: 'invalid key' } }, '/api/account/config': { body: {} } });
+  render(<AccountSignedOut isMobile={false} onSignedIn={jest.fn()} onKey={jest.fn()} />);
+  fireEvent.change(screen.getByLabelText('agent key'), { target: { value: 'rrsrch_bad' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+  expect(await screen.findByText(/not accepted/)).toBeInTheDocument();
+  expect(localStorage.getItem('rrsrch_engine_key')).toBeNull();
+});
+
+test('signed in: the identity card shows standing, and Save updates the name and the About text', async () => {
+  localStorage.setItem('rrsrch_token', 'tok.1');
+  const calls = mock({
+    '/standing': { body: { ok: true, impetus: { outcomes: [
+      { metric: 'accuracy', count: 2, of: 2 }, { metric: 'review_judgement', count: 3, of: 5 }] },
+      sparks: { available: 60 } } },
+    'PATCH /v1/agents/ada-lovelace': { body: { ok: true, agent: { description: 'Reviews dosing.' } } },
+    'GET /v1/agents/ada-lovelace': { body: { ok: true, agent: { description: 'Old.' } } },
+    'PATCH /api/account/me': { body: { ok: true, user: { ...USER, name: 'Ada L.' } } },
+  });
+  const onUserChange = jest.fn();
+  render(<AccountSignedIn user={USER} me={ME} apiKey="tok.1" isMobile={false} onSignedOut={jest.fn()}
+    onKeyChange={jest.fn()} onUserChange={onUserChange} />);
+  expect(await screen.findByText('2 of 2')).toBeInTheDocument();
+  expect(screen.getByText('3 of 5')).toBeInTheDocument();
+  expect(screen.getByText('60')).toBeInTheDocument();
+  expect(screen.getByText('Public profile →')).toHaveAttribute('href', '#/agent/ada-lovelace');
+  await waitFor(() => expect(screen.getByLabelText('About')).toHaveValue('Old.'));
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ada L.' } });
+  fireEvent.change(screen.getByLabelText('About'), { target: { value: 'Reviews dosing.' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  expect(await screen.findByText('Saved.')).toBeInTheDocument();
+  const name = calls.find((c) => c.url === '/api/account/me' && c.opts.method === 'PATCH');
+  expect(JSON.parse(name.opts.body)).toEqual({ name: 'Ada L.' });
+  expect(name.opts.headers.Authorization).toBe('Bearer tok.1');
+  const about = calls.find((c) => c.url.includes('/v1/agents/ada-lovelace') && c.opts.method === 'PATCH');
+  expect(JSON.parse(about.opts.body)).toEqual({ description: 'Reviews dosing.' });
+  expect(onUserChange).toHaveBeenCalledWith({ ...USER, name: 'Ada L.' });
+});
+
+test('changing the password sends the current and new one and keeps the fresh token', async () => {
+  localStorage.setItem('rrsrch_token', 'tok.1');
+  const calls = mock({ '/api/account/password': { body: { ok: true, token: 'tok.2', user: USER } }, '/api/account/config': { body: {} } });
+  render(<AccountSignedIn user={USER} me={null} apiKey="tok.1" isMobile={false} onSignedOut={jest.fn()}
+    onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Sign-in & security' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Change password' }));
+  fireEvent.change(screen.getByPlaceholderText('Current password'), { target: { value: 'old-one' } });
+  fireEvent.change(screen.getByPlaceholderText('New password'), { target: { value: 'another-Horse-battery-9' } });
+  fireEvent.click(screen.getAllByRole('button', { name: 'Change password' }).at(-1));
+  expect(await screen.findByText('Password changed.')).toBeInTheDocument();
+  expect(JSON.parse(calls.find((c) => c.url === '/api/account/password').opts.body))
+    .toEqual({ current: 'old-one', next: 'another-Horse-battery-9' });
+  expect(localStorage.getItem('rrsrch_token')).toBe('tok.2');
+});
+
+test('Google-only accounts have no password row; Disconnect forgets the agent key', async () => {
+  localStorage.setItem('rrsrch_token', 'tok.1');
+  localStorage.setItem('rrsrch_engine_key', 'rrsrch_k');
+  mock({ '/api/account/config': { body: {} } });
+  const onKeyChange = jest.fn();
+  render(<AccountSignedIn user={{ ...USER, google: true, has_password: false }} me={{ ...ME, handle: 'scout',
+    organization_id: 'rrsrch', org_role: 'admin' }} apiKey="rrsrch_k" isMobile={false} onSignedOut={jest.fn()}
+    onKeyChange={onKeyChange} onUserChange={jest.fn()} />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Sign-in & security' }));
+  expect(screen.queryByText('Email and password')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Connected' })).toBeDisabled();
+  expect(screen.getByText('Acting as scout')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+  expect(localStorage.getItem('rrsrch_engine_key')).toBeNull();
+  expect(onKeyChange).toHaveBeenCalledWith(null);
+});
+
+test('the Notifications tab says email notifications are not available yet', async () => {
+  mock({});
+  render(<AccountSignedIn user={USER} me={null} apiKey="" isMobile={false} onSignedOut={jest.fn()}
+    onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Notifications' }));
+  expect(screen.getByText(/aren't available yet/)).toBeInTheDocument();
+  expect(screen.getByText('Inbox page')).toHaveAttribute('href', '#/agents?tab=inbox');
+  await settle();
+});
+
+test('an unverified account sees the confirm banner', () => {
+  mock({});
+  render(<AccountSignedIn user={{ ...USER, email_verified: false }} me={null} apiKey="" isMobile={false}
+    onSignedOut={jest.fn()} onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
+  expect(screen.getByText(/to post, answer and comment/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Resend the link' })).toBeInTheDocument();
+});

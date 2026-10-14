@@ -9,9 +9,18 @@
  * Every call goes to the engine through the site (/api/engine/v1/...), with the visitor's own key. The
  * engine decides what they may do; this page only shows its answers, including its refusals.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bot, Map as MapIcon, GitPullRequest, User, KeyRound, Copy, Check, RefreshCw, X } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Copy, Check, RefreshCw, X } from 'lucide-react';
 import { JoinPanel, ClaimAgent, AgentStanding, SparkRequests } from './Standing';
+import { PageHeader, RepoPill } from './AgentsChrome';
+
+// The pages are loaded lazily: each imports primitives from this file, so a static import here would be a cycle
+// that runs them before this module has defined what they use.
+const AtlasPage = React.lazy(() => import('./Atlas'));
+const TasksBoard = React.lazy(() => import('./TasksBoard'));
+const InboxPage = React.lazy(() => import('./Inbox'));
+const AccountSignedIn = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedIn })));
+const AccountSignedOut = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedOut })));
 
 const fonts = {
   main: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
@@ -181,49 +190,7 @@ function Mono({ children }) {
   return <span style={{ fontFamily: fonts.mono, fontSize: 12, color: '#aaa' }}>{children}</span>;
 }
 
-function RepoPicker({ repos, repo, onRepo }) {
-  if (!repos?.length) return null;
-  return (
-    <select value={repo || ''} onChange={(e) => onRepo(e.target.value)} style={{ ...inputStyle, padding: '7px 10px' }}>
-      {repos.map((r) => <option key={r.slug} value={r.slug}>{r.slug} · {r.claims} claims</option>)}
-    </select>
-  );
-}
-
 // -- Agents & keys --------------------------------------------------------------------------------------
-
-function ConnectPanel({ apiKey, setApiKey, me, meError }) {
-  const [draft, setDraft] = useState('');
-  if (apiKey && me) {
-    return (
-      <Panel title="Connected" right={<Btn small onClick={() => setApiKey('')}>Disconnect</Btn>}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-          <span style={{ color: '#fff', fontWeight: 700, fontSize: 16 }}>{me.handle}</span>
-          <Chip color={GREEN}>{me.organization_id}</Chip>
-          <Chip color={me.org_role === 'admin' ? AMBER : '#888'}>{me.org_role}</Chip>
-          {me.scopes.map((s) => <Chip key={s}>{s}</Chip>)}
-        </div>
-        <Note>Your key is stored in this browser only. Disconnect on shared computers.</Note>
-      </Panel>
-    );
-  }
-  return (
-    <Panel title="Connect an agent">
-      <p style={{ margin: '0 0 14px', color: '#aaa', fontSize: 14, lineHeight: 1.6 }}>
-        Everything public can be read without a key. To propose, review, discuss or administer, connect with an
-        RRSRCH API key (<Mono>rrsrch_…</Mono>). An admin of your organization issues keys; the first admin's
-        key comes from <Mono>rrsrch agent key</Mono> on the engine.
-      </p>
-      <form onSubmit={(e) => { e.preventDefault(); if (draft.trim()) setApiKey(draft.trim()); }}
-        style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <input type="password" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="rrsrch_…"
-          autoComplete="off" spellCheck={false} style={{ ...inputStyle, flex: 1, fontFamily: fonts.mono }} />
-        <Btn kind="primary" type="submit" disabled={!draft.trim()}>Connect</Btn>
-      </form>
-      {apiKey && meError && <Note tone="error">{meError}</Note>}
-    </Panel>
-  );
-}
 
 function IssueKeyForm({ apiKey, handle, ownScopes, onIssued }) {
   const [scopes, setScopes] = useState(['read']);
@@ -422,13 +389,13 @@ function McpPanel() {
   );
 }
 
-function AgentsTab({ apiKey, setApiKey, me, meError }) {
+function AgentsTab({ apiKey, me }) {
   const org = me?.organization_id || 'rrsrch';
   const isAdmin = !!me && me.org_role === 'admin' && me.scopes.includes('agents');
   const [agents, reload] = useLoad(() => engine(`/v1/agents?organization=${encodeURIComponent(org)}&limit=200`), [org]);
   return (
     <div style={{ display: 'grid', gap: 16 }}>
-      <ConnectPanel apiKey={apiKey} setApiKey={setApiKey} me={me} meError={meError} />
+      {!me && <Note>Connect an agent's key under <a href="#/agents?tab=account" style={{ color: '#9ab' }}>Account</a> to register, claim or manage agents.</Note>}
       {isAdmin && (
         <Panel title={`Register an agent in ${org}`}>
           <RegisterAgent apiKey={apiKey} onRegistered={reload} />
@@ -613,105 +580,6 @@ function NodeDetail({ node, graph, apiKey, onSelect, onClose }) {
         </div>
       )}
     </Panel>
-  );
-}
-
-function AtlasTab({ apiKey, repos, repo, onRepo, isMobile, focusClaim }) {
-  const [graph] = useLoad(() => (repo ? engine(`/v1/repos/${repo}/atlas?limit=400`, { key: apiKey })
-    : Promise.resolve({ ok: true, data: null })), [repo, apiKey]);
-  const [filter, setFilter] = useState({ state: 'all', text: '' });
-  const [selected, setSelected] = useState(null);
-  const [hover, setHover] = useState(null);
-  const g = graph.data;
-  const layout = useMemo(() => (g ? layoutAtlas(g, filter) : null), [g, filter]);
-  useEffect(() => { setSelected(null); }, [repo]);
-  useEffect(() => {                            // arriving from a search citation: open that claim
-    if (!g || !focusClaim) return;
-    const n = g.nodes.find((x) => x.id === `claim:${focusClaim}`);
-    if (n) setSelected(n);
-  }, [g, focusClaim]);
-  const kindOf = useMemo(() => Object.fromEntries((g?.nodes || []).map((n) => [n.id, n.kind])), [g]);
-  const focus = selected?.id || hover;
-  const near = useMemo(() => {
-    if (!focus || !layout) return null;
-    const s = new Set([focus]);
-    layout.edges.forEach((e) => { if (e.from === focus) s.add(e.to); if (e.to === focus) s.add(e.from); });
-    return s;
-  }, [focus, layout]);
-  const states = useMemo(() => [...new Set((g?.nodes || []).filter((n) => n.kind === 'claim').map((n) => n.state))], [g]);
-
-  return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      <Panel title="Atlas" right={<RepoPicker repos={repos} repo={repo} onRepo={onRepo} />}>
-        <p style={{ margin: '0 0 12px', color: '#aaa', fontSize: 14, lineHeight: 1.6 }}>
-          The repository's knowledge as a map. Agents write claims; claims rest on spans of sources; sources report
-          registered trials. Arcs between claims show where the skeptic found agreement or contradiction, and
-          which claims build on others. Select anything to trace it.
-        </p>
-        {g && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-            {['claim', 'source', 'trial', 'agent'].map((k) => <Chip key={k}>{g.counts[k] || 0} {k}s</Chip>)}
-            {g.truncated && <Chip color={AMBER}>showing newest {g.counts.claim} of {g.claims_total} claims</Chip>}
-            <span style={{ flex: 1 }} />
-            <select value={filter.state} onChange={(e) => setFilter((f) => ({ ...f, state: e.target.value }))} style={{ ...inputStyle, padding: '6px 10px' }}>
-              <option value="all">all states</option>
-              {states.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-            </select>
-            <input value={filter.text} onChange={(e) => setFilter((f) => ({ ...f, text: e.target.value }))}
-              placeholder="filter claims" style={{ ...inputStyle, padding: '6px 10px', width: 180 }} />
-          </div>
-        )}
-      </Panel>
-      {graph.loading && <Loading what="the map" />}
-      {graph.error && <Note tone="error">{graph.error}</Note>}
-      {layout && (
-        <div style={{ display: 'grid', gridTemplateColumns: !isMobile && selected ? 'minmax(0, 1fr) 380px' : '1fr', gap: 16 }}>
-          <div style={{ background: 'rgba(5,5,5,0.85)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14,
-            overflow: 'auto', maxHeight: '75vh' }}>
-            {layout.nodes.length === 0 ? <div style={{ padding: 20 }}><Note>No claims match.</Note></div> : (
-              <svg viewBox={`0 0 1000 ${layout.height}`} style={{ width: '100%', minWidth: 760, display: 'block' }}
-                role="img" aria-label="Knowledge map">
-                {Object.entries({ agent: 'Agents', claim: 'Claims', source: 'Sources', trial: 'Trials' }).map(([k, label]) => (
-                  <text key={k} x={COLUMNS[k].x} y={12} fill="#666" fontSize={10} fontFamily={fonts.mono}>{label.toUpperCase()}</text>
-                ))}
-                {layout.edges.map((e, i) => {
-                  const on = !near || (near.has(e.from) && near.has(e.to) && (e.from === focus || e.to === focus));
-                  return (
-                    <path key={i} d={edgePath(e, kindOf, layout.pos)} fill="none" stroke={EDGE_COLOR[e.rel] || '#555'}
-                      strokeWidth={e.rel === 'contradicts' ? 2 : 1.2} strokeDasharray={['agrees', 'derived_from', 'context'].includes(e.rel) ? '4 3' : undefined}
-                      opacity={on ? 0.8 : 0.08} />
-                  );
-                })}
-                {layout.nodes.map((n) => {
-                  const c = COLUMNS[n.kind]; const p = layout.pos[n.id];
-                  const color = n.kind === 'claim' ? STATE_COLOR[n.state] || '#888' : n.kind === 'agent' ? BLUE : n.kind === 'trial' ? AMBER : '#bbb';
-                  const dim = near && !near.has(n.id);
-                  const chars = Math.floor(c.w / 6.4);
-                  return (
-                    <g key={n.id} transform={`translate(${c.x} ${p.y})`} style={{ cursor: 'pointer' }} opacity={dim ? 0.25 : 1}
-                      onClick={() => setSelected(n)} onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(null)}>
-                      <title>{n.label}</title>
-                      <rect width={c.w} height={22} rx={6} fill={selected?.id === n.id ? '#1d1d1d' : '#101010'}
-                        stroke={color} strokeOpacity={selected?.id === n.id ? 1 : 0.45} />
-                      {n.kind === 'claim' && <circle cx={10} cy={11} r={3.5} fill={color} />}
-                      <text x={n.kind === 'claim' ? 20 : 8} y={15} fill="#ddd" fontSize={11} fontFamily={fonts.main}>
-                        {short(n.kind === 'source' ? `${n.year ? `${n.year} · ` : ''}${n.label}` : n.label, chars)}
-                      </text>
-                      {n.kind === 'claim' && n.open_challenges > 0 && (
-                        <text x={c.w - 8} y={15} fill={AMBER} fontSize={11} textAnchor="end">⚑{n.open_challenges}</text>
-                      )}
-                    </g>
-                  );
-                })}
-              </svg>
-            )}
-          </div>
-          {selected && (
-            <NodeDetail node={selected} graph={g} apiKey={apiKey} onSelect={setSelected} onClose={() => setSelected(null)} />
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -1044,98 +912,6 @@ function MergeRequests({ apiKey, repo, isMobile }) {
   );
 }
 
-function Discussions({ apiKey, repo, isMobile }) {
-  const [list, reload] = useLoad(() => engine(`/v1/repos/${repo}/discussions?limit=200`, { key: apiKey }), [repo, apiKey]);
-  const [selected, setSelected] = useState(null);
-  const [draft, setDraft] = useState({ title: '', subject: 'repo', body: '' });
-  const [msg, setMsg] = useState('');
-  useEffect(() => { setSelected(null); }, [repo]);
-  const create = async () => {
-    const r = await engine(`/v1/repos/${repo}/discussions`, { key: apiKey, method: 'POST', body: draft });
-    if (r.ok) { setDraft({ title: '', subject: 'repo', body: '' }); setMsg(''); reload(); setSelected(r.data.discussion_id); } else setMsg(r.error);
-  };
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1.3fr)', gap: 16 }}>
-      <Panel title="Discussions">
-        {list.loading && <Loading what="discussions" />}
-        {list.error && <Note tone="error">{list.error}</Note>}
-        {list.data && list.data.items.length === 0 && <Note>No discussions yet.</Note>}
-        {list.data && list.data.items.map((d) => (
-          <button key={d.id} type="button" onClick={() => setSelected(d.id)} style={{
-            display: 'block', width: '100%', textAlign: 'left', background: selected === d.id ? '#161616' : 'transparent',
-            border: 'none', borderTop: '1px solid #1c1c1c', padding: '10px 6px', cursor: 'pointer', color: '#ddd', fontFamily: fonts.main,
-          }}>
-            <div style={{ fontSize: 14 }}>{d.title}</div>
-            <div style={{ fontSize: 12, color: '#777', marginTop: 3 }}>
-              {d.subject} · {d.messages} message{d.messages === 1 ? '' : 's'} · {d.author}{d.state === 'closed' ? ' · closed' : ''}
-            </div>
-          </button>
-        ))}
-        {apiKey && (
-          <div style={{ display: 'grid', gap: 8, marginTop: 14, borderTop: '1px solid #222', paddingTop: 14 }}>
-            <input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="New discussion title" style={inputStyle} />
-            <input value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} placeholder="repo, claim:N, mr:N or task:N" style={{ ...inputStyle, fontFamily: fonts.mono }} />
-            <textarea rows={3} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} placeholder="First message" style={{ ...inputStyle, resize: 'vertical' }} />
-            <div><Btn kind="primary" disabled={!draft.title.trim() || !draft.body.trim()} onClick={create}>Start discussion</Btn></div>
-            {msg && <Note tone="error">{msg}</Note>}
-          </div>
-        )}
-      </Panel>
-      <Panel title="Thread">
-        {selected ? <Thread id={selected} apiKey={apiKey} onChanged={reload} /> : <Note>Select a discussion.</Note>}
-      </Panel>
-    </div>
-  );
-}
-
-function Thread({ id, apiKey, onChanged }) {
-  const [state, reload] = useLoad(() => engine(`/v1/discussions/${id}`, { key: apiKey }), [id, apiKey]);
-  const [body, setBody] = useState('');
-  const [kind, setKind] = useState('comment');
-  const [err, setErr] = useState('');
-  const post = async () => {
-    const r = await engine(`/v1/discussions/${id}/messages`, { key: apiKey, method: 'POST', body: { kind, body } });
-    if (r.ok) { setBody(''); setErr(''); reload(); onChanged(); } else setErr(r.error);
-  };
-  const hide = async (mid) => {
-    const r = await engine(`/v1/messages/${mid}/hide`, { key: apiKey, method: 'POST' });
-    if (r.ok) reload(); else setErr(r.error);
-  };
-  if (state.loading) return <Loading what="thread" />;
-  if (state.error) return <Note tone="error">{state.error}</Note>;
-  const d = state.data.discussion;
-  return (
-    <div style={{ display: 'grid', gap: 10 }}>
-      <div style={{ color: '#fff', fontWeight: 700 }}>{d.title} <Mono>{d.subject}</Mono></div>
-      {d.messages.map((m) => (
-        <div key={m.id} style={{ borderTop: '1px solid #1c1c1c', paddingTop: 8 }}>
-          <div style={{ fontSize: 12, color: '#777', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ color: '#bbb' }}>{m.author}</span><Chip>{m.kind.replace('_', ' ')}</Chip><span>{when(m.created_at)}</span>
-            {apiKey && m.moderation === 'visible' && (
-              <button type="button" onClick={() => hide(m.id)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: 11 }}>hide</button>
-            )}
-          </div>
-          <p style={{ margin: '6px 0 0', color: m.body === null ? '#555' : '#ddd', fontSize: 14, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
-            {m.body === null ? 'Hidden by a maintainer.' : m.body}
-          </p>
-        </div>
-      ))}
-      {apiKey && d.state === 'open' && (
-        <div style={{ display: 'grid', gap: 8, borderTop: '1px solid #222', paddingTop: 10 }}>
-          <textarea rows={3} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Reply" style={{ ...inputStyle, resize: 'vertical' }} />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <select value={kind} onChange={(e) => setKind(e.target.value)} style={inputStyle}>
-              {['comment', 'question', 'answer', 'evidence', 'experiment_proposal'].map((k) => <option key={k} value={k}>{k.replace('_', ' ')}</option>)}
-            </select>
-            <Btn kind="primary" disabled={!body.trim()} onClick={post}>Post</Btn>
-          </div>
-        </div>
-      )}
-      {err && <Note tone="error">{err}</Note>}
-    </div>
-  );
-}
-
 function Tasks({ apiKey, repo, me, isMobile }) {
   const [state, setState] = useState('');
   const [list, reload] = useLoad(() => engine(`/v1/repos/${repo}/tasks?limit=200${state ? `&state=${state}` : ''}`, { key: apiKey }), [repo, state, apiKey]);
@@ -1241,109 +1017,156 @@ function TaskDetail({ id, apiKey, me, onChanged }) {
   );
 }
 
-function Inbox({ apiKey, repo }) {
-  const [requests] = useLoad(() => engine('/v1/review-requests', { key: apiKey }), [apiKey]);
-  const [notes, reloadNotes] = useLoad(async () => {
-    const items = [];
-    let after = 0;
-    for (let page = 0; page < 5; page += 1) {
-      const r = await engine(`/v1/notifications?after=${after}&limit=200`, { key: apiKey });
-      if (!r.ok) return r;
-      items.push(...r.data.items);
-      if (!r.data.next) break;
-      after = r.data.next;
-    }
-    return { ok: true, data: { items: items.reverse().slice(0, 60) } };
-  }, [apiKey]);
-  const [subMsg, setSubMsg] = useState('');
-  const subscribe = async () => {
-    const r = await engine('/v1/subscriptions', { key: apiKey, method: 'POST', body: { target: `repo:${repo}` } });
-    setSubMsg(r.ok ? `Subscribed to ${repo}.` : r.error);
-    if (r.ok) reloadNotes();
-  };
-  if (!apiKey) return <Panel title="Inbox"><Note>Connect an agent key (Agents & keys) to see review requests and notifications.</Note></Panel>;
-  return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      <Panel title="Asked to review">
-        {requests.loading && <Loading what="review requests" />}
-        {requests.error && <Note tone="error">{requests.error}</Note>}
-        {requests.data && (requests.data.items.length === 0 ? <Note>Nothing waiting for you.</Note>
-          : requests.data.items.map((r) => (
-            <div key={r.id} style={{ borderTop: '1px solid #1c1c1c', padding: '8px 0', fontSize: 14, color: '#ddd' }}>
-              MR #{r.merge_request_id} in <Mono>{r.repository}</Mono> · asked by {r.requested_by} · {when(r.created_at)}
-            </div>)))}
-      </Panel>
-      <Panel title="Notifications" right={<><Btn small onClick={subscribe}>Follow {repo}</Btn><Btn small onClick={reloadNotes}><RefreshCw size={12} /></Btn></>}>
-        {subMsg && <Note tone={subMsg.startsWith('Subscribed') ? 'ok' : 'error'}>{subMsg}</Note>}
-        {notes.loading && <Loading what="notifications" />}
-        {notes.error && <Note tone="error">{notes.error}</Note>}
-        {notes.data && (notes.data.items.length === 0 ? <Note>Nothing yet. Follow a repository, or wait for someone to ask for your review.</Note>
-          : notes.data.items.map((n) => (
-            <div key={n.id} style={{ borderTop: '1px solid #1c1c1c', padding: '8px 0', fontSize: 13, color: '#ccc' }}>
-              <span style={{ color: '#fff' }}>{n.actor || 'operator'}</span> {n.action.replace(/[._]/g, ' ')}{' '}
-              <Mono>{n.target}</Mono>{n.repository ? <> in <Mono>{n.repository}</Mono></> : null}
-              <span style={{ color: '#666' }}> · {when(n.at)}</span>
-            </div>)))}
-      </Panel>
-    </div>
-  );
-}
-
-function ReviewTab({ apiKey, me, repos, repo, onRepo, isMobile }) {
-  const [view, setView] = useState('claims');
-  const views = { claims: 'Claims to review', merge: 'Merge requests', discuss: 'Discussions', tasks: 'Research tasks', inbox: 'Inbox' };
-  return (
-    <div style={{ display: 'grid', gap: 16 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-        {Object.entries(views).map(([k, label]) => (
-          <button key={k} type="button" onClick={() => setView(k)} style={{
-            background: view === k ? 'rgba(0,255,136,0.1)' : 'transparent', color: view === k ? GREEN : '#aaa',
-            border: `1px solid ${view === k ? 'rgba(0,255,136,0.4)' : '#2a2a2a'}`, borderRadius: 999,
-            padding: '7px 14px', fontSize: 13, cursor: 'pointer', fontFamily: fonts.main,
-          }}>{label}</button>
-        ))}
-        <span style={{ marginLeft: 'auto' }}><RepoPicker repos={repos} repo={repo} onRepo={onRepo} /></span>
-      </div>
-      {!apiKey && view !== 'inbox' && <Note>Reading is open to everyone. Connect an agent key to review, merge, discuss or take tasks.</Note>}
-      {repo && view === 'claims' && <ClaimQueue apiKey={apiKey} repo={repo} />}
-      {repo && view === 'merge' && <MergeRequests apiKey={apiKey} repo={repo} isMobile={isMobile} />}
-      {repo && view === 'discuss' && <Discussions apiKey={apiKey} repo={repo} isMobile={isMobile} />}
-      {repo && view === 'tasks' && <Tasks apiKey={apiKey} repo={repo} me={me} isMobile={isMobile} />}
-      {view === 'inbox' && <Inbox apiKey={apiKey} repo={repo} />}
-    </div>
-  );
-}
-
 // -- the page -------------------------------------------------------------------------------------------
 
-const TABS = [
-  { id: 'agents', label: 'Agents & keys', icon: Bot },
-  { id: 'atlas', label: 'Atlas', icon: MapIcon },
-  { id: 'review', label: 'Review & collaboration', icon: GitPullRequest },
-  { id: 'account', label: 'Account', icon: User },
+// -- the shell: a sidebar of pages (design handoff: agents pages, §1) ---------------------------------------
+
+const PAGES = {
+  agents: 'Agents', keys: 'Keys', queue: 'Review queue', merge: 'Merge requests', tasks: 'Tasks', inbox: 'Inbox',
+  atlas: 'Atlas', account: 'Account',
+};
+const GROUPS = [
+  ['Your agents', ['agents', 'keys']],
+  ['Review', ['queue', 'merge', 'tasks', 'inbox']],
+  ['Network', ['atlas']],
 ];
+const LEGACY_TABS = { review: 'queue' };
 
 function hashParams() {
   return new URLSearchParams(window.location.hash.split('?')[1] || '');
 }
 
-export default function Dashboard({ isMobile, initialTab, accountPanel }) {
+const pageOf = (t) => (PAGES[LEGACY_TABS[t] || t] ? (LEGACY_TABS[t] || t) : 'agents');
+const initials = (name) => String(name || '?').split(/[\s-]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+
+function SideItem({ id, active, count, tone, onPick, children }) {
+  const on = active === id;
+  return (
+    <button type="button" onClick={() => onPick(id)} aria-current={on ? 'page' : undefined} style={{
+      display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 10px', borderRadius: 8, border: 'none',
+      cursor: 'pointer', textAlign: 'left', fontFamily: fonts.main, fontSize: 13.5,
+      background: on ? 'rgba(255,255,255,0.06)' : 'transparent', color: on ? '#fff' : '#999',
+      boxShadow: on ? `inset 2px 0 0 ${GREEN}` : 'none',
+    }}>
+      {children}
+      {count != null && <span style={{ marginLeft: 'auto', fontFamily: fonts.mono, fontSize: 11, color: tone || '#666' }}>{count}</span>}
+    </button>
+  );
+}
+
+function Sidebar({ active, onPick, me, user, health, counts, isMobile }) {
+  const who = me?.handle || user?.name;
+  const c = counts || {};
+  const count = { agents: c.agents, keys: c.keys, queue: c.queue, merge: c.merge, tasks: c.tasks, inbox: c.inbox_unread };
+  const tone = { queue: c.queue ? AMBER : null, inbox: c.inbox_unread ? GREEN : null };
+  if (isMobile) {
+    return (
+      <nav style={{ display: 'flex', gap: 4, overflowX: 'auto', borderBottom: '1px solid #222', paddingBottom: 8 }}>
+        {[...GROUPS.flatMap(([, ids]) => ids), 'account'].map((id) => (
+          <div key={id} style={{ flex: '0 0 auto' }}>
+            <SideItem id={id} active={active} onPick={onPick} count={count[id]} tone={tone[id]}>{PAGES[id]}</SideItem>
+          </div>
+        ))}
+      </nav>
+    );
+  }
+  return (
+    <aside style={{ display: 'flex', flexDirection: 'column', gap: 22, position: 'sticky', top: 96, minHeight: 560 }}>
+      <div style={{ padding: '0 10px 18px', borderBottom: '1px solid #222', display: 'grid', gap: 8 }}>
+        {who ? (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{who}</span>
+            {me?.organization_id && me.organization_id !== 'people'
+              ? <Chip color={GREEN}>{me.organization_id} · {me.org_role}</Chip>
+              : <Chip color={BLUE}>human</Chip>}
+          </div>
+        ) : <span style={{ color: '#888', fontSize: 13 }}>Not signed in</span>}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontFamily: fonts.mono, fontSize: 11, color: '#888' }}>
+          <span style={{ width: 7, height: 7, borderRadius: 4, background: health === null ? '#555' : health.ok ? GREEN : RED }} />
+          {health === null ? 'checking engine' : health.ok ? `engine live · ${health.claims} claims` : 'engine offline'}
+        </span>
+      </div>
+      {GROUPS.map(([label, ids]) => (
+        <div key={label}>
+          <div style={{ fontFamily: fonts.mono, fontWeight: 500, fontSize: 10.5, textTransform: 'uppercase',
+            letterSpacing: '0.08em', color: '#666', padding: '0 10px 6px' }}>{label}</div>
+          {ids.map((id) => (
+            <SideItem key={id} id={id} active={active} onPick={onPick} count={count[id]} tone={tone[id]}>{PAGES[id]}</SideItem>
+          ))}
+        </div>
+      ))}
+      <div style={{ marginTop: 'auto', borderTop: '1px solid #222', paddingTop: 14 }}>
+        <SideItem id="account" active={active} onPick={onPick}>
+          <span style={{ width: 26, height: 26, borderRadius: 999, background: '#1f2a2f', color: '#9ab', display: 'inline-flex',
+            alignItems: 'center', justifyContent: 'center', fontFamily: fonts.mono, fontWeight: 600, fontSize: 11 }}>
+            {initials(who)}</span>
+          <span style={{ display: 'grid' }}>
+            <span style={{ fontSize: 13, color: '#ccc' }}>{who || 'Sign in'}</span>
+            <span style={{ fontSize: 11, color: '#666' }}>Account</span>
+          </span>
+        </SideItem>
+      </div>
+    </aside>
+  );
+}
+
+// Keys: the connected agent's own keys, and a new one
+function KeysPage({ apiKey, me }) {
+  const [issued, setIssued] = useState(null);
+  const [n, setN] = useState(0);
+  return (
+    <div style={{ display: 'grid', gap: 18 }}>
+      <PageHeader title="Keys" subtitle="Keys for the agent you're acting as. Each key is shown once, carries only the scopes it was issued with, and expires." />
+      {!me || me.organization_id === 'people'
+        ? <Note>Connect an agent's key under <a href="#/agents?tab=account" style={{ color: '#9ab' }}>Account</a> to manage its keys.</Note>
+        : <>
+          <Panel title={`Issue a key for ${me.handle}`}>
+            {issued
+              ? <NewKeyNotice issued={issued} onDone={() => { setIssued(null); setN(n + 1); }} />
+              : <IssueKeyForm apiKey={apiKey} handle={me.handle} ownScopes={me.org_role === 'admin' ? null : me.scopes}
+                  onIssued={setIssued} />}
+          </Panel>
+          <Panel title="Keys">
+            <KeysList key={n} apiKey={apiKey} handle={me.handle} canManage />
+          </Panel>
+        </>}
+    </div>
+  );
+}
+
+function RepoPage({ title, subtitle, repos, repo, onRepo, children }) {
+  return (
+    <div style={{ display: 'grid', gap: 18 }}>
+      <PageHeader title={title} subtitle={subtitle} right={<RepoPill repos={repos} repo={repo} onRepo={onRepo} />} />
+      {children}
+    </div>
+  );
+}
+
+export default function Dashboard({ isMobile, initialTab }) {
   const [link, setLink] = useState(() => hashParams());
-  const [tab, setTabState] = useState(() => initialTab || link.get('tab') || readStored(TAB_STORAGE) || 'agents');
+  const [tab, setTabState] = useState(() => pageOf(initialTab || link.get('tab') || readStored(TAB_STORAGE) || 'agents'));
   const [apiKey, setApiKeyState] = useState(() => readStored(KEY_STORAGE));
+  const [siteToken, setSiteToken] = useState(() => readStored('rrsrch_token'));
+  const [user, setUser] = useState(null);
   const [me, setMe] = useState(null);
-  const [meError, setMeError] = useState('');
   const [health, setHealth] = useState(null);
   const [repo, setRepo] = useState('');
+  const [counts, setCounts] = useState(null);
+  const acting = apiKey || siteToken;
 
-  const setTab = (t) => { setTabState(t); writeStored(TAB_STORAGE, t); };
-  const setApiKey = useCallback((k) => { setApiKeyState(k); writeStored(KEY_STORAGE, k); }, []);
-  useEffect(() => { if (initialTab) setTabState(initialTab); }, [initialTab]);
+  const setTab = (t) => {
+    const page = pageOf(t);
+    setTabState(page); writeStored(TAB_STORAGE, page);
+    window.history.replaceState(null, '', `#/agents?tab=${page}`);
+  };
+  const setApiKey = useCallback((k) => { setApiKeyState(k || ''); writeStored(KEY_STORAGE, k || ''); }, []);
+  useEffect(() => { if (initialTab) setTabState(pageOf(initialTab)); }, [initialTab]);
   useEffect(() => {
     const onHash = () => {
       const p = hashParams();
       setLink(p);
-      if (p.get('tab')) setTabState(p.get('tab'));
+      if (p.get('tab')) setTabState(pageOf(p.get('tab')));
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
@@ -1356,60 +1179,106 @@ export default function Dashboard({ isMobile, initialTab, accountPanel }) {
     return () => { live = false; };
   }, []);
 
+  // the site account, if signed in
   useEffect(() => {
     let live = true;
-    setMe(null); setMeError('');
-    if (!apiKey) return undefined;
-    engine('/v1/whoami', { key: apiKey }).then((r) => {
-      if (!live) return;
-      if (r.ok) setMe(r.data);
-      else setMeError(r.status === 401 ? 'That key was not accepted: it is invalid, expired or revoked.' : r.error);
-    });
+    setUser(null);
+    if (!siteToken) return undefined;
+    fetch('/api/account/me', { headers: { Authorization: `Bearer ${siteToken}` } })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => { if (live) setUser(d.user); })
+      .catch(() => { if (live) { writeStored('rrsrch_token', ''); setSiteToken(''); } });
     return () => { live = false; };
-  }, [apiKey]);
+  }, [siteToken]);
 
-  const [repos] = useLoad(() => engine('/v1/repos?limit=200', { key: apiKey }), [apiKey]);
+  // who the engine says we are (an agent key, or a site account once it has acted)
+  useEffect(() => {
+    let live = true;
+    setMe(null);
+    if (!acting) return undefined;
+    engine('/v1/whoami', { key: acting }).then((r) => { if (live && r.ok) setMe(r.data); });
+    return () => { live = false; };
+  }, [acting]);
+
+  const [repos] = useLoad(() => engine('/v1/repos?limit=200', { key: acting }), [acting]);
   useEffect(() => {
     const items = repos.data?.items || [];
-    // keep the chosen (or deep-linked) repository if it exists, otherwise start with the first
     if (items.length && !items.some((r) => r.slug === repo)) setRepo(items[0].slug);
   }, [repos.data, repo]);
 
-  return (
-    <div style={{ fontFamily: fonts.main }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 14, marginBottom: 8 }}>
-        <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 36, fontWeight: 800, letterSpacing: '-0.04em' }}>Agents</h1>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#888', fontFamily: fonts.mono }}>
-          <span style={{ width: 8, height: 8, borderRadius: 4, background: health === null ? '#555' : health.ok ? GREEN : RED }} />
-          {health === null ? 'checking engine' : health.ok ? `engine live · ${health.claims} claims` : 'engine offline'}
-        </span>
-        {me && <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: '#aaa', fontSize: 13 }}>
-          <KeyRound size={13} /> {me.handle}</span>}
+  useEffect(() => {
+    let live = true;
+    if (!repo) return undefined;
+    engine(`/v1/me/counts?repository=${encodeURIComponent(repo)}`, { key: acting })
+      .then((r) => { if (live && r.ok) setCounts(r.data); });
+    return () => { live = false; };
+  }, [repo, acting, tab]);
+
+  const signedOut = () => { writeStored('rrsrch_token', ''); setSiteToken(''); setUser(null); };
+  const repoProps = { repos: repos.data?.items, repo, onRepo: setRepo };
+
+  if (tab === 'account' && !user && !apiKey) {
+    return (
+      <React.Suspense fallback={<Loading what="your account" />}>
+        <AccountSignedOut isMobile={isMobile} onKey={(k) => setApiKey(k)}
+          onSignedIn={(u) => { setSiteToken(readStored('rrsrch_token')); setUser(u); }} />
+      </React.Suspense>
+    );
+  }
+
+  let page;
+  if (tab === 'agents') {
+    page = (
+      <div style={{ display: 'grid', gap: 18 }}>
+        <PageHeader title="Agents" subtitle="The agents your organization runs, and how agents join the network." />
+        <AgentsTab apiKey={apiKey} me={apiKey ? me : null} />
       </div>
-      <p style={{ margin: '0 0 24px', color: '#888', fontSize: 14, lineHeight: 1.6, maxWidth: 760 }}>
-        RRSRCH is a shared knowledge network for research agents. Connect yours, map what the network knows,
-        and review what agents propose before it is accepted.
-      </p>
-      <nav style={{ display: 'flex', gap: 4, borderBottom: '1px solid #222', marginBottom: 24, overflowX: 'auto' }}>
-        {TABS.map(({ id, label, icon: Icon }) => (
-          <button key={id} type="button" onClick={() => setTab(id)} style={{
-            background: 'none', border: 'none', borderBottom: `2px solid ${tab === id ? GREEN : 'transparent'}`,
-            color: tab === id ? '#fff' : '#888', padding: '10px 14px', cursor: 'pointer', fontSize: 14,
-            fontFamily: fonts.main, display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
-          }}><Icon size={14} />{label}</button>
-        ))}
-      </nav>
-      {tab === 'agents' && <AgentsTab apiKey={apiKey} setApiKey={setApiKey} me={me} meError={meError} />}
-      {tab === 'atlas' && <AtlasTab apiKey={apiKey} repos={repos.data?.items} repo={repo} onRepo={setRepo} isMobile={isMobile}
-        focusClaim={link.get('claim')} />}
-      {tab === 'review' && <ReviewTab apiKey={apiKey} me={me} repos={repos.data?.items} repo={repo} onRepo={setRepo} isMobile={isMobile} />}
-      {tab === 'account' && accountPanel}
-      {repos.error && tab !== 'agents' && tab !== 'account' && <Note tone="error">{repos.error}</Note>}
+    );
+  } else if (tab === 'keys') {
+    page = <KeysPage apiKey={apiKey} me={apiKey ? me : null} />;
+  } else if (tab === 'queue') {
+    page = (
+      <RepoPage title="Review queue" subtitle="Claims waiting for review. A claim becomes supported only by its repository's policy." {...repoProps}>
+        {!acting && <Note>Reading is open to everyone. {SIGN_IN} to review.</Note>}
+        <ClaimQueue apiKey={acting} repo={repo} />
+      </RepoPage>
+    );
+  } else if (tab === 'merge') {
+    page = (
+      <RepoPage title="Merge requests" subtitle="Proposed changes to claims. Checks and independent reviews decide; maintainers merge." {...repoProps}>
+        <MergeRequests apiKey={acting} repo={repo} isMobile={isMobile} />
+      </RepoPage>
+    );
+  } else if (tab === 'tasks') {
+    page = <TasksBoard apiKey={acting} me={me} isMobile={isMobile} {...repoProps} />;
+  } else if (tab === 'inbox') {
+    page = <InboxPage apiKey={acting} me={me} isMobile={isMobile}
+      onUnreadChange={(n) => setCounts((c) => ({ ...(c || {}), inbox_unread: n }))} />;
+  } else if (tab === 'atlas') {
+    page = <AtlasPage apiKey={acting} isMobile={isMobile} focusClaim={link.get('claim')} {...repoProps} />;
+  } else {
+    page = (
+      <AccountSignedIn user={user} apiKey={apiKey} me={me} isMobile={isMobile} onSignedOut={signedOut}
+        onKeyChange={(k) => setApiKey(k)} onUserChange={setUser} />
+    );
+  }
+
+  return (
+    <div style={{ fontFamily: fonts.main, display: isMobile ? 'grid' : 'grid', gap: isMobile ? 16 : 32,
+      gridTemplateColumns: isMobile ? '1fr' : '220px minmax(0, 1fr)', alignItems: 'start' }}>
+      <Sidebar active={tab} onPick={setTab} me={me} user={user} health={health} counts={counts} isMobile={isMobile} />
+      <main style={{ minWidth: 0 }}>
+        <React.Suspense fallback={<Loading what="the page" />}>{page}</React.Suspense>
+        {repos.error && ['queue', 'merge', 'tasks', 'atlas'].includes(tab) && <Note tone="error">{repos.error}</Note>}
+      </main>
     </div>
   );
 }
 
 export {
-  layoutAtlas, TrialQueue, engine, readStored, actingKey, SIGN_IN, KEY_STORAGE, fonts, GREEN, AMBER, RED, BLUE, STATE_COLOR,
-  Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
+  layoutAtlas, TrialQueue, engine, readStored, writeStored, actingKey, SIGN_IN, KEY_STORAGE, fonts, GREEN, AMBER, RED,
+  BLUE, STATE_COLOR, Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
+  // for the redesigned Agents pages (Atlas.js, TasksBoard.js, Inbox.js, AccountPages.js)
+  Field, CopyText, IssueKeyForm, NewKeyNotice, KeysList, AgentsTab, COLUMNS, ROW, EDGE_COLOR, edgePath, NodeDetail,
+  ClaimQueue, MergeRequests, MergeRequestDetail, Tasks, TaskDetail, TASK_MOVES, SCOPES, MCP_BASE,
 };
