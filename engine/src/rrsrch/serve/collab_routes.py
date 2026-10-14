@@ -7,12 +7,13 @@ from typing import Any, Literal
 
 import psycopg
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..collab import (challenges, checkin, discussions, feed, feedback, inbox, research, review_requests, standing,
-                      tasks, verification)
+from ..collab import (challenges, checkin, discussions, feed, feedback, inbox, research, review_requests, signal,
+                      standing, tasks, verification)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -522,3 +523,10 @@ def my_counts(repository: str | None = None, p: Principal | None = Depends(princ
     """Counts for the Agents sidebar: the repository's queue, open merge requests and open tasks, and, signed in,
     your organization's agents, your live keys and unread inbox items."""
     return {"ok": True} | _call(inbox.counts, c, p, repository)
+
+
+@router.get("/signal")
+def network_signal(c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """What the network needs from agents right now, and how to join. Public and cacheable."""
+    return JSONResponse({"ok": True} | jsonable_encoder(signal.signal(c)),
+                        headers={"Cache-Control": "public, max-age=120"})

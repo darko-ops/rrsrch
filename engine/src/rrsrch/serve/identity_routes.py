@@ -20,7 +20,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..identity import access, onboarding, store
+from ..identity import access, onboarding, orgs, store
 from ..identity.access import Action, Principal, Role
 from ..knowledge.models import HANDLE, AgentKind
 from ..trust import audit
@@ -49,17 +49,19 @@ def site_principal(request: Request, c: psycopg.Connection) -> Principal | None:
     uid = request.headers.get("x-rrsrch-site-user", "").strip()
     if not uid or not _proxied(request):
         return None
-    if request.method in ("GET", "HEAD"):
-        row = c.execute("SELECT id, handle, status FROM agents WHERE site_user_id = %s", (uid,)).fetchone()
-        person = dict(zip(("id", "handle", "status"), row)) if row else None
-    else:
-        person = onboarding.site_person(c, uid, unquote(request.headers.get("x-rrsrch-site-name", "")))
-    if person is None:
+    if request.method not in ("GET", "HEAD"):
+        onboarding.site_person(c, uid, unquote(request.headers.get("x-rrsrch-site-name", "")))
+    row = c.execute("SELECT id, handle, status, organization_id, org_role FROM agents WHERE site_user_id = %s",
+                    (uid,)).fetchone()
+    if row is None:
         return None
-    if person["status"] != "active":
-        raise HTTPException(401, f"this account's agent is {person['status']}")
-    return Principal(agent_id=person["id"], handle=person["handle"], organization_id=onboarding.PEOPLE,
-                     org_role="member", status="active", scopes=SITE_SCOPES)
+    agent_id, handle, status, org, role = row
+    if status != "active":
+        raise HTTPException(401, f"this account's agent is {status}")
+    # a person who created an organization administers it: they may manage its agents
+    scopes = SITE_SCOPES | ({"agents"} if role == "admin" and org != onboarding.PEOPLE else set())
+    return Principal(agent_id=agent_id, handle=handle, organization_id=org, org_role=role, status="active",
+                     scopes=frozenset(scopes))
 
 
 def principal(request: Request, c: psycopg.Connection = Depends(conn)) -> Principal | None:
@@ -143,6 +145,16 @@ class SelfRegistration(BaseModel):
 class ProfileUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     model: str | None = Field(default=None, max_length=200)
+
+
+class NewOrganization(BaseModel):
+    id: str = Field(min_length=3, max_length=39)
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+
+
+class OrgVerification(BaseModel):
+    verified: bool
 
 
 class Claim(BaseModel):
@@ -335,3 +347,46 @@ def remove_member(owner: str, name: str, handle: str, p: Principal | None = Depe
     audit.append(c, "member.remove", f"agent:{handle}", actor_id=p.agent_id, repository_id=repo.id,
                  detail={"removed": removed})
     return {"ok": True, "repository": repo.slug, "handle": handle, "removed": removed}
+
+
+@router.post("/organizations", status_code=201)
+def create_organization(body: NewOrganization, p: Principal | None = Depends(principal),
+                        c: psycopg.Connection = Depends(conn)) -> dict:
+    """A person signed in on rrsrch.com creates an organization and becomes its admin. It starts unverified."""
+    try:
+        org = orgs.create(c, p, body.id, body.name, body.description)
+    except Refused as e:
+        raise HTTPException(e.status, str(e)) from e
+    audit.append(c, "organization.create", f"org:{org['id']}", actor_id=p.agent_id,
+                 detail={"name": org["name"], "self_serve": True})
+    return {"ok": True, "organization": org, "role": "admin"}
+
+
+@router.get("/organizations")
+def pending_organizations(p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Self-serve organizations waiting for an RRSRCH operator to verify them."""
+    try:
+        return {"ok": True, "items": orgs.pending(c, p)}
+    except Refused as e:
+        raise HTTPException(e.status, str(e)) from e
+
+
+@router.get("/organizations/{org_id}")
+def get_organization(org_id: str, c: psycopg.Connection = Depends(conn)) -> dict:
+    org = orgs.get(c, org_id)
+    if org is None:
+        raise HTTPException(404)
+    return {"ok": True, "organization": org}
+
+
+@router.post("/organizations/{org_id}/verification")
+def verify_organization(org_id: str, body: OrgVerification, p: Principal | None = Depends(principal),
+                        c: psycopg.Connection = Depends(conn)) -> dict:
+    """An RRSRCH operator verifies an organization: its agents' evaluations then count as independent."""
+    try:
+        org = orgs.set_verification(c, p, org_id, body.verified)
+    except Refused as e:
+        raise HTTPException(e.status, str(e)) from e
+    audit.append(c, "organization.verify" if body.verified else "organization.unverify", f"org:{org_id}",
+                 actor_id=p.agent_id)
+    return {"ok": True, "organization": org}

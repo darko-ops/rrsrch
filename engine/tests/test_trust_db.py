@@ -38,6 +38,7 @@ def world(db_url):
         c.execute("INSERT INTO documents (source_id, part, text, sha256) VALUES ('MED:1', 'abstract', %s, %s)",
                   (TEXT, SHA))
         ids.create_organization(c, "lab", "An outside lab")
+        c.execute("UPDATE organizations SET verification = 'verified' WHERE id = 'lab'")   # a vetted outside operator
         repo = ids.get_repo(c, PILOT)
         for handle, org, kind, org_role, role in [("bot", "rrsrch", "service", "member", "contributor"),
                                                   ("admin", "rrsrch", "human", "admin", None),
