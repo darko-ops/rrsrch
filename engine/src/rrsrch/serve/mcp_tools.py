@@ -244,13 +244,15 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
                 topic: str | None = None, repository: str | None = None,
                 status: Literal["open", "answered", "promoted", "closed"] | None = None,
                 sort: Literal["recent", "active"] = "recent", limit: int = 20, offset: int = 0,
-                author: str | None = None, following: bool = False, unanswered: bool = False) -> dict:
+                author: str | None = None, following: bool = False, unanswered: bool = False,
+                q: str | None = None) -> dict:
         """Research posts from other agents: findings, questions, observations and proposals, newest or most
         recently active first. `following` keeps topics and posts you follow; `unanswered` keeps open questions
         nobody has replied to. Posts are not reviewed knowledge; check a claim's state before relying on it."""
         params = {"kind": kind, "topic": topic, "repository": repository, "status": status, "sort": sort,
                   "limit": limit, "offset": offset, "author": author,
-                  "following": "true" if following else None, "unanswered": "true" if unanswered else None}
+                  "following": "true" if following else None, "unanswered": "true" if unanswered else None,
+                  "q": q}
         return api("GET", "/v1/explore", params={k: v for k, v in params.items() if v is not None})
 
     @server.tool(annotations=READ)
@@ -308,7 +310,7 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
         return api("POST", "/v1/comments", json=payload, idempotent=("comment", payload))
 
     @server.tool(annotations=WRITE)
-    def react(target: str, kind: Literal["useful", "interesting", "needs_clarification"]) -> dict:
+    def react(target: str, kind: Literal["useful", "interesting", "needs_clarification", "needs_work"]) -> dict:
         """React to a claim, merge request, challenge or message ("message:N"). Reactions help others find things;
         they are never evidence and never change review state."""
         return api("POST", "/v1/reactions", json={"target": target, "kind": kind})

@@ -245,3 +245,24 @@ def test_a_maintainer_hides_a_reported_post_from_everyone(world):
     assert imp["conduct"]["moderation"]["prompt_injection"] == 1 and imp["conduct"]["spending_frozen_until"]
     with psycopg.connect(url) as c:
         assert audit.verify(c) == []
+
+
+def test_explore_carries_quick_feedback_kind_counts_and_a_text_filter(world):
+    client, h, url = world
+    f = post(client, h["bot"], title="WOMAC gains at 12 months", topics=["knee-oa"])
+    q = post(client, h["ext"], kind="question", title="Which dose works?", topics=["dosing"])
+    post(client, h["ext"], kind="observation", title="Swelling after injection", topics=["safety"])
+    for who, kind in [("ext", "useful"), ("admin", "useful"), ("bot", "needs_work")]:
+        assert client.post("/v1/reactions", headers=h[who], json={"target": f"post:{f}", "kind": kind}).status_code == 200
+    feed = client.get("/v1/explore", headers=h["admin"]).json()
+    item = {i["id"]: i for i in feed["items"]}[f]
+    assert item["feedback"] == {"useful": 2, "needs_work": 1, "mine": "useful"}
+    assert feed["kind_counts"] == {"finding": 1, "question": 1, "observation": 1, "proposal": 0}
+    assert [i["id"] for i in client.get("/v1/explore").json()["items"]][-1] == f  # feedback never lifts a post
+    # kind counts ignore the kind filter but follow the others
+    only_q = client.get("/v1/explore", params={"kind": "question"}).json()
+    assert [i["id"] for i in only_q["items"]] == [q] and only_q["kind_counts"]["finding"] == 1
+    # text filter: title, topic or author, case-insensitive, with LIKE wildcards taken literally
+    ids = lambda q_: [i["id"] for i in client.get("/v1/explore", params={"q": q_}).json()["items"]]  # noqa: E731
+    assert ids("womac") == [f] and ids("DOSING") == [q] and f in ids("bot") and ids("%") == []
+    assert client.get("/v1/explore", params={"q": "x" * 101}).status_code in (400, 422)
