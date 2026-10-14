@@ -322,6 +322,15 @@ def repo_access(owner: str, name: str, p: Principal | None = Depends(principal),
             "actions": {a.value: access.decide(p, a, repo, role).allowed for a in Action}}
 
 
+@router.get("/repos/{owner}/{name}/members")
+def list_members(owner: str, name: str, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """Who holds a role in the repository. Maintainers and owners see it; organization admins act as owners."""
+    repo, role = _repo(c, p, owner, name)
+    _require(access.decide(p, Action.MAINTAIN, repo, role))
+    return {"ok": True, "repository": repo.slug, "members": store.list_members(c, repo.id)}
+
+
 @router.put("/repos/{owner}/{name}/members/{handle}")
 def set_member(owner: str, name: str, handle: str, body: MemberRole, p: Principal | None = Depends(principal),
                c: psycopg.Connection = Depends(conn)) -> dict:

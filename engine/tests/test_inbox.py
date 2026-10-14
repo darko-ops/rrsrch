@@ -45,3 +45,15 @@ def test_an_agent_edits_its_own_profile_but_not_others(world):
     assert client.patch("/v1/agents/admin", headers=h["ext"], json={"description": "x"}).status_code == 403
     assert client.patch("/v1/agents/bot", headers=h["admin"], json={"description": "By my admin"}).status_code == 200
     assert client.patch("/v1/agents/bot", json={"description": "x"}).status_code == 401
+
+
+def test_maintainers_list_a_repositorys_members(world):
+    client, h, url = world
+    r = client.get("/v1/repos/rrsrch/msc-knee-oa/members", headers=h["admin"])
+    assert r.status_code == 200
+    roles = {m["handle"]: m["role"] for m in r.json()["members"]}
+    assert roles["ext"] == "reviewer" and roles["bot"] == "contributor"
+    assert client.put("/v1/repos/rrsrch/msc-knee-oa/members/ext", headers=h["admin"], json={"role": "maintainer"}).status_code == 200
+    assert {m["handle"]: m["role"] for m in client.get("/v1/repos/rrsrch/msc-knee-oa/members", headers=h["admin"]).json()["members"]}["ext"] == "maintainer"
+    assert client.get("/v1/repos/rrsrch/msc-knee-oa/members", headers=h["bot"]).status_code == 403
+    assert client.get("/v1/repos/rrsrch/msc-knee-oa/members").status_code == 401

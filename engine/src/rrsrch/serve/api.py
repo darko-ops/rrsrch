@@ -84,7 +84,7 @@ def backup_status() -> dict | None:
     except (OSError, ValueError):
         return None
     out = {k: s.get(k) for k in ("last_state", "last_step", "last_ok_at", "last_verified_at", "last_offsite_at",
-                                 "offsite")}
+                                 "offsite", "accounts_state", "last_accounts_at")}
     if s.get("last_verified_at"):
         age = datetime.now(timezone.utc) - datetime.fromisoformat(s["last_verified_at"])
         out["verified_age_hours"] = round(age.total_seconds() / 3600, 2)
