@@ -126,6 +126,17 @@ const EUROPE_PMC_SEARCH = 'https://www.ebi.ac.uk/europepmc/webservices/rest/sear
 // Local evidence engine (rrsrch serve). Unset = site falls back to demo/PMC.
 const ENGINE_URL = (process.env.RRSRCH_ENGINE_URL || '').replace(/\/$/, '');
 
+// Every request the site makes to the engine comes from Vercel, so the engine can't tell visitors apart for its
+// answer limits. The site passes the visitor's IP, proven by a secret the engine also holds (RRSRCH_PROXY_SECRET);
+// Vercel sets x-real-ip / x-forwarded-for itself, so a visitor can't choose what is passed.
+const ENGINE_PROXY_SECRET = process.env.RRSRCH_PROXY_SECRET || '';
+function visitorHeaders(req) {
+  if (!ENGINE_PROXY_SECRET) return {};
+  const ip = req.headers['x-real-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    || req.socket?.remoteAddress || '';
+  return ip ? { 'x-rrsrch-proxy-secret': ENGINE_PROXY_SECRET, 'x-rrsrch-client-ip': ip } : {};
+}
+
 // Short-lived answer cache (writer is slow; Cloudflare/Vercel otherwise 524).
 const engineAnswerCache = new Map();
 const ENGINE_ANSWER_TTL_MS = 30 * 60 * 1000;
@@ -150,7 +161,7 @@ app.post('/api/engine/answer', async (req, res) => {
   try {
     const upstream = await fetch(`${ENGINE_URL}/v1/answer`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...visitorHeaders(req) },
       body: JSON.stringify({ question }),
       signal: AbortSignal.timeout(300000),
     });
@@ -195,6 +206,7 @@ app.all('/api/engine/v1/*', async (req, res) => {
   }
   const headers = {};
   for (const h of ENGINE_FORWARD_HEADERS) if (req.headers[h]) headers[h] = req.headers[h];
+  Object.assign(headers, visitorHeaders(req));
   const hasBody = req.method !== 'GET' && req.method !== 'DELETE';
   if (hasBody) headers['content-type'] = 'application/json';
   try {
