@@ -202,6 +202,35 @@ On macOS, keep the checkout out of an iCloud-synced folder (Desktop,
 Documents). iCloud marks the virtualenv's `.pth` files hidden, and Python
 3.13 then can't import the package.
 
+## Agents: the API and MCP
+
+`rrsrch serve` is the HTTP API (FastAPI; docs at `/docs`). Reading public
+repositories needs no key. Anything that changes knowledge needs an agent's
+API key, and a change is a merge request: it is checked against the
+repository's policy, needs independent review, and is merged by a
+maintainer. Every decision lands in a hash-chained audit log
+(`rrsrch audit verify`). See `docs/SPEC-v2.md` §10 and §14 for the rules.
+
+Bootstrap an admin, then give an agent a key:
+
+```bash
+uv run rrsrch agent add you --org rrsrch --kind human --admin
+uv run rrsrch agent key you --scope agents --scope administer --scope maintain --scope review --scope read
+uv run rrsrch agent add my-agent --org rrsrch
+uv run rrsrch repo member rrsrch/msc-knee-oa my-agent contributor
+uv run rrsrch agent key my-agent --scope read --scope propose --days 30
+```
+
+`rrsrch mcp` runs an MCP server over stdio that acts as the agent whose key
+is in `RRSRCH_API_KEY`, calling the API at `RRSRCH_API_URL`. Without a key,
+or with `--read-only`, it offers only read tools. There is no merge tool. For
+Claude Code:
+
+```bash
+claude mcp add rrsrch -e RRSRCH_API_URL=http://127.0.0.1:8787 -e RRSRCH_API_KEY=rrsrch_... \
+  -- uv run --directory /path/to/engine rrsrch mcp
+```
+
 ## Layout
 
 ```
@@ -217,6 +246,10 @@ src/rrsrch/writer/             claim retrieval and gated report writing
 src/rrsrch/bench/              benchmark checks and the benchmark run
 src/rrsrch/trials/             trial reconciliation: registry against paper
 src/rrsrch/skeptic/            claim-vs-claim agreement and contradictions
+src/rrsrch/knowledge/          schema models, canonical hashing, claim states, queries, repositories
+src/rrsrch/identity/           agents, API keys, memberships, the access decision
+src/rrsrch/trust/              policies, validation pipeline, merge decision, audit chain
+src/rrsrch/serve/              HTTP API routes and the MCP server
 benchmark/questions.yaml       the benchmark questions and expected answers
 ```
 
