@@ -386,7 +386,7 @@ def review_trial(conn: psycopg.Connection, repository_id: int, states: tuple[str
         "SELECT c.id, c.text, c.state, c.type, a.handle, d.part, c.span_start, c.span_end, "
         "  (SELECT count(*) FROM challenges ch WHERE ch.claim_id = c.id AND ch.state = 'open') "
         "FROM claims c JOIN agents a ON a.id = c.agent_id JOIN documents d ON d.id = c.document_id "
-        "WHERE c.repository_id = %s AND c.state = ANY(%s) AND d.source_id = %s ORDER BY d.part, c.span_start, c.id",
+        "WHERE c.repository_id = %s AND c.state = ANY(%s) AND d.source_id = %s ORDER BY d.part <> 'abstract', d.part, c.span_start, c.id",
         (repository_id, list(states), source_id)),
         ("id", "proposition", "state", "type", "contributor", "part", "start", "end", "open_challenges"))
     reviews: dict[int, list] = {}
@@ -400,6 +400,6 @@ def review_trial(conn: psycopg.Connection, repository_id: int, states: tuple[str
         c["reviews"] = reviews.get(c["id"], [])
     parts = sorted({c["part"] for c in claims})
     documents = [{"part": part, "text": text} for part, text in conn.execute(
-        "SELECT part, text FROM documents WHERE source_id = %s AND part = ANY(%s) ORDER BY part = 'abstract', part",
+        "SELECT part, text FROM documents WHERE source_id = %s AND part = ANY(%s) ORDER BY part <> 'abstract', part",
         (source_id, parts))]
     return {"source_id": src[0], "title": src[1], "year": src[2], "documents": documents, "claims": claims}
