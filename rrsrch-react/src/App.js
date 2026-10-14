@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
@@ -615,6 +615,55 @@ function BackpackPanel({ isMobile, accountEmail, endpoint, setEndpoint }) {
   );
 }
 
+// "Continue with Google": Google Identity Services hands the browser an ID token, and the server verifies it
+// (/api/account/google) and returns the same account token as an email sign-in. Shown only when the server
+// has a Google client ID configured.
+export function GoogleSignIn({ onSignedIn, onError }) {
+  const slot = useRef(null);
+  const [clientId, setClientId] = useState(null);
+  useEffect(() => {
+    fetch('/api/account/config').then((r) => (r.ok ? r.json() : {}))
+      .then((d) => setClientId(d.google_client_id || null)).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!clientId || !slot.current) return undefined;
+    const render = () => {
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async ({ credential }) => {
+          const r = await fetch('/api/account/google', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential }) });
+          const d = await r.json().catch(() => ({}));
+          if (r.ok) onSignedIn(d); else onError(d.error || 'Google sign-in failed.');
+        },
+      });
+      window.google.accounts.id.renderButton(slot.current,
+        { theme: 'filled_black', size: 'large', text: 'continue_with', shape: 'pill', width: 380 });
+    };
+    if (window.google?.accounts?.id) { render(); return undefined; }
+    let script = document.querySelector('script[data-gsi]');
+    if (!script) {
+      script = document.createElement('script');
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.dataset.gsi = '1';
+      document.head.appendChild(script);
+    }
+    script.addEventListener('load', render);
+    return () => script.removeEventListener('load', render);
+  }, [clientId, onSignedIn, onError]);
+  if (!clientId) return null;
+  return (
+    <div style={{ marginTop: '18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#555', fontSize: '12px',
+        marginBottom: '14px' }}>
+        <span style={{ flex: 1, borderTop: '1px solid #222' }} />or<span style={{ flex: 1, borderTop: '1px solid #222' }} />
+      </div>
+      <div ref={slot} style={{ display: 'flex', justifyContent: 'center', minHeight: '44px' }} />
+    </div>
+  );
+}
+
 function AccountPage({ isMobile }) {
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
@@ -760,6 +809,8 @@ function AccountPage({ isMobile }) {
   };
 
   const signOut = () => { localStorage.removeItem(TOKEN_KEY); setUser(null); };
+  const onGoogle = useCallback((d) => { localStorage.setItem(TOKEN_KEY, d.token); setUser(d.user); setErr(''); }, []);
+  const onGoogleError = useCallback((m) => setErr(m), []);
 
   const deleteAccount = async () => {
     if (!window.confirm('Delete your account? This cannot be undone.')) return;
@@ -779,7 +830,7 @@ function AccountPage({ isMobile }) {
         <h2 style={heading}>{mode === 'signin' ? 'Sign in.' : 'Create your account.'}</h2>
         <p style={{ ...body, marginBottom: '28px' }}>
           Your account is where the dashboard lives: connection setup for both MCP servers now,
-          usage and keys as the hosted pilot lands. No spam, no card — just an email and a password.
+          usage and keys as the hosted pilot lands. No spam, no card — just an email and a password, or your Google account.
         </p>
         <div style={{ ...card, maxWidth: '440px' }}>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '22px' }}>
@@ -809,6 +860,7 @@ function AccountPage({ isMobile }) {
           }}>
             {busy ? 'Working…' : (mode === 'signin' ? 'Sign in' : 'Create account')}
           </button>
+          <GoogleSignIn onSignedIn={onGoogle} onError={onGoogleError} />
         </div>
         <p style={{ ...body, fontSize: '12px', color: '#555', maxWidth: '440px' }}>
           Early accounts: profile + connection setup today; usage metering arrives with the hosted

@@ -4,7 +4,6 @@ const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
 const passport = require('passport');
-const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const session = require('express-session');
 const bcrypt = require('bcrypt');
 require('dotenv').config();
@@ -32,28 +31,6 @@ app.use(passport.session());
 
 // Initialize Twitter client
 const twitterClient = new TwitterApi(process.env.TWITTER_BEARER_TOKEN);
-
-// Configure Google OAuth Strategy (only when credentials are configured —
-// the strategy constructor throws if clientID/clientSecret are missing).
-const googleOAuthEnabled = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
-if (googleOAuthEnabled) {
-  passport.use(new GoogleStrategy({
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/api/auth/google/callback`
-    },
-    function(accessToken, refreshToken, profile, cb) {
-      // Here you would normally save the user to a database
-      // For now, we'll just return the profile
-      return cb(null, {
-        id: profile.id,
-        name: profile.displayName,
-        email: profile.emails[0].value,
-        picture: profile.photos[0].value
-      });
-    }
-  ));
-}
 
 passport.serializeUser((user, done) => {
   done(null, user);
@@ -200,7 +177,8 @@ async function siteUser(auth) {
   const payload = verifyToken(auth.replace(/^Bearer\s+/i, ''));
   if (!payload) return null;
   const user = (await readUsers()).find((u) => u.id === payload.sub);
-  if (!user || (payload.dev && !(user.devices || []).some((d) => d.id === payload.dev))) return null;
+  if (!user || tokenRevoked(user, payload)) return null;
+  if (payload.dev && !(user.devices || []).some((d) => d.id === payload.dev)) return null;
   return user;
 }
 
@@ -1569,24 +1547,6 @@ app.delete('/api/posts/:id', async (req, res) => {
 });
 
 // Google OAuth routes
-app.get('/api/auth/google', (req, res, next) => {
-  if (!googleOAuthEnabled) {
-    return res.status(503).json({ error: 'Google sign-in is not configured' });
-  }
-  passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
-});
-
-app.get('/api/auth/google/callback', (req, res, next) => {
-  if (!googleOAuthEnabled) {
-    return res.status(503).json({ error: 'Google sign-in is not configured' });
-  }
-  passport.authenticate('google', { failureRedirect: '/' })(req, res, () => {
-    // Successful authentication, redirect to frontend with user data
-    const frontendURL = process.env.FRONTEND_URL || 'http://localhost:3000';
-    res.redirect(`${frontendURL}?auth=success&user=${encodeURIComponent(JSON.stringify(req.user))}`);
-  });
-});
-
 // Get current user
 app.get('/api/auth/user', (req, res) => {
   if (req.isAuthenticated()) {
@@ -1766,7 +1726,9 @@ function verifyToken(token) {
   }
 }
 const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, created_at: u.created_at });
-const tokenFor = (u) => signToken({ sub: u.id, exp: Date.now() + 30 * 24 * 3600 * 1000 });
+const tokenFor = (u) => signToken({ sub: u.id, iat: Date.now(), exp: Date.now() + 30 * 24 * 3600 * 1000 });
+// Tokens issued before an account's tokens_after (set when Google takes over an email account) no longer work.
+const tokenRevoked = (user, payload) => !!user.tokens_after && !(payload.iat >= user.tokens_after);
 
 async function requireUser(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -1793,6 +1755,10 @@ async function requireUser(req, res) {
     return null;
   }
   // device tokens are revocable: the device must still be on the account
+  if (tokenRevoked(user, payload)) {
+    res.status(401).json({ error: 'Signed out; sign in again', reason: 'token_revoked' });
+    return null;
+  }
   if (payload.dev && !(user.devices || []).some((d) => d.id === payload.dev)) {
     console.warn(`auth: device ${payload.dev} not on account ${user.id}`);
     res.status(401).json({ error: 'Device revoked', reason: 'device_revoked' });
@@ -1835,6 +1801,9 @@ app.post('/api/account/login', async (req, res) => {
   try {
     const cleanEmail = String((req.body || {}).email || '').trim().toLowerCase();
     const user = (await readUsers()).find((u) => u.email === cleanEmail);
+    if (user && !user.password_hash) {
+      return res.status(401).json({ error: 'This account signs in with Google.' });
+    }
     const ok = user && await bcrypt.compare(String((req.body || {}).password || ''),
                                             user.password_hash);
     if (!ok) return res.status(401).json({ error: 'Wrong email or password.' });
@@ -1842,6 +1811,62 @@ app.post('/api/account/login', async (req, res) => {
   } catch (err) {
     console.error('login failed:', err);
     res.status(500).json({ error: 'Login failed.' });
+  }
+});
+
+// --- Sign in with Google ------------------------------------------------------
+// The browser gets an ID token from Google Identity Services and posts it here. Google's tokeninfo endpoint checks
+// its signature and expiry; we check it was issued for this site, by Google, for a verified email. The person then
+// gets the same stateless account token as an email sign-in, so everything downstream (the engine proxy included)
+// treats both alike. Only the public client ID is needed, no secret.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_ISSUERS = ['accounts.google.com', 'https://accounts.google.com'];
+
+app.get('/api/account/config', (_req, res) => res.json({ google_client_id: GOOGLE_CLIENT_ID || null }));
+
+async function verifyGoogleIdToken(credential) {
+  if (!credential || credential.length > 4096) return null;
+  const r = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`,
+    { signal: AbortSignal.timeout(10000) });
+  if (!r.ok) return null;
+  const t = await r.json();
+  if (t.aud !== GOOGLE_CLIENT_ID || !GOOGLE_ISSUERS.includes(t.iss)) return null;
+  if (String(t.email_verified) !== 'true' || !t.email || !t.sub) return null;
+  if (!(Number(t.exp) * 1000 > Date.now())) return null;
+  return t;
+}
+
+app.post('/api/account/google', async (req, res) => {
+  if (!GOOGLE_CLIENT_ID) return res.status(503).json({ error: 'Google sign-in is not set up yet.' });
+  try {
+    const t = await verifyGoogleIdToken(String((req.body || {}).credential || ''));
+    if (!t) return res.status(401).json({ error: 'Google sign-in could not be verified.' });
+    const email = t.email.trim().toLowerCase();
+    const users = await readUsers();
+    let user = users.find((u) => u.google_sub === t.sub);
+    if (user) return res.json({ token: tokenFor(user), user: publicUser(user) });
+    user = users.find((u) => u.email === email);
+    if (user && user.google_sub) {
+      return res.status(409).json({ error: 'That email is linked to a different Google account.' });
+    }
+    if (user) {
+      // The first Google sign-in to an account made with an email and password. Google has verified the address;
+      // the password sign-up never did, so whoever chose that password may not own it. Google wins: the password
+      // stops working, paired devices are removed, and every earlier sign-in token is cut off.
+      user.google_sub = t.sub;
+      user.password_hash = null;
+      user.devices = [];
+      user.tokens_after = Date.now();
+    } else {
+      user = { id: crypto.randomUUID(), name: String(t.name || '').trim().slice(0, 80) || email.split('@')[0],
+               email, password_hash: null, google_sub: t.sub, created_at: new Date().toISOString() };
+      users.push(user);
+    }
+    await writeUsers(users);
+    res.json({ token: tokenFor(user), user: publicUser(user) });
+  } catch (err) {
+    console.error('google sign-in failed:', err);
+    res.status(500).json({ error: 'Google sign-in failed.' });
   }
 });
 
