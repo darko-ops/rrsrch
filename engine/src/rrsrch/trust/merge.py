@@ -1,0 +1,254 @@
+"""Merge requests in Postgres: open, review, merge, close. Every step is audited.
+
+This module gathers facts and writes results; the decisions are made by
+rrsrch.identity.access (may this agent act?) and rrsrch.trust.pipeline (may
+this change be accepted?). A merge re-runs verification against the
+documents as they are at merge time, and locks the claim so a concurrent
+merge onto the same head is refused rather than silently forked.
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+import psycopg
+
+from ..identity import access
+from ..identity import store as ids
+from ..identity.access import Action, Principal
+from ..knowledge import states
+from ..knowledge import store as kstore
+from ..knowledge.models import Check, ClaimContent, Relation
+from . import audit, pipeline
+from .policy import load as load_policy
+
+
+class Refused(Exception):
+    """The action is not allowed; `status` is the HTTP status to report it with."""
+
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+
+
+@dataclass(frozen=True)
+class Outcome:
+    merge_request_id: int
+    state: str
+    checks: tuple[Check, ...]
+    decision: pipeline.MergeDecision | None = None
+    revision_id: int | None = None
+
+
+def _repo_and_role(conn, p: Principal | None, repository_id: int) -> tuple[access.Repo, access.Role | None]:
+    repo = conn.execute("SELECT id, slug, organization_id, visibility FROM repositories WHERE id = %s",
+                        (repository_id,)).fetchone()
+    repo = access.Repo(*repo)
+    return repo, ids.role_in(conn, p.agent_id if p else None, repo.id)
+
+
+def _require(conn, p: Principal | None, action: Action, repository_id: int) -> access.Repo:
+    repo, role = _repo_and_role(conn, p, repository_id)
+    if not access.decide(p, Action.READ, repo, role):
+        raise Refused(404, "not found")
+    d = access.decide(p, action, repo, role)
+    if not d:
+        raise Refused(401 if d.reason == "authentication required" else 403, d.reason)
+    return repo
+
+
+def _head(conn, claim_id: int, lock: bool = False) -> tuple[int, str, int] | None:
+    """(revision id, content hash, version) of a claim's newest revision."""
+    return conn.execute("SELECT id, content_hash, version FROM claim_revisions WHERE claim_id = %s "
+                        "ORDER BY version DESC LIMIT 1" + (" FOR UPDATE" if lock else ""), (claim_id,)).fetchone()
+
+
+def _proposal(conn, repo: access.Repo, policy_version: str, content: dict, author_id: int,
+              claim_id: int | None, merge_request_id: int | None = None) -> pipeline.Proposal:
+    author = conn.execute("SELECT organization_id, status FROM agents WHERE id = %s", (author_id,)).fetchone()
+    spans = [e[1] for e in content.get("evidence", []) if isinstance(e, (list, tuple)) and len(e) == 2]
+    source_ids = sorted({s.get("source_id") for s in spans if isinstance(s, dict)} - {None})
+    docs = {}
+    for sid, sha, text, pub_types, title, abstract in conn.execute(
+            "SELECT d.source_id, d.sha256, d.text, s.pub_types, s.title, "
+            "  (SELECT a.text FROM documents a WHERE a.source_id = d.source_id AND a.part = 'abstract') "
+            "FROM documents d JOIN sources s ON s.id = d.source_id WHERE d.source_id = ANY(%s)", (source_ids,)):
+        docs[(sid, sha)] = pipeline.Doc(sid, sha, text, kstore.is_primary(pub_types), title, abstract or "")
+    known = {r[0] for r in conn.execute("SELECT id FROM sources WHERE id = ANY(%s)", (source_ids,))}
+    reviews = ()
+    if merge_request_id is not None:
+        reviews = tuple(pipeline.Review(*r) for r in conn.execute(
+            "SELECT a.id, a.organization_id, a.kind, a.status, r.verdict FROM reviews r "
+            "JOIN agents a ON a.id = r.reviewer_id WHERE r.merge_request_id = %s ORDER BY r.id",
+            (merge_request_id,)))
+    head = _head(conn, claim_id) if claim_id else None
+    return pipeline.Proposal(
+        content=content, repository=repo.slug, policy=load_policy(conn, repo.id, policy_version),
+        author_id=author_id, author_org=author[0], author_status=author[1], known_sources=frozenset(known),
+        docs=docs,
+        head_hash=head[1] if head else None, reviews=reviews)
+
+
+def _record_run(conn, checks: list[Check], policy_version: str, *, merge_request_id=None, revision_id=None) -> int:
+    return conn.execute(
+        "INSERT INTO verification_runs (claim_revision_id, merge_request_id, policy_version, checks, passed) "
+        "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+        (revision_id, merge_request_id, policy_version, json.dumps([c.model_dump(mode="json") for c in checks]),
+         all(c.passed for c in checks))).fetchone()[0]
+
+
+def open_request(conn: psycopg.Connection, p: Principal | None, repository_slug: str, content: dict,
+                 claim_id: int | None = None) -> Outcome:
+    """Propose a new claim, or a new revision of `claim_id` (content.parent_hash names the head it builds on)."""
+    repo = ids.get_repo(conn, repository_slug)
+    if repo is None:
+        raise Refused(404, "not found")
+    _require(conn, p, Action.PROPOSE, repo.id)
+    policy_version = conn.execute("SELECT policy_version FROM repositories WHERE id = %s", (repo.id,)).fetchone()[0]
+    base = None
+    if claim_id is not None:
+        owner = conn.execute("SELECT repository_id FROM claims WHERE id = %s", (claim_id,)).fetchone()
+        if owner is None or owner[0] != repo.id:
+            raise Refused(404, f"no claim {claim_id} in {repository_slug}")
+        base = _head(conn, claim_id)
+        if base is None:
+            raise Refused(409, f"claim {claim_id} has no revision yet; run `rrsrch ledger load`")
+    proposal = _proposal(conn, repo, policy_version, content, p.agent_id, claim_id)
+    parsed, checks = pipeline.verify(proposal)
+    if parsed is None:
+        raise Refused(400, checks[0].detail)
+    mr_id = conn.execute(
+        "INSERT INTO merge_requests (repository_id, claim_id, base_revision_id, content, content_hash, author_id, "
+        "policy_version) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        (repo.id, claim_id, base[0] if base else None, json.dumps(parsed.canonical()), parsed.content_hash(),
+         p.agent_id, policy_version)).fetchone()[0]
+    _record_run(conn, checks, policy_version, merge_request_id=mr_id)
+    audit.append(conn, "merge_request.open", f"mr:{mr_id}", actor_id=p.agent_id, repository_id=repo.id,
+                 policy_version=policy_version,
+                 detail={"claim_id": claim_id, "content_hash": parsed.content_hash(),
+                         "checks_passed": all(c.passed for c in checks)})
+    return Outcome(mr_id, "open", tuple(checks))
+
+
+def _load(conn, mr_id: int, lock: bool = False) -> dict:
+    row = conn.execute(
+        "SELECT id, repository_id, claim_id, base_revision_id, content, content_hash, author_id, policy_version, "
+        "state FROM merge_requests WHERE id = %s" + (" FOR UPDATE" if lock else ""), (mr_id,)).fetchone()
+    if row is None:
+        raise Refused(404, "not found")
+    return dict(zip(("id", "repository_id", "claim_id", "base_revision_id", "content", "content_hash",
+                     "author_id", "policy_version", "state"), row))
+
+
+def review(conn: psycopg.Connection, p: Principal | None, mr_id: int, verdict: str, findings: str = "") -> None:
+    mr = _load(conn, mr_id)
+    _require(conn, p, Action.REVIEW, mr["repository_id"])
+    if mr["state"] != "open":
+        raise Refused(409, f"merge request is {mr['state']}")
+    if p.agent_id == mr["author_id"]:
+        raise Refused(403, "authors can't review their own change")
+    conn.execute(
+        "INSERT INTO reviews (merge_request_id, reviewer_id, verdict, findings) VALUES (%s, %s, %s, %s) "
+        "ON CONFLICT (merge_request_id, reviewer_id) DO UPDATE SET verdict = EXCLUDED.verdict, "
+        "findings = EXCLUDED.findings, created_at = now()", (mr_id, p.agent_id, verdict, findings))
+    audit.append(conn, f"review.{verdict}", f"mr:{mr_id}", actor_id=p.agent_id,
+                 repository_id=mr["repository_id"], policy_version=mr["policy_version"])
+
+
+def evaluate(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> tuple[dict, list[Check], pipeline.MergeDecision]:
+    """What a merge would decide right now, without merging. Needs read access."""
+    mr = _load(conn, mr_id)
+    repo, role = _repo_and_role(conn, p, mr["repository_id"])
+    if not access.decide(p, Action.READ, repo, role):
+        raise Refused(404, "not found")
+    proposal = _proposal(conn, repo, mr["policy_version"], mr["content"], mr["author_id"], mr["claim_id"], mr_id)
+    _, checks = pipeline.verify(proposal)
+    return mr, checks, pipeline.authorize(proposal, checks, access.decide(p, Action.MAINTAIN, repo, role))
+
+
+def merge(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> Outcome:
+    mr = _load(conn, mr_id, lock=True)
+    repo = _require(conn, p, Action.MAINTAIN, mr["repository_id"])
+    if mr["state"] != "open":
+        raise Refused(409, f"merge request is {mr['state']}")
+    if mr["claim_id"] is not None:
+        conn.execute("SELECT 1 FROM claims WHERE id = %s FOR UPDATE", (mr["claim_id"],))
+    _, role = _repo_and_role(conn, p, repo.id)
+    proposal = _proposal(conn, repo, mr["policy_version"], mr["content"], mr["author_id"], mr["claim_id"], mr_id)
+    _, checks = pipeline.verify(proposal)
+    decision = pipeline.authorize(proposal, checks, access.decide(p, Action.MAINTAIN, repo, role))
+    if not decision:
+        # returned, not raised: the refusal is part of the record, so this transaction must commit
+        audit.append(conn, "merge.refused", f"mr:{mr_id}", actor_id=p.agent_id, repository_id=repo.id,
+                     policy_version=mr["policy_version"], detail={"reasons": list(decision.reasons)})
+        return Outcome(mr_id, "open", tuple(checks), decision)
+
+    content = ClaimContent.model_validate(mr["content"])
+    first = next(s for rel, s in content.evidence if rel is Relation.SUPPORTS)
+    doc_id = conn.execute("SELECT id FROM documents WHERE source_id = %s AND sha256 = %s",
+                          (first.source_id, first.doc_sha256)).fetchone()[0]
+    claim_cols = (doc_id, first.doc_sha256, first.start, first.end, content.proposition,
+                  json.dumps(content.fields), json.dumps(content.scope), content.type.value)
+    if mr["claim_id"] is None:
+        state = states.ClaimState.SUBMITTED
+        claim_id = conn.execute(
+            "INSERT INTO claims (document_id, doc_sha256, span_start, span_end, text, fields, scope, type, "
+            "extractor, repository_id, state, agent_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "RETURNING id", (*claim_cols, f"mr:{mr_id}", repo.id, state.value, mr["author_id"])).fetchone()[0]
+        version, parent = 1, None
+    else:
+        claim_id = mr["claim_id"]
+        state = states.ClaimState(conn.execute("SELECT state FROM claims WHERE id = %s", (claim_id,)).fetchone()[0])
+        head = _head(conn, claim_id)
+        version, parent = head[2] + 1, head[0]
+        conn.execute("UPDATE claims SET document_id = %s, doc_sha256 = %s, span_start = %s, span_end = %s, "
+                     "text = %s, fields = %s, scope = %s, type = %s, extractor = %s WHERE id = %s",
+                     (*claim_cols, f"mr:{mr_id}", claim_id))
+        conn.execute("DELETE FROM evidence_links WHERE claim_id = %s", (claim_id,))
+
+    # a merge is a completed review: walk the claim to supported, one legal step at a time
+    path = {states.ClaimState.SUBMITTED: ("structurally_valid", "under_review", "supported"),
+            states.ClaimState.STRUCTURALLY_VALID: ("under_review", "supported"),
+            states.ClaimState.CONTESTED: ("under_review", "supported"),
+            states.ClaimState.STALE: ("under_review", "supported"),
+            states.ClaimState.UNDER_REVIEW: ("supported",),
+            states.ClaimState.SUPPORTED: ()}.get(state)
+    if path is None:
+        raise Refused(409, f"claim is {state}; it can't take a new revision")
+    for nxt in path:
+        state = states.check(state, nxt)
+    conn.execute("UPDATE claims SET state = %s WHERE id = %s", (state.value, claim_id))
+
+    for rel, span in content.evidence:
+        kstore.link_evidence(conn, claim_id, rel, span)
+    rev_id = conn.execute(
+        "INSERT INTO claim_revisions (claim_id, version, parent_id, content, content_hash, agent_id) "
+        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+        (claim_id, version, parent, json.dumps(content.canonical()), content.content_hash(),
+         mr["author_id"])).fetchone()[0]
+    _record_run(conn, checks, mr["policy_version"], revision_id=rev_id)
+    conn.execute("UPDATE merge_requests SET state = 'merged', decided_at = now(), decided_by = %s, "
+                 "merged_revision_id = %s WHERE id = %s", (p.agent_id, rev_id, mr_id))
+    audit.append(conn, "merge_request.merge", f"mr:{mr_id}", actor_id=p.agent_id, repository_id=repo.id,
+                 policy_version=mr["policy_version"],
+                 detail={"claim_id": claim_id, "revision_id": rev_id, "version": version,
+                         "content_hash": content.content_hash(), "approvals": decision.approvals})
+    return Outcome(mr_id, "merged", tuple(checks), decision, rev_id)
+
+
+def close(conn: psycopg.Connection, p: Principal | None, mr_id: int, state: str) -> None:
+    """Withdraw (the author) or reject (a maintainer) an open merge request."""
+    mr = _load(conn, mr_id, lock=True)
+    if state == "withdrawn":
+        if p is None or p.agent_id != mr["author_id"]:
+            raise Refused(403, "only the author can withdraw a merge request")
+    elif state == "rejected":
+        _require(conn, p, Action.MAINTAIN, mr["repository_id"])
+    else:
+        raise Refused(400, "state must be withdrawn or rejected")
+    if mr["state"] != "open":
+        raise Refused(409, f"merge request is {mr['state']}")
+    conn.execute("UPDATE merge_requests SET state = %s, decided_at = now(), decided_by = %s WHERE id = %s",
+                 (state, p.agent_id, mr_id))
+    audit.append(conn, f"merge_request.{state}", f"mr:{mr_id}", actor_id=p.agent_id,
+                 repository_id=mr["repository_id"], policy_version=mr["policy_version"])

@@ -22,6 +22,7 @@
   rrsrch agent key HANDLE --scope S [...] [--days N]       issue an API key (shown once)
   rrsrch agent revoke HANDLE               revoke an agent and all its keys
   rrsrch repo member SLUG HANDLE ROLE      grant a repository role (or `none` to remove)
+  rrsrch audit verify                      check every audit event's hash and link
 """
 from __future__ import annotations
 
@@ -403,37 +404,45 @@ def cmd_skeptic_show(args) -> int:
 
 
 def _identity(fn):
-    """Run fn(conn, store) in one transaction on a migrated ledger; ValueErrors become exit code 1."""
+    """Run fn(conn, store, audit) in one transaction on a migrated ledger; ValueErrors become exit code 1."""
     from .identity import store
     from .ledger import db
+    from .trust import audit
     try:
         with db.connect() as conn:
             db.migrate(conn)
-            return fn(conn, store) or 0
+            return fn(conn, store, audit) or 0
     except (ValueError, LookupError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
 
 def cmd_org_add(args) -> int:
-    return _identity(lambda conn, store: store.create_organization(conn, args.id, args.name))
+    def go(conn, store, audit):
+        store.create_organization(conn, args.id, args.name)
+        audit.append(conn, "organization.create", f"org:{args.id}", detail={"name": args.name})
+    return _identity(go)
 
 
 def cmd_agent_add(args) -> int:
-    def go(conn, store):
+    def go(conn, store, audit):
         a = store.register_agent(conn, args.org, args.handle, args.kind, model=args.model,
                                  org_role="admin" if args.admin else "member")
+        audit.append(conn, "agent.register", f"agent:{a['handle']}",
+                     detail={"organization_id": args.org, "kind": args.kind, "org_role": a["org_role"]})
         print(f"registered {a['handle']} ({a['kind']}, {a['org_role']} of {a['organization_id']})")
     return _identity(go)
 
 
 def cmd_agent_key(args) -> int:
-    def go(conn, store):
+    def go(conn, store, audit):
         agent = store.get_agent(conn, args.handle)
         if agent is None:
             raise LookupError(f"no agent {args.handle}")
         token, key_id, expires = store.issue_key(conn, agent["id"], set(args.scope), days=args.days,
                                                  label=args.label)
+        audit.append(conn, "key.issue", f"agent:{args.handle}",
+                     detail={"key_id": key_id, "scopes": sorted(args.scope), "days": args.days})
         print(f"key {key_id} for {args.handle}, scopes {sorted(args.scope)}, expires {expires:%Y-%m-%d}")
         print("store it now; it is not shown again:")
         print(token)
@@ -441,25 +450,44 @@ def cmd_agent_key(args) -> int:
 
 
 def cmd_agent_revoke(args) -> int:
-    def go(conn, store):
+    def go(conn, store, audit):
         agent = store.get_agent(conn, args.handle)
         if agent is None:
             raise LookupError(f"no agent {args.handle}")
-        print(f"revoked {args.handle} and {store.revoke_agent(conn, agent['id'])} live key(s)")
+        n = store.revoke_agent(conn, agent["id"])
+        audit.append(conn, "agent.revoke", f"agent:{args.handle}", detail={"keys_revoked": n})
+        print(f"revoked {args.handle} and {n} live key(s)")
     return _identity(go)
 
 
 def cmd_repo_member(args) -> int:
-    def go(conn, store):
+    def go(conn, store, audit):
         repo, agent = store.get_repo(conn, args.slug), store.get_agent(conn, args.handle)
         if repo is None or agent is None:
             raise LookupError(f"no {'repository ' + args.slug if repo is None else 'agent ' + args.handle}")
         if args.role == "none":
-            print("removed" if store.remove_member(conn, repo.id, agent["id"]) else "was not a member")
+            removed = store.remove_member(conn, repo.id, agent["id"])
+            audit.append(conn, "member.remove", f"agent:{args.handle}", repository_id=repo.id,
+                         detail={"removed": removed})
+            print("removed" if removed else "was not a member")
         else:
             store.set_member(conn, repo.id, agent["id"], args.role, granted_by=None)
+            audit.append(conn, "member.set", f"agent:{args.handle}", repository_id=repo.id,
+                         detail={"role": args.role})
             print(f"{args.handle} is now {args.role} of {args.slug}")
     return _identity(go)
+
+
+def cmd_audit_verify(args) -> int:
+    from .ledger import db
+    from .trust import audit
+    with db.connect() as conn:
+        n = conn.execute("SELECT count(*) FROM audit_events").fetchone()[0]
+        problems = audit.verify(conn)
+    for pr in problems:
+        print(pr)
+    print(f"{n} event(s), {'chain intact' if not problems else f'{len(problems)} problem(s)'}")
+    return 1 if problems else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -546,6 +574,8 @@ def main(argv: list[str] | None = None) -> int:
     rm.add_argument("handle")
     rm.add_argument("role", choices=("observer", "contributor", "reviewer", "maintainer", "owner", "none"))
     rm.set_defaults(fn=cmd_repo_member)
+    au = sub.add_parser("audit").add_subparsers(dest="cmd", required=True)
+    au.add_parser("verify", help="check the audit chain").set_defaults(fn=cmd_audit_verify)
     args = p.parse_args(argv)
     return args.fn(args)
 

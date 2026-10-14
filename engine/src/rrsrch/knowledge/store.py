@@ -35,6 +35,29 @@ def _retrieved_at(lock: dict | None, source_id: str, part: str) -> str | None:
     return entry["fetched_at"] if entry else None
 
 
+def link_evidence(conn: psycopg.Connection, claim_id: int, relation: Relation, span: Span,
+                  lock: dict | None = None) -> int:
+    """Link a claim to the evidence row for a span of a stored document, creating the row if needed."""
+    row = conn.execute(
+        "SELECT d.id, d.part, d.text, s.pub_types, s.license FROM documents d JOIN sources s ON s.id = d.source_id "
+        "WHERE d.source_id = %s AND d.sha256 = %s", (span.source_id, span.doc_sha256)).fetchone()
+    if row is None:
+        raise LookupError(f"no document {span.source_id}@{span.doc_sha256}")
+    doc_id, part, doc_text, pub_types, license_ = row
+    ev = conn.execute(
+        "INSERT INTO evidence (kind, source_id, document_id, doc_sha256, span_start, span_end, excerpt, "
+        "is_primary, license, retrieved_at) VALUES ('document_span', %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (document_id, doc_sha256, span_start, span_end) DO NOTHING RETURNING id",
+        (span.source_id, doc_id, span.doc_sha256, span.start, span.end, doc_text[span.start:span.end],
+         is_primary(pub_types), license_, _retrieved_at(lock, span.source_id, part))).fetchone()
+    ev_id = ev[0] if ev else conn.execute(
+        "SELECT id FROM evidence WHERE document_id = %s AND doc_sha256 = %s AND span_start = %s "
+        "AND span_end = %s", (doc_id, span.doc_sha256, span.start, span.end)).fetchone()[0]
+    conn.execute("INSERT INTO evidence_links (claim_id, evidence_id, relation) VALUES (%s, %s, %s) "
+                 "ON CONFLICT DO NOTHING", (claim_id, ev_id, relation.value))
+    return ev_id
+
+
 def record_claim(conn: psycopg.Connection, claim_id: int, lock: dict | None = None) -> bool:
     """Give a claim its revision, evidence and verification run. False if it already has them."""
     if conn.execute("SELECT 1 FROM claim_revisions WHERE claim_id = %s", (claim_id,)).fetchone():
@@ -55,17 +78,7 @@ def record_claim(conn: psycopg.Connection, claim_id: int, lock: dict | None = No
                            fields=fields, evidence=((Relation.SUPPORTS, span),))
     digest = content.content_hash()
 
-    ev = conn.execute(
-        "INSERT INTO evidence (kind, source_id, document_id, doc_sha256, span_start, span_end, excerpt, "
-        "is_primary, license, retrieved_at) VALUES ('document_span', %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-        "ON CONFLICT (document_id, doc_sha256, span_start, span_end) DO NOTHING RETURNING id",
-        (source_id, doc_id, doc_sha, start, end, doc_text[start:end], is_primary(pub_types), license_,
-         _retrieved_at(lock, source_id, part))).fetchone()
-    ev_id = ev[0] if ev else conn.execute(
-        "SELECT id FROM evidence WHERE document_id = %s AND doc_sha256 = %s AND span_start = %s "
-        "AND span_end = %s", (doc_id, doc_sha, start, end)).fetchone()[0]
-    conn.execute("INSERT INTO evidence_links (claim_id, evidence_id, relation) VALUES (%s, %s, 'supports')",
-                 (claim_id, ev_id))
+    link_evidence(conn, claim_id, Relation.SUPPORTS, span, lock)
 
     rev_id = conn.execute(
         "INSERT INTO claim_revisions (claim_id, version, content, content_hash, agent_id) "
