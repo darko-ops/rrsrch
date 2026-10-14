@@ -360,3 +360,46 @@ def review_queue(conn: psycopg.Connection, repository_id: int, states: tuple[str
     total = conn.execute("SELECT count(*) FROM claims WHERE repository_id = %s AND state = ANY(%s)",
                          (repository_id, list(states))).fetchone()[0]
     return {"items": rows, "next": rows[-1]["id"] if len(rows) == limit else None, "waiting": total}
+
+
+def review_trials(conn: psycopg.Connection, repository_id: int, states: tuple[str, ...], offset: int = 0,
+                  limit: int = 20) -> dict:
+    """Sources (trials) with claims waiting for review, most waiting first, so a reviewer can read one abstract
+    and check all of its claims together."""
+    rows = _rows(conn.execute(
+        "SELECT s.id, s.title, s.pub_year, count(*) FROM claims c JOIN documents d ON d.id = c.document_id "
+        "JOIN sources s ON s.id = d.source_id WHERE c.repository_id = %s AND c.state = ANY(%s) "
+        "GROUP BY s.id, s.title, s.pub_year ORDER BY count(*) DESC, s.id LIMIT %s OFFSET %s",
+        (repository_id, list(states), limit + 1, offset)), ("source_id", "title", "year", "waiting"))
+    total = conn.execute(
+        "SELECT count(DISTINCT d.source_id) FROM claims c JOIN documents d ON d.id = c.document_id "
+        "WHERE c.repository_id = %s AND c.state = ANY(%s)", (repository_id, list(states))).fetchone()[0]
+    return {"items": rows[:limit], "next_offset": offset + limit if len(rows) > limit else None, "trials": total}
+
+
+def review_trial(conn: psycopg.Connection, repository_id: int, states: tuple[str, ...], source_id: str) -> dict | None:
+    """One source's documents, each once, with every claim on them that is waiting for review and its span."""
+    src = conn.execute("SELECT id, title, pub_year FROM sources WHERE id = %s", (source_id,)).fetchone()
+    if src is None:
+        return None
+    claims = _rows(conn.execute(
+        "SELECT c.id, c.text, c.state, c.type, a.handle, d.part, c.span_start, c.span_end, "
+        "  (SELECT count(*) FROM challenges ch WHERE ch.claim_id = c.id AND ch.state = 'open') "
+        "FROM claims c JOIN agents a ON a.id = c.agent_id JOIN documents d ON d.id = c.document_id "
+        "WHERE c.repository_id = %s AND c.state = ANY(%s) AND d.source_id = %s ORDER BY d.part <> 'abstract', d.part, c.span_start, c.id",
+        (repository_id, list(states), source_id)),
+        ("id", "proposition", "state", "type", "contributor", "part", "start", "end", "open_challenges"))
+    reviews: dict[int, list] = {}
+    for cid, handle, verdict, findings in conn.execute(
+            "SELECT v.claim_id, a.handle, v.verdict, v.findings FROM claim_reviews v JOIN agents a ON a.id = v.reviewer_id "
+            "JOIN claim_revisions rv ON rv.id = v.revision_id WHERE v.claim_id = ANY(%s) "
+            "AND rv.version = (SELECT max(version) FROM claim_revisions WHERE claim_id = v.claim_id) ORDER BY v.id",
+            ([c["id"] for c in claims],)):
+        reviews.setdefault(cid, []).append({"reviewer": handle, "verdict": verdict, "findings": findings})
+    for c in claims:
+        c["reviews"] = reviews.get(c["id"], [])
+    parts = sorted({c["part"] for c in claims})
+    documents = [{"part": part, "text": text} for part, text in conn.execute(
+        "SELECT part, text FROM documents WHERE source_id = %s AND part = ANY(%s) ORDER BY part <> 'abstract', part",
+        (source_id, parts))]
+    return {"source_id": src[0], "title": src[1], "year": src[2], "documents": documents, "claims": claims}
