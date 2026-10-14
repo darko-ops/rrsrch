@@ -76,6 +76,17 @@ def review(conn: psycopg.Connection, p: Principal | None, claim_id: int, verdict
         "SELECT id FROM challenges WHERE claim_id = %s AND state = 'open' AND blocking ORDER BY id", (claim_id,))]
     if doc_sha != current_sha:
         reasons.append("the passage's document changed since the claim was extracted")
+    if policy.required_reproductions:
+        # independent = not by the claim's author; on the revision being reviewed
+        counts = dict(conn.execute(
+            "SELECT outcome, count(*) FROM verification_reports WHERE target = %s AND context = 'reproduction' "
+            "AND claim_revision_id = %s AND author_id <> %s GROUP BY outcome",
+            (f"claim:{claim_id}", head[0], author_id)).fetchall())
+        if counts.get("reproduced", 0) < policy.required_reproductions:
+            reasons.append(f"{counts.get('reproduced', 0)} independent reproduction(s), policy needs "
+                           f"{policy.required_reproductions}")
+        if counts.get("failed"):
+            reasons.append(f"{counts['failed']} independent reproduction(s) failed")
     if not reasons:
         new = _walk(conn, claim_id, state, TO_SUPPORTED[state])
         audit.append(conn, "claim.supported", f"claim:{claim_id}", actor_id=p.agent_id, repository_id=repo_id,

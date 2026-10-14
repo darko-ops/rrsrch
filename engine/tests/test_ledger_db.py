@@ -17,7 +17,7 @@ def test_load_is_repeatable_and_links_trials(conn, corpus_dir):
                                 "0011_answer_jobs.sql",
                                 "0012_claim_reviews.sql",
                                 "0013_answer_limits.sql",
-                                "0014_feedback.sql"]
+                                "0014_feedback.sql", "0015_research_network.sql"]
     assert db.migrate(conn) == []
     rep = db.load_corpus(conn, corpus_dir)
     assert (rep.sources, rep.trials, rep.links) == (1, 1, 1)
@@ -33,7 +33,7 @@ def test_text_changed_under_a_claim_is_refused(conn, corpus_dir):
     doc_id, sha = conn.execute("SELECT id, sha256 FROM documents WHERE part = 'abstract'").fetchone()
     conn.execute("INSERT INTO claims (document_id, doc_sha256, span_start, span_end, text, extractor, "
                  "repository_id, type, state, agent_id) VALUES (%s, %s, 0, 7, 'Methods', 'test', "
-                 "(SELECT id FROM repositories), 'empirical', 'structurally_valid', (SELECT id FROM agents))",
+                 "(SELECT id FROM repositories WHERE slug = 'rrsrch/msc-knee-oa'), 'empirical', 'structurally_valid', (SELECT id FROM agents))",
                  (doc_id, sha))
     conn.commit()
     rec_path = snapshot.record_dir("MED:1") / "record.json"

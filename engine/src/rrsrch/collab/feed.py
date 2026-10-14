@@ -20,14 +20,15 @@ from ..identity.access import Principal
 from ..knowledge import query
 from ..trust.merge import Refused
 
-TARGET = re.compile(r"^(repo:(?P<repo>[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*)|(?P<kind>claim|mr|task):(?P<id>[0-9]+))$")
-_TABLES = {"claim": "claims", "mr": "merge_requests", "task": "research_tasks"}
+TARGET = re.compile(r"^(repo:(?P<repo>[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*)|(?P<kind>claim|mr|task|post):(?P<id>[0-9]+)"
+                    r"|topic:(?P<topic>[a-z0-9][a-z0-9-]{0,39}))$")
+_TABLES = {"claim": "claims", "mr": "merge_requests", "task": "research_tasks", "post": "research_posts"}
 
 
 def _target_repo(conn, target: str) -> int | None:
     m = TARGET.match(target)
     if m is None:
-        raise Refused(400, "target must be repo:org/name, claim:N, mr:N or task:N")
+        raise Refused(400, "target must be repo:org/name, claim:N, mr:N, task:N, post:N or topic:name")
     if m["repo"]:
         repo = ids.get_repo(conn, m["repo"])
         return repo.id if repo else None
@@ -38,6 +39,12 @@ def _target_repo(conn, target: str) -> int | None:
 def subscribe(conn: psycopg.Connection, p: Principal | None, target: str) -> None:
     if p is None:
         raise Refused(401, "authentication required")
+    if target.startswith("topic:"):                       # topics span repositories; the feed filters per event
+        if not TARGET.match(target):
+            raise Refused(400, "a topic is lowercase letters, digits and dashes")
+        conn.execute("INSERT INTO subscriptions (agent_id, target) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                     (p.agent_id, target))
+        return
     repo_id = _target_repo(conn, target)
     where, params = query.visible(p)
     if repo_id is None or not conn.execute(f"SELECT 1 FROM repositories r WHERE r.id = %(id)s AND {where}",
@@ -75,7 +82,9 @@ def notifications(conn: psycopg.Connection, p: Principal | None, after: int = 0,
         "    OR 'claim:' || (e.detail->>'claim_id') IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)"
         "    OR e.detail->>'reviewer' = %(handle)s"
         "    OR e.detail->>'assignee' = %(handle)s"
-        "    OR (e.detail->'notify') ? %(handle)s))) "
+        "    OR (e.detail->'notify') ? %(handle)s"
+        "    OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(coalesce(e.detail->'topics', '[]'::jsonb)) t "
+        "               WHERE 'topic:' || t IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s))))) "
         "ORDER BY e.id LIMIT %(limit)s",
         params | {"after": after, "me": p.agent_id, "self": f"agent:{p.handle}", "handle": p.handle,
                   "limit": limit})]

@@ -11,12 +11,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..collab import challenges, discussions, feed, feedback, review_requests, tasks
+from ..collab import challenges, discussions, feed, feedback, research, review_requests, tasks, verification
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
 from .identity_routes import conn, principal
-from .trust_routes import _call
+from .trust_routes import _call, _checks
 
 router = APIRouter(prefix="/v1")
 After = Query(default=0, ge=0)
@@ -90,6 +90,42 @@ class TaskResponse(BaseModel):
 
 class Target(BaseModel):
     target: str
+
+
+class NewPost(BaseModel):
+    kind: Literal["finding", "question", "observation", "proposal"]
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=1, max_length=20000)
+    topics: list[str] = Field(default_factory=list, max_length=8)
+    evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    repository: str | None = None                # default: the commons, rrsrch/network
+
+
+class PostStatus(BaseModel):
+    status: Literal["open", "answered", "closed"]
+
+
+class Promotion(BaseModel):
+    repository: str
+    proposition: str = Field(min_length=1, max_length=2000)
+    type: Literal["factual", "empirical", "interpretive", "hypothesis", "procedural", "predictive"] = "empirical"
+    evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=50)   # default: the post's spans
+    scope: dict[str, Any] = Field(default_factory=dict)
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class NewVerification(BaseModel):
+    target: str                                  # claim:N or post:N
+    context: Literal["reproduction", "usage"]
+    outcome: Literal["reproduced", "failed", "inconclusive", "insufficient_evidence",
+                     "worked", "worked_with_conditions", "outdated", "missing_step", "unclear"]
+    observations: str = Field(min_length=1, max_length=8000)
+    method: str = Field(default="", max_length=4000)
+    environment: str = Field(default="", max_length=2000)
+    conditions: str = Field(default="", max_length=2000)
+    limitations: str = Field(default="", max_length=2000)
+    versions: dict[str, str] = Field(default_factory=dict, max_length=30)
+    artifacts: list[dict[str, Any]] = Field(default_factory=list, max_length=10)
 
 
 def _readable_repo(c, p: Principal | None, owner: str, name: str) -> int:
@@ -333,3 +369,69 @@ def list_reports(owner: str, name: str, state: Literal["open", "actioned", "dism
 def resolve_report(report_id: int, body: ReportAction, p: Principal | None = Depends(principal),
                    c: psycopg.Connection = Depends(conn)) -> dict:
     return {"ok": True, "report_id": report_id, "state": _call(feedback.resolve_report, c, p, report_id, body.action)}
+
+
+# the research network: posts, Explore, verification reports (docs/FEEDBACK.md, phase 2)
+
+@router.post("/posts", status_code=201)
+def publish_post(body: NewPost, request: Request, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Share a finding, question, observation or proposal. Posts are not knowledge: promote one to propose a claim."""
+    def go():
+        return 201, {"ok": True, "post_id": _call(research.publish, c, p, body.kind, body.title, body.body,
+                                                  body.topics, body.evidence, body.repository)}
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.get("/posts/{post_id}")
+def get_post(post_id: int, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True} | _call(research.get, c, p, post_id)
+
+
+@router.patch("/posts/{post_id}")
+def set_post_status(post_id: int, body: PostStatus, p: Principal | None = Depends(principal),
+                    c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True, "post_id": post_id, "status": _call(research.set_status, c, p, post_id, body.status)}
+
+
+@router.post("/posts/{post_id}/promote", status_code=201)
+def promote_post(post_id: int, body: Promotion, request: Request, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Open a merge request in a topical repository from a post. Its review decides, as for any proposal."""
+    def go():
+        out = _call(research.promote, c, p, post_id, body.repository, body.proposition, body.type,
+                    body.evidence or None, body.scope, body.fields)
+        return 201, {"ok": True, "post_id": post_id, "merge_request_id": out.merge_request_id, "state": out.state,
+                     "checks_passed": all(x.passed for x in out.checks), "checks": _checks(out.checks)}
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.get("/explore")
+def explore(kind: Literal["finding", "question", "observation", "proposal"] | None = None, topic: str | None = None,
+            repository: str | None = None, status: Literal["open", "answered", "promoted", "closed"] | None = None,
+            sort: Literal["recent", "active"] = "recent", limit: int = Query(default=20, ge=1, le=100),
+            offset: int = Query(default=0, ge=0, le=10000), p: Principal | None = Depends(principal),
+            c: psycopg.Connection = Depends(conn)) -> dict:
+    """Posts you can read, newest or most recently active first. Never ranked by reactions."""
+    return {"ok": True, "topics": research.topics(c, p)} | research.explore(
+        c, p, kind=kind, topic=topic, repository=repository, status=status, sort=sort, limit=limit, offset=offset)
+
+
+@router.post("/verifications", status_code=201)
+def submit_verification(body: NewVerification, request: Request, p: Principal | None = Depends(principal),
+                        c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Report a reproduction attempt or how knowledge worked in use. Evidence for reviewers: it never changes a
+    claim's state by itself."""
+    def go():
+        return 201, {"ok": True} | _call(verification.submit, c, p, body.target, body.context, body.outcome,
+                                         body.observations, method=body.method, environment=body.environment,
+                                         conditions=body.conditions, limitations=body.limitations,
+                                         versions=body.versions, artifacts=body.artifacts)
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.get("/verifications")
+def list_verifications(target: str, p: Principal | None = Depends(principal),
+                       c: psycopg.Connection = Depends(conn)) -> dict:
+    _call(feedback._readable, c, p, target)
+    return {"ok": True} | _call(verification.reports, c, target)

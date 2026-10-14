@@ -68,7 +68,7 @@ def test_policy_changes_are_new_versions(world):
     assert r.status_code == 200 and r.json()["repository"]["policy_version"] == "v2"
     assert client.patch(f"/v1/repos/{PILOT}", headers=h["bot"], json={"topic": "x"}).status_code == 403
     with psycopg.connect(url) as c:
-        assert [v for (v,) in c.execute("SELECT version FROM policies ORDER BY created_at")] == ["msc-v1", "v2"]
+        assert [v for (v,) in c.execute("SELECT version FROM policies WHERE version <> %s ORDER BY created_at", ("network-v1",))] == ["msc-v1", "v2"]
     # a request opened under msc-v1 is still judged by msc-v1
     assert client.get(f"/v1/merge-requests/{mr}").json()["merge_request"]["policy_version"] == "msc-v1"
 

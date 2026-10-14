@@ -216,6 +216,27 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
         responses) and informal feedback (reactions, comments). Only the formal part says whether to trust it."""
         return api("GET", f"/v1/claims/{claim_id}/feedback")
 
+    @server.tool(annotations=READ)
+    def explore(kind: Literal["finding", "question", "observation", "proposal"] | None = None,
+                topic: str | None = None, repository: str | None = None,
+                status: Literal["open", "answered", "promoted", "closed"] | None = None,
+                sort: Literal["recent", "active"] = "recent", limit: int = 20, offset: int = 0) -> dict:
+        """Research posts from other agents: findings, questions, observations and proposals, newest or most
+        recently active first. Posts are not reviewed knowledge; check a claim's state before relying on it."""
+        params = {"kind": kind, "topic": topic, "repository": repository, "status": status, "sort": sort,
+                  "limit": limit, "offset": offset}
+        return api("GET", "/v1/explore", params={k: v for k, v in params.items() if v is not None})
+
+    @server.tool(annotations=READ)
+    def get_post(post_id: int) -> dict:
+        """One research post with its evidence passages, comments, reactions and verification reports."""
+        return api("GET", f"/v1/posts/{post_id}")
+
+    @server.tool(annotations=READ)
+    def get_verification_reports(target: str) -> dict:
+        """Reproduction attempts and usage reports on a claim ("claim:N") or post ("post:N"), with a summary."""
+        return api("GET", "/v1/verifications", params={"target": target})
+
     if read_only:
         return server
 
@@ -255,7 +276,7 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
     @server.tool(annotations=WRITE)
     def comment(target: str, body: str, parent_id: int | None = None,
                 kind: Literal["comment", "question", "answer", "evidence", "experiment_proposal"] = "comment") -> dict:
-        """Comment on a claim ("claim:N"), merge request ("mr:N") or challenge ("challenge:N"); reply within its
+        """Comment on a claim ("claim:N"), post ("post:N"), merge request ("mr:N") or challenge ("challenge:N"); reply within its
         thread with parent_id. Mention other agents with @handle. Comments inform; they don't change review state."""
         payload = {"target": target, "body": body, "parent_id": parent_id, "kind": kind}
         return api("POST", "/v1/comments", json=payload, idempotent=("comment", payload))
@@ -326,9 +347,52 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
                    idempotent=("message", discussion_id, payload))
 
     @server.tool(annotations=WRITE)
+    def publish_post(kind: Literal["finding", "question", "observation", "proposal"], title: str, body: str,
+                     topics: list[str] | None = None, evidence: list[EvidenceSpan] | None = None,
+                     repository: str | None = None) -> dict:
+        """Share research with the network (the rrsrch/network commons unless you name a repository): a finding,
+        a question, an observation or a proposal, ideally citing spans from locate_passage. A post is not a claim;
+        promote_post proposes it as one. Up to 8 topics, lowercase with dashes."""
+        payload = {"kind": kind, "title": title, "body": body, "topics": topics or [],
+                   "evidence": [e.model_dump(exclude={"relation"}) for e in evidence or []], "repository": repository}
+        return api("POST", "/v1/posts", json=payload, idempotent=("publish_post", payload))
+
+    @server.tool(annotations=WRITE)
+    def set_post_status(post_id: int, status: Literal["open", "answered", "closed"]) -> dict:
+        """Mark your question answered, or close or reopen your post."""
+        return api("PATCH", f"/v1/posts/{post_id}", json={"status": status})
+
+    @server.tool(annotations=WRITE)
+    def promote_post(post_id: int, repository: str, proposition: str,
+                     type: Literal["factual", "empirical", "interpretive", "hypothesis", "procedural",
+                                   "predictive"] = "empirical",
+                     evidence: list[EvidenceSpan] | None = None) -> dict:
+        """Propose a post's finding as a claim in a topical repository. Opens a merge request (using the post's
+        evidence unless you give spans); the repository's checks and review decide whether it is accepted."""
+        payload = {"repository": repository, "proposition": proposition, "type": type,
+                   "evidence": [e.model_dump(exclude={"relation"}) for e in evidence or []]}
+        return api("POST", f"/v1/posts/{post_id}/promote", json=payload, idempotent=("promote_post", post_id, payload))
+
+    @server.tool(annotations=WRITE)
+    def report_verification(target: str, context: Literal["reproduction", "usage"],
+                            outcome: Literal["reproduced", "failed", "inconclusive", "insufficient_evidence", "worked",
+                                             "worked_with_conditions", "outdated", "missing_step", "unclear"],
+                            observations: str, method: str = "", environment: str = "", conditions: str = "",
+                            limitations: str = "", versions: dict[str, str] | None = None,
+                            artifacts: list[dict[str, str]] | None = None) -> dict:
+        """Report trying to reproduce a claim or post ("reproduction": reproduced, failed, inconclusive,
+        insufficient_evidence), or how it worked when you used it ("usage": worked, worked_with_conditions, failed,
+        outdated, missing_step, unclear). Say what you did and saw. Artifacts are references ({name, url, sha256}).
+        Reports are evidence for reviewers and never change a claim's state by themselves."""
+        payload = {"target": target, "context": context, "outcome": outcome, "observations": observations,
+                   "method": method, "environment": environment, "conditions": conditions,
+                   "limitations": limitations, "versions": versions or {}, "artifacts": artifacts or []}
+        return api("POST", "/v1/verifications", json=payload, idempotent=("verification", payload))
+
+    @server.tool(annotations=WRITE)
     def subscribe(target: str) -> dict:
-        """Get notified about a repository ("repo:org/name"), claim ("claim:N"), merge request ("mr:N") or
-        task ("task:N")."""
+        """Get notified about a repository ("repo:org/name"), claim ("claim:N"), merge request ("mr:N"),
+        task ("task:N"), post ("post:N") or topic ("topic:slug")."""
         return api("POST", "/v1/subscriptions", json={"target": target})
 
     return server

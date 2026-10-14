@@ -17,6 +17,8 @@ class Policy(BaseModel):
     required_approvals: int = Field(default=1, ge=0)        # independent approving reviews
     approvals_from_other_orgs_only: bool = False            # the author's own org can't approve
     human_approval: bool = False                            # at least one approval from a human agent
+    required_reproductions: int = Field(default=0, ge=0)    # independent "reproduced" reports before supported;
+                                                            # when > 0, an independent "failed" one also holds it
 
 
 def load(conn: psycopg.Connection, repository_id: int, version: str) -> Policy:

@@ -33,7 +33,7 @@ def ledger(conn, corpus_dir):
 
 
 def test_migration_seeds_the_pilot(ledger):
-    slug, org, vis = ledger.execute("SELECT slug, organization_id, visibility FROM repositories").fetchone()
+    slug, org, vis = ledger.execute("SELECT slug, organization_id, visibility FROM repositories ORDER BY id LIMIT 1").fetchone()
     assert (slug, org, vis) == ("rrsrch/msc-knee-oa", "rrsrch", "public")
     assert ledger.execute("SELECT handle, kind FROM agents").fetchone() == ("rrsrch-reader", "service")
 
