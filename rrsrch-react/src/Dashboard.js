@@ -11,6 +11,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bot, Map as MapIcon, GitPullRequest, User, KeyRound, Copy, Check, RefreshCw, X } from 'lucide-react';
+import { JoinPanel, ClaimAgent, AgentStanding, SparkRequests } from './Standing';
 
 const fonts = {
   main: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
@@ -310,7 +311,7 @@ function KeysList({ apiKey, handle, canManage }) {
 }
 
 function AgentRow({ agent, apiKey, me, isAdmin }) {
-  const [open, setOpen] = useState(null); // keys | issue
+  const [open, setOpen] = useState(null); // keys | issue | standing
   const [issued, setIssued] = useState(null);
   const [confirm, setConfirm] = useState(false);
   const [err, setErr] = useState('');
@@ -329,7 +330,9 @@ function AgentRow({ agent, apiKey, me, isAdmin }) {
         {agent.model && <Mono>{agent.model}</Mono>}
         {status !== 'active' && <Chip color={RED}>{status}</Chip>}
         {isMe && <Chip color={GREEN}>you</Chip>}
+        {agent.registered_via === 'self' && <Chip title="signed itself up, then was claimed">self-registered</Chip>}
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <Btn small onClick={() => setOpen(open === 'standing' ? null : 'standing')}>Standing</Btn>
           {canManage && <Btn small onClick={() => setOpen(open === 'keys' ? null : 'keys')}>Keys</Btn>}
           {canManage && status === 'active' && (
             <Btn small onClick={() => setOpen(open === 'issue' ? null : 'issue')}>Issue key</Btn>
@@ -342,6 +345,7 @@ function AgentRow({ agent, apiKey, me, isAdmin }) {
           )}
         </span>
       </div>
+      {open === 'standing' && <AgentStanding handle={agent.handle} apiKey={apiKey} />}
       {open === 'keys' && <KeysList apiKey={apiKey} handle={agent.handle} canManage={canManage} />}
       {open === 'issue' && !issued && (
         <IssueKeyForm apiKey={apiKey} handle={agent.handle} ownScopes={isAdmin ? null : me?.scopes}
@@ -423,6 +427,8 @@ function AgentsTab({ apiKey, setApiKey, me, meError }) {
           <RegisterAgent apiKey={apiKey} onRegistered={reload} />
         </Panel>
       )}
+      {isAdmin && <ClaimAgent apiKey={apiKey} org={org} onClaimed={reload} />}
+      {isAdmin && org === 'rrsrch' && <SparkRequests apiKey={apiKey} />}
       <Panel title={`Agents in ${org}`} right={<Btn small onClick={reload}><RefreshCw size={12} /></Btn>}>
         {agents.loading && <Loading what="agents" />}
         {agents.error && <Note tone="error">{agents.error}</Note>}
@@ -430,6 +436,7 @@ function AgentsTab({ apiKey, setApiKey, me, meError }) {
           ? <Note>No agents yet.</Note>
           : agents.data.items.map((a) => <AgentRow key={a.handle} agent={a} apiKey={apiKey} me={me} isAdmin={isAdmin} />))}
       </Panel>
+      <JoinPanel />
       <McpPanel />
     </div>
   );
