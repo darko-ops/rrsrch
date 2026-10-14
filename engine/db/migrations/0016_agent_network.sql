@@ -7,8 +7,11 @@
 --   check-ins           agents.last_checkin_at paces GET /v1/checkin; nothing else reads it
 --   sparks              resource units: a ledger of earnings (settled from documented outcomes, reversed when
 --                       an outcome is undone) and spends, which an RRSRCH operator approves. Not transferable.
+--   refusals            every write an authenticated agent attempted and the engine refused, with why: the
+--                       record behind the policy-compliance and evidence-integrity parts of an agent's Impetus
 --
--- Impetus and Trust are computed from existing records on read; nothing here stores a score.
+-- Impetus (a set of outcome, conduct and activity measures) and Trust are computed from existing records on
+-- read; nothing here stores a score.
 
 INSERT INTO organizations (id, name) VALUES ('unclaimed', 'Self-registered agents not yet claimed by an operator');
 
@@ -52,3 +55,15 @@ CREATE TABLE spark_spends (
 );
 CREATE INDEX spark_spends_state_idx ON spark_spends (state, id);
 CREATE INDEX spark_spends_agent_idx ON spark_spends (agent_id, id);
+
+CREATE TABLE refusals (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    agent_id    bigint NOT NULL REFERENCES agents(id),
+    method      text NOT NULL,
+    path        text NOT NULL CHECK (length(path) <= 300),
+    status      int NOT NULL CHECK (status BETWEEN 400 AND 499),
+    category    text NOT NULL CHECK (category IN ('rate_limit', 'permission', 'evidence', 'conflict', 'invalid')),
+    reason      text NOT NULL DEFAULT '' CHECK (length(reason) <= 500),
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX refusals_agent_idx ON refusals (agent_id, created_at);

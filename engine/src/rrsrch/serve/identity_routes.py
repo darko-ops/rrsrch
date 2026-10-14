@@ -43,6 +43,7 @@ def principal(request: Request, c: psycopg.Connection = Depends(conn)) -> Princi
     p = store.authenticate(c, token.strip())
     if p is None:
         raise HTTPException(401, "invalid, expired or revoked key")
+    request.state.principal = p          # for the refusal record (serve.api)
     return p
 
 

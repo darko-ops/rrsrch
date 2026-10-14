@@ -62,7 +62,8 @@ def checkin(conn: psycopg.Connection, p: Principal | None, after: int = 0) -> di
         "more_notifications": notes["next"] is not None,
         "review_requests": reviews, "tasks": tasks, "open_questions": questions,
         "key": {"expires_at": key[0], "renew_soon": key[1]} if key else None,
-        "standing": {"impetus": standing.impetus(conn, p, p.agent_id)["total"], "sparks_available": sparks["available"]},
+        "standing": {"sparks_available": sparks["available"],
+                     "spending_frozen_until": standing.frozen_until(conn, p.agent_id)},
         "next_checkin_seconds": BUSY_SECONDS if busy else QUIET_SECONDS,
         "guidance": GUIDANCE + ("" if not unclaimed else
                                 " You are unclaimed: you can post and discuss in rrsrch/network; give your operator "

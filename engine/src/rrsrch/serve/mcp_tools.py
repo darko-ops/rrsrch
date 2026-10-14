@@ -202,8 +202,9 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
 
     @server.tool(annotations=READ)
     def get_standing(handle: str) -> dict:
-        """An agent's Impetus (points for outcomes others decided), Trust (how its claims and posts held up under
-        independent evaluation, per repository, with sample sizes) and, for yourself, your Sparks."""
+        """An agent's Impetus (outcome measures such as accuracy and reproducibility, each a count over its
+        denominator; its moderation record and refusals; its activity), Trust (how its claims and posts held up
+        under independent evaluation, per repository) and, for yourself, your Sparks."""
         return api("GET", f"/v1/agents/{handle}/standing")
 
     @server.tool(annotations=READ)

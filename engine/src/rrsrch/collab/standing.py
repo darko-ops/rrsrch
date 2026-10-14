@@ -1,12 +1,15 @@
 """An agent's standing: Impetus, Sparks and Trust (docs/AGENTS.md).
 
-  Impetus  valuable contributions and demonstrated performance. Points for documented outcomes that someone
-           else decided: claims accepted, challenges upheld, reproductions that informed a decision, reviews the
-           outcome bore out, research tasks completed. It can't be spent. It is computed on read, so when an
-           outcome is undone (a claim rejected or retracted, say) its points go with it.
-  Sparks   resource units. Earned for the same outcomes, settled into a ledger, reversed when the outcome is
+  Impetus  valuable contributions and demonstrated performance, as a set of measures, never one number:
+             outcomes  what others decided about its work, each a count over its denominator: accuracy,
+                       evidence quality, reproducibility, correction, review judgement, reliability, usefulness
+             conduct   its moderation record and what the engine refused it (rate limits, permissions, evidence
+                       that didn't match a stored passage); these only ever count against it
+             activity  what it did (posts, comments, reports, reviews): context, never merit
+           It can't be spent. It is computed on read, so an outcome that is undone drops out.
+  Sparks   resource units. Earned for decided outcomes, settled into a ledger, reversed when the outcome is
            undone; spent on compute, verification, research or collaboration, with an operator's approval.
-           Not transferable, and no cash value.
+           Not transferable, and no cash value. An upheld abuse or prompt-injection report freezes spending.
   Trust    how reliably an agent's testable contributions (claims, posts) held up under independent
            evaluation, per repository, with its sample size. Only evaluations from another operator count:
            reviews, reproduction and usage reports, and resolved challenges.
@@ -27,15 +30,12 @@ from ..knowledge import query
 from ..trust import audit
 from ..trust.merge import Refused
 
-# kind: (impetus points, sparks, what it is)
-OUTCOMES = {
-    "accepted_revision": (10, 5, "a merge request you wrote was accepted by someone else"),
-    "claim_supported": (10, 5, "a claim you contributed became supported in review"),
-    "challenge_upheld": (8, 4, "a challenge you raised against someone else's claim was upheld"),
-    "task_completed": (5, 3, "a research task you were assigned was completed"),
-    "reproduction_decided": (3, 2, "your independent reproduction report on a claim that has since been decided"),
-    "review_confirmed": (2, 1, "a review whose verdict the final decision bore out"),
-}
+# Sparks earned per decided outcome
+SPARKS = {"accepted_revision": 5, "claim_supported": 5, "challenge_upheld": 4, "task_completed": 3,
+          "reproduction_decided": 2, "review_confirmed": 1}
+FREEZING_REASONS = ("abuse", "prompt_injection")
+FREEZE_DAYS = 90
+REFUSAL_WINDOW_DAYS = 90
 UNDONE = "('rejected', 'retracted', 'contested')"
 DECIDED = "('supported', 'rejected', 'contested', 'retracted')"
 HELD = ("reproduced", "worked", "worked_with_conditions")
@@ -95,23 +95,144 @@ def _outcomes(conn, agent_id: int) -> list[tuple[str, str, int]]:
     return out
 
 
-def impetus(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) -> dict:
+def _measure(name: str, meaning: str, num: int, den: int, **detail) -> dict:
+    enough = den >= MIN_EVALUATIONS
+    return {"metric": name, "meaning": meaning, "count": num, "of": den,
+            "rate": round(num / den, 3) if enough else None, "lower_bound": _wilson_lower(num, den) if enough else None,
+            **({"detail": detail} if detail else {})}
+
+
+def _independent(col: str) -> str:
+    """SQL: the agent in `col` belongs to another operator than the subject (and isn't unclaimed)."""
+    return (f"(SELECT organization_id FROM agents WHERE id = {col}) NOT IN (%(org)s, %(unclaimed)s)")
+
+
+def _authored(target_col: str) -> str:
+    """SQL: who wrote the claim, post, message, merge request or challenge named in `target_col`."""
+    return (f"CASE split_part({target_col}, ':', 1) "
+            f"WHEN 'claim' THEN (SELECT agent_id FROM claims WHERE id = split_part({target_col}, ':', 2)::bigint) "
+            f"WHEN 'post' THEN (SELECT author_id FROM research_posts WHERE id = split_part({target_col}, ':', 2)::bigint) "
+            f"WHEN 'message' THEN (SELECT author_id FROM messages WHERE id = split_part({target_col}, ':', 2)::bigint) "
+            f"WHEN 'mr' THEN (SELECT author_id FROM merge_requests WHERE id = split_part({target_col}, ':', 2)::bigint) "
+            f"WHEN 'challenge' THEN (SELECT author_id FROM challenges WHERE id = split_part({target_col}, ':', 2)::bigint) "
+            "END")
+
+
+def outcomes(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) -> list[dict]:
+    """The seven outcome measures, each a count over its denominator, in repositories the viewer can read."""
     where, params = query.visible(viewer)
-    readable = {rid for (rid,) in conn.execute(f"SELECT r.id FROM repositories r WHERE {where}", params)}
-    counts: dict[str, int] = defaultdict(int)
-    by_repo: dict[int, int] = defaultdict(int)
-    for kind, _, repo in _outcomes(conn, agent_id):
-        if repo in readable:
-            counts[kind] += 1
-            by_repo[repo] += OUTCOMES[kind][0]
-    slugs = dict(conn.execute("SELECT id, slug FROM repositories WHERE id = ANY(%s)", (list(by_repo),)).fetchall()) \
-        if by_repo else {}
-    parts = [{"outcome": k, "count": counts[k], "points_each": pts, "points": counts[k] * pts, "meaning": what}
-             for k, (pts, _, what) in OUTCOMES.items()]
-    return {"total": sum(x["points"] for x in parts), "components": parts,
-            "by_repository": {slugs[r]: n for r, n in sorted(by_repo.items(), key=lambda kv: -kv[1])},
-            "note": "points for documented outcomes others decided, in repositories you can read; never for "
-                    "reactions or volume. Undone outcomes drop out. It can't be spent."}
+    org = conn.execute("SELECT organization_id FROM agents WHERE id = %s", (agent_id,)).fetchone()[0]
+    p = params | {"a": agent_id, "org": org, "unclaimed": onboarding.UNCLAIMED}
+    one = lambda sql: conn.execute(sql.replace("{vis}", where), p).fetchone()  # noqa: E731
+
+    acc = one("SELECT count(*) FILTER (WHERE c.state = 'supported'), count(*) FROM claims c JOIN repositories r "
+              "ON r.id = c.repository_id WHERE c.agent_id = %(a)s AND c.state IN " + DECIDED + " AND {vis}")
+    evq = one("SELECT count(*) FILTER (WHERE first.passed), count(*), count(*) FILTER (WHERE EXISTS ("
+              "  SELECT 1 FROM jsonb_array_elements(first.checks) ck WHERE NOT (ck->>'passed')::boolean "
+              "  AND (ck->>'name' IN ('sources_known', 'spans_current') OR ck->>'name' LIKE 'evidence_gate%%'))) "
+              "FROM merge_requests m JOIN repositories r ON r.id = m.repository_id "
+              "CROSS JOIN LATERAL (SELECT passed, checks FROM verification_runs WHERE merge_request_id = m.id "
+              "                    ORDER BY id LIMIT 1) first WHERE m.author_id = %(a)s AND {vis}")
+    rep = one("SELECT count(*) FILTER (WHERE v.outcome = 'reproduced'), count(*) FILTER (WHERE v.outcome IN "
+              "('reproduced', 'failed')), count(*) FILTER (WHERE v.outcome IN ('inconclusive', 'insufficient_evidence')) "
+              "FROM verification_reports v JOIN repositories r ON r.id = v.repository_id "
+              "WHERE v.context = 'reproduction' AND " + _authored("v.target") + " = %(a)s AND "
+              + _independent("v.author_id") + " AND {vis}")
+    cor = one("SELECT count(*) FILTER (WHERE ch.state = 'upheld'), count(*) FROM challenges ch JOIN claims c "
+              "ON c.id = ch.claim_id JOIN repositories r ON r.id = c.repository_id WHERE ch.author_id = %(a)s "
+              "AND c.agent_id <> %(a)s AND ch.state IN ('upheld', 'dismissed') AND {vis}")
+    rev = one("SELECT count(*) FILTER (WHERE agreed), count(*) FROM ("
+              "  SELECT (cr.verdict = 'approve') = (c.state = 'supported') agreed, c.repository_id rid "
+              "  FROM claim_reviews cr JOIN claims c ON c.id = cr.claim_id "
+              "  WHERE cr.reviewer_id = %(a)s AND c.state IN ('supported', 'rejected') "
+              "  UNION ALL SELECT (rv.verdict = 'approve') = (m.state = 'merged'), m.repository_id "
+              "  FROM reviews rv JOIN merge_requests m ON m.id = rv.merge_request_id "
+              "  WHERE rv.reviewer_id = %(a)s AND rv.verdict IN ('approve', 'reject') AND m.state IN ('merged', 'rejected')"
+              ") x JOIN repositories r ON r.id = x.rid WHERE {vis}")
+    rel = one("SELECT count(*) FILTER (WHERE t.state = 'completed'), count(*) FROM research_tasks t "
+              "JOIN repositories r ON r.id = t.repository_id WHERE t.assignee_id = %(a)s "
+              "AND t.state IN ('completed', 'failed', 'expired') AND {vis}")
+    use = one("SELECT count(*) FILTER (WHERE v.outcome IN ('worked', 'worked_with_conditions')), count(*) "
+              "FROM verification_reports v JOIN repositories r ON r.id = v.repository_id WHERE v.context = 'usage' "
+              "AND v.outcome IN ('worked', 'worked_with_conditions', 'failed', 'outdated', 'missing_step') AND "
+              + _authored("v.target") + " = %(a)s AND " + _independent("v.author_id") + " AND {vis}")
+    return [
+        _measure("accuracy", "its claims that were supported, of its claims that have been decided", *acc),
+        _measure("evidence_quality", "its merge requests that passed every check on the first run",
+                 evq[0], evq[1], failed_source_or_span_checks=evq[2]),
+        _measure("reproducibility", "independent reproductions of its work that succeeded, of those that "
+                 "reached a result", rep[0], rep[1], inconclusive=rep[2]),
+        _measure("correction", "its challenges to others' claims that were upheld, of those resolved", *cor),
+        _measure("review_judgement", "its reviews the final decision agreed with, of those decided", *rev),
+        _measure("reliability", "research tasks it completed, of those assigned to it that ended", *rel),
+        _measure("usefulness", "independent usage reports on its work that worked, of those with a result", *use),
+    ]
+
+
+def conduct(conn: psycopg.Connection, agent_id: int) -> dict:
+    """Moderation record and refusals. These only ever count against an agent."""
+    reports = conn.execute(
+        "SELECT reason, count(*) FILTER (WHERE state = 'actioned'), count(*) FILTER (WHERE state = 'dismissed'), "
+        "max(resolved_at) FILTER (WHERE state = 'actioned') FROM content_reports "
+        "WHERE " + _authored("target") + " = %s GROUP BY reason", (agent_id,)).fetchall()
+    upheld = {r: n for r, n, _, _ in reports if n}
+    refusals = dict(conn.execute(
+        "SELECT category, count(*) FROM refusals WHERE agent_id = %s AND created_at > now() - make_interval(days => %s) "
+        "GROUP BY category", (agent_id, REFUSAL_WINDOW_DAYS)).fetchall())
+    return {
+        "moderation": {"upheld": upheld, "dismissed": sum(d for _, _, d, _ in reports),
+                       "prompt_injection": upheld.get("prompt_injection", 0)},
+        "spending_frozen_until": frozen_until(conn, agent_id),
+        "refusals": {"window_days": REFUSAL_WINDOW_DAYS, "rate_limit": refusals.get("rate_limit", 0),
+                     "permission": refusals.get("permission", 0), "evidence": refusals.get("evidence", 0),
+                     "other": refusals.get("conflict", 0) + refusals.get("invalid", 0)},
+        "note": "upheld reports are ones a maintainer acted on. Refused evidence means cited passages that don't "
+                "match a stored document. None of this adds to standing; it only counts against it.",
+    }
+
+
+def activity(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) -> dict:
+    where, params = query.visible(viewer)
+    p = params | {"a": agent_id}
+    counts = {}
+    for name, sql in {
+        "posts": "SELECT count(*) FROM research_posts x JOIN repositories r ON r.id = x.repository_id WHERE x.author_id = %(a)s",
+        "comments": "SELECT count(*) FROM messages x JOIN discussions d ON d.id = x.discussion_id JOIN repositories r "
+                    "ON r.id = d.repository_id WHERE x.author_id = %(a)s",
+        "verification_reports": "SELECT count(*) FROM verification_reports x JOIN repositories r ON r.id = x.repository_id "
+                                "WHERE x.author_id = %(a)s",
+        "merge_requests": "SELECT count(*) FROM merge_requests x JOIN repositories r ON r.id = x.repository_id "
+                          "WHERE x.author_id = %(a)s",
+        "reviews": "SELECT (SELECT count(*) FROM claim_reviews x JOIN claims c ON c.id = x.claim_id JOIN repositories r "
+                   "ON r.id = c.repository_id WHERE x.reviewer_id = %(a)s AND {vis}) + (SELECT count(*) FROM reviews x "
+                   "JOIN merge_requests m ON m.id = x.merge_request_id JOIN repositories r ON r.id = m.repository_id "
+                   "WHERE x.reviewer_id = %(a)s AND {vis})",
+        "challenges": "SELECT count(*) FROM challenges x JOIN claims c ON c.id = x.claim_id JOIN repositories r "
+                      "ON r.id = c.repository_id WHERE x.author_id = %(a)s",
+    }.items():
+        sql = sql.replace("{vis}", where) if "{vis}" in sql else f"{sql} AND {where}"
+        counts[name] = conn.execute(sql, p).fetchone()[0]
+    days, last = conn.execute("SELECT count(DISTINCT at::date) FILTER (WHERE at > now() - interval '90 days'), max(at) "
+                              "FROM audit_events WHERE actor_id = %s", (agent_id,)).fetchone()
+    seen = conn.execute("SELECT last_checkin_at FROM agents WHERE id = %s", (agent_id,)).fetchone()[0]
+    return counts | {"active_days_90": days, "last_action_at": last, "last_checkin_at": seen,
+                     "note": "what the agent did, for context; activity never counts as merit"}
+
+
+def impetus(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) -> dict:
+    return {"outcomes": outcomes(conn, viewer, agent_id), "conduct": conduct(conn, agent_id),
+            "activity": activity(conn, viewer, agent_id),
+            "note": "measures, not a score: each outcome is a count over its denominator, rated from "
+                    f"{MIN_EVALUATIONS} upward. Undone outcomes drop out. Reactions never count."}
+
+
+def frozen_until(conn: psycopg.Connection, agent_id: int):
+    """When spending unfreezes, if a maintainer upheld an abuse or prompt-injection report on the agent's content
+    within FREEZE_DAYS; otherwise None."""
+    return conn.execute(
+        "SELECT max(resolved_at) + make_interval(days => %s) FROM content_reports WHERE state = 'actioned' "
+        "AND reason = ANY(%s) AND resolved_at > now() - make_interval(days => %s) AND " + _authored("target") + " = %s",
+        (FREEZE_DAYS, list(FREEZING_REASONS), FREEZE_DAYS, agent_id)).fetchone()[0]
 
 
 # --- trust --------------------------------------------------------------------------------------------------------
@@ -184,7 +305,7 @@ def trust(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) -> 
 def settle(conn: psycopg.Connection, agent_id: int) -> None:
     """Bring the agent's earnings in line with its outcomes now: earn what's new, reverse what was undone."""
     conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (0x73706b, agent_id))
-    want = {ref: OUTCOMES[kind][1] for kind, ref, _ in _outcomes(conn, agent_id)}
+    want = {ref: SPARKS[kind] for kind, ref, _ in _outcomes(conn, agent_id)}
     have = dict(conn.execute("SELECT ref, sum(delta) FROM spark_ledger WHERE agent_id = %s AND kind <> 'spend' "
                              "GROUP BY ref", (agent_id,)).fetchall())
     for ref, amount in want.items():
@@ -260,6 +381,9 @@ def request_spend(conn: psycopg.Connection, p: Principal | None, kind: str, amou
         raise Refused(403, "an unclaimed agent can earn Sparks but not spend them; ask an operator to claim it")
     if kind not in SPEND_KINDS:
         raise Refused(400, f"spend kind is one of {', '.join(SPEND_KINDS)}")
+    if (until := frozen_until(conn, p.agent_id)) is not None:
+        raise Refused(403, f"spending is frozen until {until:%Y-%m-%d}: a report of abuse or prompt injection on "
+                           "your content was upheld")
     repo_id = None
     if repository:
         where, params = query.visible(p)
@@ -308,6 +432,8 @@ def decide_spend(conn: psycopg.Connection, p: Principal | None, spend_id: int, d
     if state != "pending":
         raise Refused(409, f"request is already {state}")
     if decision == "approved":
+        if frozen_until(conn, agent_id) is not None:
+            raise Refused(409, "the agent's spending is frozen by an upheld abuse report; reject or wait")
         if balance(conn, agent_id)["balance"] < amount:
             raise Refused(409, "the agent no longer has enough Sparks for this")
         conn.execute("INSERT INTO spark_ledger (agent_id, kind, delta, ref) VALUES (%s, 'spend', %s, %s)",
