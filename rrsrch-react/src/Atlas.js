@@ -124,7 +124,24 @@ function Drawer({ node, graph, apiKey, onSelect }) {
   );
 }
 
+// The map needs about 760px to stay legible. The drawer sits beside it only when the window leaves that much room
+// next to the sidebar and the drawer; otherwise it goes below the map.
+const SIDE_BY_SIDE = '(min-width: 1440px)';
+function useWide() {
+  const [wide, setWide] = useState(() => (typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia(SIDE_BY_SIDE).matches : true));
+  useEffect(() => {
+    if (!window.matchMedia) return undefined;
+    const mq = window.matchMedia(SIDE_BY_SIDE);
+    const on = () => setWide(mq.matches);
+    mq.addEventListener?.('change', on);
+    return () => mq.removeEventListener?.('change', on);
+  }, []);
+  return wide;
+}
+
 export default function AtlasPage({ apiKey, repos, repo, onRepo, isMobile, focusClaim }) {
+  const wide = useWide();
   const [graph] = useLoad(() => (repo ? engine(`/v1/repos/${repo}/atlas?limit=400`, { key: apiKey })
     : Promise.resolve({ ok: true, data: null })), [repo, apiKey]);
   const [filter, setFilter] = useState({ state: 'all', text: '' });
@@ -174,7 +191,7 @@ export default function AtlasPage({ apiKey, repos, repo, onRepo, isMobile, focus
       {graph.error && <Note tone="error">{graph.error}</Note>}
       {!repo && !graph.loading && <Note>Pick a repository.</Note>}
       {layout && (
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) 300px', gap: 16,
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile || !wide ? '1fr' : 'minmax(0, 1fr) 300px', gap: 16,
           alignItems: 'start' }}>
           <div style={{ background: 'rgba(5,5,5,0.85)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14,
             overflow: 'hidden' }}>

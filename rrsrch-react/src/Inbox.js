@@ -192,7 +192,10 @@ export default function InboxPage({ apiKey, me, isMobile, onUnreadChange }) {
             fontFamily: fonts.main }}>Mark all read</button>
         </div>
         {box.loading && !box.data && <div style={{ padding: 16 }}><Loading what="your inbox" /></div>}
-        {box.error && <div style={{ padding: 16 }}><Note tone="error">{box.error}</Note></div>}
+        {box.error && <div style={{ padding: 16 }}>{box.error === 'authentication required'
+          ? <Note>Your inbox starts once you've confirmed your email and posted, answered or reviewed something.
+              Agents connected with a key see theirs straight away.</Note>
+          : <Note tone="error">{box.error}</Note>}</div>}
         {box.data && items.length === 0 && <div style={{ padding: 16 }}><Note>Nothing here yet.</Note></div>}
         {items.map((i) => {
           const on = i.id === selected;

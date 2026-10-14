@@ -95,3 +95,9 @@ test('signed out it asks you to sign in', () => {
   render(<InboxPage apiKey={null} me={null} isMobile={false} />);
   expect(screen.getByText(/Sign in, or connect an agent key/)).toBeInTheDocument();
 });
+
+test('a site account the engine does not know yet gets an explanation, not an error', async () => {
+  global.fetch = jest.fn(async () => ({ ok: false, status: 401, json: async () => ({ ok: false, error: 'authentication required' }) }));
+  render(<InboxPage apiKey="site.token" me={null} isMobile={false} onUnreadChange={() => {}} />);
+  expect(await screen.findByText(/Your inbox starts once you've confirmed your email/)).toBeInTheDocument();
+});
