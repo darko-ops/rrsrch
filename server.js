@@ -214,10 +214,15 @@ app.all('/api/engine/v1/*', async (req, res) => {
     delete headers.authorization;
     const person = await siteUser(auth);
     if (!person) return res.status(401).json({ ok: false, error: 'your sign-in has expired; sign in again' });
-    if (!ENGINE_PROXY_SECRET) return res.status(503).json({ ok: false, error: 'signed-in actions are not set up yet' });
-    headers['x-rrsrch-proxy-secret'] = ENGINE_PROXY_SECRET;
-    headers['x-rrsrch-site-user'] = person.id;
-    headers['x-rrsrch-site-name'] = encodeURIComponent(person.name || '');
+    if (!isVerified(person) && req.method !== 'GET') {
+      return res.status(403).json({ ok: false, error: 'confirm your email first: use the link we sent, or resend it from your account' });
+    }
+    if (isVerified(person)) {                         // until the address is confirmed, reads go through as a visitor
+      if (!ENGINE_PROXY_SECRET) return res.status(503).json({ ok: false, error: 'signed-in actions are not set up yet' });
+      headers['x-rrsrch-proxy-secret'] = ENGINE_PROXY_SECRET;
+      headers['x-rrsrch-site-user'] = person.id;
+      headers['x-rrsrch-site-name'] = encodeURIComponent(person.name || '');
+    }
   }
   const hasBody = req.method !== 'GET' && req.method !== 'DELETE';
   if (hasBody) headers['content-type'] = 'application/json';
@@ -1725,7 +1730,8 @@ function verifyToken(token) {
     return null;
   }
 }
-const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, created_at: u.created_at });
+const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, created_at: u.created_at,
+                             email_verified: isVerified(u), google: !!u.google_sub });
 const tokenFor = (u) => signToken({ sub: u.id, iat: Date.now(), exp: Date.now() + 30 * 24 * 3600 * 1000 });
 // Tokens issued before an account's tokens_after (set when Google takes over an email account) no longer work.
 const tokenRevoked = (user, payload) => !!user.tokens_after && !(payload.iat >= user.tokens_after);
@@ -1767,6 +1773,100 @@ async function requireUser(req, res) {
   return user;
 }
 
+// --- Limits on sign-in and sign-up ----------------------------------------------
+// Counted in Upstash Redis (provisioned through the Vercel marketplace: KV_REST_API_URL / KV_REST_API_TOKEN), so
+// every serverless instance sees the same counts. If Redis can't be reached the request goes ahead and the outage
+// is logged: an Upstash incident shouldn't lock everyone out of their account.
+const KV_URL = (process.env.KV_REST_API_URL || '').replace(/\/$/, '');
+const KV_TOKEN = process.env.KV_REST_API_TOKEN || '';
+const LIMITS = {
+  login_account: { max: 5, seconds: 15 * 60, what: 'failed sign-ins for this account' },
+  login_ip: { max: 20, seconds: 15 * 60, what: 'failed sign-ins from your network' },
+  signup_ip: { max: 5, seconds: 60 * 60, what: 'sign-ups from your network' },
+  google_ip: { max: 30, seconds: 15 * 60, what: 'Google sign-ins from your network' },
+  verify_send: { max: 3, seconds: 60 * 60, what: 'verification emails for this account' },
+};
+
+async function kv(commands) {
+  if (!KV_URL || !KV_TOKEN) return null;
+  try {
+    const r = await fetch(`${KV_URL}/pipeline`, { method: 'POST', signal: AbortSignal.timeout(3000),
+      headers: { Authorization: `Bearer ${KV_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(commands) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return (await r.json()).map((x) => x.result);
+  } catch (err) {
+    console.error(`limits: redis unavailable (${err.message}); continuing without a limit`);
+    return null;
+  }
+}
+
+const limitKey = (kind, who) => `limit:${kind}:${crypto.createHash('sha256').update(String(who)).digest('hex').slice(0, 32)}`;
+
+// Seconds until the limit lifts, or 0 if this caller is under it.
+async function limited(kind, who) {
+  const key = limitKey(kind, who);
+  const out = await kv([['GET', key], ['TTL', key]]);
+  if (!out) return 0;
+  return Number(out[0] || 0) >= LIMITS[kind].max ? Math.max(Number(out[1]) || LIMITS[kind].seconds, 1) : 0;
+}
+
+async function count(kind, who) {
+  const key = limitKey(kind, who);
+  await kv([['INCR', key], ['EXPIRE', key, String(LIMITS[kind].seconds), 'NX']]);
+}
+
+const clearCount = (kind, who) => kv([['DEL', limitKey(kind, who)]]);
+
+function tooMany(res, kind, seconds) {
+  const minutes = Math.ceil(seconds / 60);
+  res.set('Retry-After', String(seconds));
+  return res.status(429).json({ error: `Too many ${LIMITS[kind].what}. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.` });
+}
+
+function clientIp(req) {
+  return req.headers['x-real-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    || req.socket?.remoteAddress || 'unknown';
+}
+
+// --- Verifying email addresses ----------------------------------------------------
+// A new email account gets a link (24 hours) to prove it owns the address. Until then it can sign in but can't act
+// on the research network; once the link has expired, someone else may register the address. Google accounts are
+// verified by Google. Mail goes out through Resend (marketplace: RESEND_API_KEY) from RESEND_FROM.
+const VERIFY_HOURS = 24;
+const RESEND_KEY = process.env.RESEND_API_KEY || '';
+const MAIL_FROM = process.env.RESEND_FROM || 'RRSRCH <onboarding@resend.dev>';
+const SITE_URL = (process.env.FRONTEND_URL || 'https://rrsrch.com').replace(/\/$/, '');
+const hashToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+const isVerified = (u) => u.email_verified === true || !!u.google_sub;
+const verificationExpired = (u) => !isVerified(u) && (!u.verify_expires || u.verify_expires < Date.now());
+
+// Give the account a fresh link (stored only as a hash) and email it. Returns whether the email was accepted.
+async function sendVerification(user) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  user.verify_token_hash = hashToken(token);
+  user.verify_expires = Date.now() + VERIFY_HOURS * 3600 * 1000;
+  if (!RESEND_KEY) {
+    console.error('verify: RESEND_API_KEY is not set; no email sent');
+    return false;
+  }
+  const link = `${SITE_URL}/#/verify?token=${token}`;
+  try {
+    const r = await fetch('https://api.resend.com/emails', { method: 'POST', signal: AbortSignal.timeout(10000),
+      headers: { Authorization: `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: MAIL_FROM, to: [user.email], subject: 'Confirm your email for RRSRCH',
+        text: `Hi ${user.name},\n\nConfirm this is your email address so you can post and comment on RRSRCH:\n\n${link}\n\n`
+          + `The link works for ${VERIFY_HOURS} hours. If you didn't sign up, ignore this email.\n`,
+      }) });
+    if (!r.ok) console.error(`verify: resend refused (${r.status}) ${await r.text()}`);
+    return r.ok;
+  } catch (err) {
+    console.error('verify: resend unreachable', err.message);
+    return false;
+  }
+}
+
 // Password rules for email sign-ups. The sign-up form shows the same rules as a checklist
 // (rrsrch-react/src/passwordRules.js); keep the two in step.
 const PASSWORD_MIN = 12;
@@ -1802,6 +1902,9 @@ function passwordProblems(password, { name = '', email = '' } = {}) {
 
 app.post('/api/account/signup', async (req, res) => {
   try {
+    const ip = clientIp(req);
+    const wait = await limited('signup_ip', ip);
+    if (wait) return tooMany(res, 'signup_ip', wait);
     const { name, email, password } = req.body || {};
     const cleanEmail = String(email || '').trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
@@ -1811,20 +1914,26 @@ app.post('/api/account/signup', async (req, res) => {
     if (problems.length) {
       return res.status(400).json({ error: `Password ${problems.join('; ')}.`, problems });
     }
-    const users = await readUsers();
-    if (users.some((u) => u.email === cleanEmail)) {
+    let users = await readUsers();
+    const existing = users.find((u) => u.email === cleanEmail);
+    if (existing && !verificationExpired(existing)) {
       return res.status(409).json({ error: 'An account with that email already exists.' });
     }
+    // an unverified account whose link expired never proved it owned the address: the address is free again
+    if (existing) users = users.filter((u) => u !== existing);
     const user = {
       id: crypto.randomUUID(),
       name: String(name || '').trim().slice(0, 80) || cleanEmail.split('@')[0],
       email: cleanEmail,
       password_hash: await bcrypt.hash(String(password), 10),
+      email_verified: false,
       created_at: new Date().toISOString(),
     };
+    await count('signup_ip', ip);
+    const sent = await sendVerification(user);
     users.push(user);
     await writeUsers(users);
-    res.status(201).json({ token: tokenFor(user), user: publicUser(user) });
+    res.status(201).json({ token: tokenFor(user), user: publicUser(user), verification_sent: sent });
   } catch (err) {
     console.error('signup failed:', err);
     res.status(500).json({ error: 'Signup failed.' });
@@ -1834,13 +1943,23 @@ app.post('/api/account/signup', async (req, res) => {
 app.post('/api/account/login', async (req, res) => {
   try {
     const cleanEmail = String((req.body || {}).email || '').trim().toLowerCase();
+    const ip = clientIp(req);
+    // refuse before checking the password, so a locked account can't be probed further
+    for (const [kind, who] of [['login_account', cleanEmail], ['login_ip', ip]]) {
+      const wait = await limited(kind, who);
+      if (wait) return tooMany(res, kind, wait);
+    }
     const user = (await readUsers()).find((u) => u.email === cleanEmail);
     if (user && !user.password_hash) {
       return res.status(401).json({ error: 'This account signs in with Google.' });
     }
     const ok = user && await bcrypt.compare(String((req.body || {}).password || ''),
                                             user.password_hash);
-    if (!ok) return res.status(401).json({ error: 'Wrong email or password.' });
+    if (!ok) {
+      await Promise.all([count('login_account', cleanEmail), count('login_ip', ip)]);
+      return res.status(401).json({ error: 'Wrong email or password.' });
+    }
+    await clearCount('login_account', cleanEmail);
     res.json({ token: tokenFor(user), user: publicUser(user) });
   } catch (err) {
     console.error('login failed:', err);
@@ -1872,6 +1991,10 @@ async function verifyGoogleIdToken(credential) {
 
 app.post('/api/account/google', async (req, res) => {
   if (!GOOGLE_CLIENT_ID) return res.status(503).json({ error: 'Google sign-in is not set up yet.' });
+  const ip = clientIp(req);
+  const wait = await limited('google_ip', ip);
+  if (wait) return tooMany(res, 'google_ip', wait);
+  await count('google_ip', ip);
   try {
     const t = await verifyGoogleIdToken(String((req.body || {}).credential || ''));
     if (!t) return res.status(401).json({ error: 'Google sign-in could not be verified.' });
@@ -1891,9 +2014,11 @@ app.post('/api/account/google', async (req, res) => {
       user.password_hash = null;
       user.devices = [];
       user.tokens_after = Date.now();
+      user.email_verified = true;
     } else {
       user = { id: crypto.randomUUID(), name: String(t.name || '').trim().slice(0, 80) || email.split('@')[0],
-               email, password_hash: null, google_sub: t.sub, created_at: new Date().toISOString() };
+               email, password_hash: null, google_sub: t.sub, email_verified: true,
+               created_at: new Date().toISOString() };
       users.push(user);
     }
     await writeUsers(users);
@@ -1901,6 +2026,45 @@ app.post('/api/account/google', async (req, res) => {
   } catch (err) {
     console.error('google sign-in failed:', err);
     res.status(500).json({ error: 'Google sign-in failed.' });
+  }
+});
+
+app.post('/api/account/verify', async (req, res) => {
+  try {
+    const hash = hashToken(String((req.body || {}).token || ''));
+    const users = await readUsers();
+    const user = users.find((u) => u.verify_token_hash && u.verify_token_hash === hash);
+    if (!user || user.verify_expires < Date.now()) {
+      return res.status(400).json({ error: 'That link is invalid or has expired. Sign in and send a new one.' });
+    }
+    user.email_verified = true;
+    delete user.verify_token_hash;
+    delete user.verify_expires;
+    await writeUsers(users);
+    res.json({ ok: true, user: publicUser(user) });
+  } catch (err) {
+    console.error('verify failed:', err);
+    res.status(500).json({ error: 'Verification failed.' });
+  }
+});
+
+app.post('/api/account/verify/resend', async (req, res) => {
+  const me = await requireUser(req, res);
+  if (!me) return;
+  if (isVerified(me)) return res.json({ ok: true, already: true });
+  const wait = await limited('verify_send', me.id);
+  if (wait) return tooMany(res, 'verify_send', wait);
+  try {
+    const users = await readUsers();
+    const user = users.find((u) => u.id === me.id);
+    await count('verify_send', me.id);
+    const sent = await sendVerification(user);
+    await writeUsers(users);
+    if (!sent) return res.status(503).json({ error: 'The email could not be sent. Try again later.' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('verify resend failed:', err);
+    res.status(500).json({ error: 'Could not send the email.' });
   }
 });
 

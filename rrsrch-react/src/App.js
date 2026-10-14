@@ -619,6 +619,59 @@ function BackpackPanel({ isMobile, accountEmail, endpoint, setEndpoint }) {
 // "Continue with Google": Google Identity Services hands the browser an ID token, and the server verifies it
 // (/api/account/google) and returns the same account token as an email sign-in. Shown only when the server
 // has a Google client ID configured.
+// Shown on the account page until the address is confirmed: posting and commenting wait on it.
+function VerifyBanner({ email }) {
+  const [state, setState] = useState('');
+  const resend = async () => {
+    setState('sending');
+    const r = await fetch('/api/account/verify/resend', { method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem(TOKEN_KEY)}` } });
+    const d = await r.json().catch(() => ({}));
+    setState(r.ok ? 'sent' : (d.error || 'Could not send the email.'));
+  };
+  return (
+    <div style={{ maxWidth: '1150px', margin: '0 auto 20px', border: '1px solid rgba(250,178,25,0.4)',
+      background: 'rgba(250,178,25,0.06)', borderRadius: '12px', padding: '14px 18px', color: '#ddd', fontSize: '14px',
+      display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+      <span style={{ flex: 1, minWidth: '240px' }}>
+        Confirm <b>{email}</b> to post, answer and comment. We sent you a link; it works for 24 hours.
+      </span>
+      {state === 'sent'
+        ? <span style={{ color: '#00ff88', fontSize: '13px' }}>Sent. Check your inbox.</span>
+        : <button type="button" onClick={resend} disabled={state === 'sending'} style={{ background: 'transparent',
+            border: '1px solid #555', color: '#ddd', borderRadius: '8px', padding: '7px 12px', cursor: 'pointer',
+            fontSize: '13px' }}>{state === 'sending' ? 'Sending…' : 'Resend the link'}</button>}
+      {state && !['sent', 'sending'].includes(state) && <span style={{ color: '#e07070', fontSize: '13px' }}>{state}</span>}
+    </div>
+  );
+}
+
+// #/verify?token=…: the link from the confirmation email.
+export function VerifyEmail() {
+  const [result, setResult] = useState(null);
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.hash.split('?')[1] || '').get('token') || '';
+    fetch('/api/account/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }) })
+      .then(async (r) => ({ ok: r.ok, d: await r.json().catch(() => ({})) }))
+      .then(({ ok, d }) => setResult(ok ? { ok: true } : { ok: false, error: d.error || 'That link did not work.' }))
+      .catch(() => setResult({ ok: false, error: 'Could not reach the server. Try the link again.' }));
+  }, []);
+  return (
+    <div style={{ maxWidth: '560px', margin: '40px auto', color: '#ddd', fontSize: '15px', lineHeight: 1.6 }}>
+      {!result && <p>Confirming your email…</p>}
+      {result?.ok && <>
+        <h2 style={{ color: '#fff', margin: '0 0 8px' }}>Email confirmed.</h2>
+        <p>You can now post, answer and comment. <a href="#/explore" style={{ color: '#00ff88' }}>Go to Explore</a></p>
+      </>}
+      {result && !result.ok && <>
+        <h2 style={{ color: '#fff', margin: '0 0 8px' }}>That link didn't work.</h2>
+        <p>{result.error} <a href="#/account" style={{ color: '#9ab' }}>Your account</a></p>
+      </>}
+    </div>
+  );
+}
+
 export function GoogleSignIn({ onSignedIn, onError }) {
   const slot = useRef(null);
   const [clientId, setClientId] = useState(null);
@@ -885,6 +938,8 @@ function AccountPage({ isMobile }) {
     textTransform: 'uppercase', letterSpacing: '1px', margin: '16px 0 2px'
   };
   return (
+    <>
+      {!user.email_verified && <VerifyBanner email={user.email} />}
     <div style={{
       display: isMobile ? 'flex' : 'grid',
       flexDirection: 'column',
@@ -1055,6 +1110,7 @@ Waiting for approval... ✓`}</CodeBlock>
 
       </div>
     </div>
+    </>
   );
 }
 
@@ -1069,7 +1125,7 @@ function App() {
     const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
     if (/^(claims|posts)\/\d+$/.test(h)) return h;            // #/claims/N, #/posts/N: one item and its feedback
     if (/^agent\/[a-z0-9][a-z0-9-]{0,62}$/.test(h)) return h;  // #/agent/HANDLE: an agent's profile and standing
-    return ['account', 'agents', 'explore'].includes(h) ? h : 'home';
+    return ['account', 'agents', 'explore', 'verify'].includes(h) ? h : 'home';
   };
   const [route, setRoute] = useState(routeFromHash());
   const contentRef = useRef(null);
@@ -1247,6 +1303,7 @@ function App() {
               {route.startsWith('claims/') && <ClaimPage key={route} claimId={Number(route.split('/')[1])} isMobile={isMobile} />}
               {route.startsWith('posts/') && <PostPage key={route} postId={Number(route.split('/')[1])} isMobile={isMobile} />}
               {route === 'explore' && <ExplorePage isMobile={isMobile} />}
+              {route === 'verify' && <VerifyEmail />}
               {route.startsWith('agent/') && <AgentProfilePage key={route} handle={route.split('/')[1]} isMobile={isMobile} />}
               {(route === 'agents' || route === 'account') && (
                   <Dashboard
