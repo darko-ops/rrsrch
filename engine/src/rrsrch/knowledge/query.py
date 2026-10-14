@@ -328,3 +328,35 @@ def atlas(conn: psycopg.Connection, repository_id: int, limit: int = 300) -> dic
         counts[n["kind"]] = counts.get(n["kind"], 0) + 1
     return {"nodes": list(nodes.values()), "edges": edges, "counts": counts, "claims_total": total,
             "truncated": total > len(claims)}
+
+
+CONTEXT_CHARS = 240
+
+
+def review_queue(conn: psycopg.Connection, repository_id: int, states: tuple[str, ...], after: int = 0,
+                 limit: int = 20) -> dict:
+    """Claims waiting for review, oldest first, each with the passage it rests on shown in context."""
+    rows = _rows(conn.execute(
+        "SELECT c.id, c.text, c.state, c.type, a.handle, s.id, s.title, s.pub_year, d.text, c.span_start, c.span_end, "
+        "  (SELECT count(*) FROM challenges ch WHERE ch.claim_id = c.id AND ch.state = 'open') "
+        "FROM claims c JOIN agents a ON a.id = c.agent_id JOIN documents d ON d.id = c.document_id "
+        "JOIN sources s ON s.id = d.source_id "
+        "WHERE c.repository_id = %s AND c.state = ANY(%s) AND c.id > %s ORDER BY c.id LIMIT %s",
+        (repository_id, list(states), after, limit)),
+        ("id", "proposition", "state", "type", "contributor", "source_id", "source_title", "year", "doc", "start",
+         "end", "open_challenges"))
+    ids = [r["id"] for r in rows]
+    reviews: dict[int, list] = {}
+    for cid, handle, verdict, findings in conn.execute(
+            "SELECT v.claim_id, a.handle, v.verdict, v.findings FROM claim_reviews v JOIN agents a ON a.id = v.reviewer_id "
+            "JOIN claim_revisions rv ON rv.id = v.revision_id WHERE v.claim_id = ANY(%s) "
+            "AND rv.version = (SELECT max(version) FROM claim_revisions WHERE claim_id = v.claim_id) ORDER BY v.id",
+            (ids,)):
+        reviews.setdefault(cid, []).append({"reviewer": handle, "verdict": verdict, "findings": findings})
+    for r in rows:
+        doc, a, b = r.pop("doc"), r.pop("start"), r.pop("end")
+        r["passage"] = {"before": doc[max(0, a - CONTEXT_CHARS):a], "excerpt": doc[a:b], "after": doc[b:b + CONTEXT_CHARS]}
+        r["reviews"] = reviews.get(r["id"], [])
+    total = conn.execute("SELECT count(*) FROM claims WHERE repository_id = %s AND state = ANY(%s)",
+                         (repository_id, list(states))).fetchone()[0]
+    return {"items": rows, "next": rows[-1]["id"] if len(rows) == limit else None, "waiting": total}

@@ -163,6 +163,36 @@ def verify(p: Proposal) -> tuple[ClaimContent | None, list[Check]]:
     return c, checks
 
 
+def review_tally(reviews, author_id: int, author_org: str, policy: Policy) -> tuple[int, int, list[str]]:
+    """(independent approvals, of them by humans, standing objections). Shared by merges and claim reviews.
+
+    Never counts the author's own review; ignores suspended or revoked reviewers; if the policy says so,
+    ignores reviewers from the author's organization. Any other non-approval is an objection that blocks."""
+    approvals, humans, objections = 0, 0, []
+    for r in reviews:
+        if r.reviewer_id == author_id:
+            continue                                    # never counts, never blocks
+        if r.status != "active":
+            continue
+        if policy.approvals_from_other_orgs_only and r.organization_id == author_org:
+            continue
+        if r.verdict == "approve":
+            approvals += 1
+            humans += r.kind == "human"
+        else:
+            objections.append(f"reviewer {r.reviewer_id} says {r.verdict}")
+    return approvals, humans, objections
+
+
+def approval_reasons(approvals: int, humans: int, policy: Policy) -> list[str]:
+    reasons = []
+    if approvals < policy.required_approvals:
+        reasons.append(f"{approvals} independent approval(s), policy needs {policy.required_approvals}")
+    if policy.human_approval and not humans:
+        reasons.append("policy needs an approval from a human reviewer")
+    return reasons
+
+
 def authorize(p: Proposal, checks: list[Check], merger: Decision) -> MergeDecision:
     reasons = []
     if not merger:
@@ -171,21 +201,7 @@ def authorize(p: Proposal, checks: list[Check], merger: Decision) -> MergeDecisi
 
     reasons += [f"blocking challenge {cid} is open" for cid in p.blocking_challenges]
 
-    approvals, humans = 0, 0
-    for r in p.reviews:
-        if r.reviewer_id == p.author_id:
-            continue                                    # never counts, never blocks
-        if r.status != "active":
-            continue
-        if p.policy.approvals_from_other_orgs_only and r.organization_id == p.author_org:
-            continue
-        if r.verdict == "approve":
-            approvals += 1
-            humans += r.kind == "human"
-        else:
-            reasons.append(f"reviewer {r.reviewer_id} says {r.verdict}")
-    if approvals < p.policy.required_approvals:
-        reasons.append(f"{approvals} independent approval(s), policy needs {p.policy.required_approvals}")
-    if p.policy.human_approval and not humans:
-        reasons.append("policy needs an approval from a human reviewer")
+    approvals, humans, objections = review_tally(p.reviews, p.author_id, p.author_org, p.policy)
+    reasons += objections
+    reasons += approval_reasons(approvals, humans, p.policy)
     return MergeDecision(not reasons, tuple(reasons), approvals)

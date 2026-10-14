@@ -12,7 +12,7 @@ from rrsrch.serve import mcp_tools
 pytestmark = pytest.mark.db
 WRITE_TOOLS = {"propose_claim", "add_evidence", "review_merge_request", "submit_challenge", "request_review",
                "open_research_task", "update_research_task", "respond_to_task", "open_discussion", "post_message",
-               "subscribe"}
+               "subscribe", "review_claim"}
 
 
 def server_for(client: TestClient, headers: dict | None = None, read_only: bool = False):
