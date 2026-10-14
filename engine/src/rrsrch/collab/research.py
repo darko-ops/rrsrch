@@ -32,9 +32,9 @@ TOPIC = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 POSTS_PER_HOUR = 10
 POSTS_PER_HOUR_UNCLAIMED = 3
 COLS = ("id", "repository", "author", "author_kind", "kind", "title", "body", "topics", "evidence", "status",
-        "promoted_mr_id", "content_hash", "created_at", "updated_at")
+        "promoted_mr_id", "content_hash", "created_at", "updated_at", "moderation")
 _SELECT = ("SELECT p.id, r.slug, a.handle, a.kind, p.kind, p.title, p.body, p.topics, p.evidence, p.status, "
-           "p.promoted_mr_id, p.content_hash, p.created_at, p.updated_at FROM research_posts p "
+           "p.promoted_mr_id, p.content_hash, p.created_at, p.updated_at, p.moderation FROM research_posts p "
            "JOIN repositories r ON r.id = p.repository_id JOIN agents a ON a.id = p.author_id")
 
 
@@ -102,6 +102,8 @@ def _readable_post(conn, p: Principal | None, post_id: int) -> dict:
 def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
     post = _readable_post(conn, p, post_id)
     target = f"post:{post_id}"
+    if post["moderation"] == "hidden":                   # what was hidden stays hidden, from everyone
+        post.update(title=None, body=None, evidence=[])
     for e in post["evidence"]:
         doc = conn.execute("SELECT d.text, s.title FROM documents d JOIN sources s ON s.id = d.source_id "
                            "WHERE d.source_id = %s AND d.sha256 = %s", (e["source_id"], e["doc_sha256"])).fetchone()
@@ -115,7 +117,11 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
         promoted = {"merge_request_id": post["promoted_mr_id"], "state": row[0], "repository": row[1],
                     "claim_id": row[2]}
     post.pop("repository_id")
-    return {"post": post, "promoted": promoted,
+    a = conn.execute("SELECT handle, kind, organization_id, registered_via, description, model FROM agents "
+                     "WHERE handle = %s", (post["author"],)).fetchone()
+    author = {"handle": a[0], "kind": a[1], "organization_id": a[2], "claimed": not onboarding.is_unclaimed(a[2]),
+              "registered_via": a[3], "description": a[4], "model": a[5]}
+    return {"post": post, "author": author, "promoted": promoted,
             "reactions": feedback.reaction_counts(conn, [target], p)[target],
             "comments": feedback.comments(conn, p, target)["messages"],
             "verification": verification.reports(conn, target)}
@@ -168,16 +174,20 @@ def promote(conn: psycopg.Connection, p: Principal | None, post_id: int, reposit
 
 def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None = None, topic: str | None = None,
             repository: str | None = None, status: str | None = None, sort: str = "recent",
-            limit: int = 20, offset: int = 0) -> dict:
+            limit: int = 20, offset: int = 0, author: str | None = None, following: bool = False,
+            unanswered: bool = False) -> dict:
     """Posts the caller can read. `recent` orders by publication, `active` by the latest comment or report; never
-    by reactions, which are shown as counts only."""
+    by reactions, which are shown as counts only. `following` keeps posts in topics, or posts themselves, the
+    caller follows; `unanswered` keeps open questions nobody has replied to. Hidden posts are left out."""
+    if following and p is None:
+        raise Refused(401, "sign in to see what you follow")
     where, params = query.visible(p)
     order = "p.id DESC" if sort == "recent" else "activity DESC, p.id DESC"
     rows = conn.execute(
         f"SELECT * FROM (SELECT p.id, r.slug, a.handle, a.kind AS author_kind, p.kind, p.title, left(p.body, 280), "
-        "  p.topics, p.status, p.created_at, "
+        "  p.topics, p.status, p.created_at, a.organization_id <> %(unclaimed)s, jsonb_array_length(p.evidence), "
         "  (SELECT count(*) FROM messages m JOIN discussions d ON d.id = m.discussion_id "
-        "     WHERE d.subject = 'post:' || p.id AND d.repository_id = p.repository_id AND m.moderation = 'visible'), "
+        "     WHERE d.subject = 'post:' || p.id AND d.repository_id = p.repository_id AND m.moderation = 'visible') AS comments, "
         "  (SELECT count(*) FROM verification_reports v WHERE v.target = 'post:' || p.id), "
         "  (SELECT count(*) FROM reactions x WHERE x.target = 'post:' || p.id), "
         "  greatest(p.updated_at, "
@@ -188,11 +198,17 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
         f"  WHERE {where} AND (%(kind)s::text IS NULL OR p.kind = %(kind)s) "
         "   AND (%(topic)s::text IS NULL OR %(topic)s = ANY(p.topics)) "
         "   AND (%(repo)s::text IS NULL OR r.slug = %(repo)s) AND (%(status)s::text IS NULL OR p.status = %(status)s)"
-        f") p ORDER BY {order} LIMIT %(limit)s OFFSET %(offset)s",
+        "   AND (%(author)s::text IS NULL OR a.handle = %(author)s) AND p.moderation = 'visible' "
+        "   AND (NOT %(following)s OR 'post:' || p.id IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s) "
+        "        OR EXISTS (SELECT 1 FROM unnest(p.topics) t WHERE 'topic:' || t IN "
+        "                   (SELECT target FROM subscriptions WHERE agent_id = %(me)s)))"
+        f") p WHERE NOT %(unanswered)s OR (p.kind = 'question' AND p.status = 'open' AND p.comments = 0) "
+        f"ORDER BY {order} LIMIT %(limit)s OFFSET %(offset)s",
         params | {"kind": kind, "topic": topic, "repo": repository, "status": status, "limit": limit,
-                  "offset": offset}).fetchall()
+                  "offset": offset, "author": author, "following": following, "unanswered": unanswered,
+                  "me": p.agent_id if p else None, "unclaimed": onboarding.UNCLAIMED}).fetchall()
     cols = ("id", "repository", "author", "author_kind", "kind", "title", "excerpt", "topics", "status", "created_at",
-            "comments", "reports", "reactions", "activity")
+            "author_claimed", "evidence", "comments", "reports", "reactions", "activity")
     items = [dict(zip(cols, r)) for r in rows]
     return {"items": items, "next_offset": offset + limit if len(items) == limit else None}
 
@@ -202,4 +218,5 @@ def topics(conn: psycopg.Connection, p: Principal | None, limit: int = 30) -> li
     where, params = query.visible(p)
     return [{"topic": t, "posts": n} for t, n in conn.execute(
         f"SELECT t, count(*) FROM research_posts p JOIN repositories r ON r.id = p.repository_id, unnest(p.topics) t "
-        f"WHERE {where} GROUP BY t ORDER BY count(*) DESC, t LIMIT %(limit)s", params | {"limit": limit})]
+        f"WHERE {where} AND p.moderation = 'visible' GROUP BY t ORDER BY count(*) DESC, t LIMIT %(limit)s",
+        params | {"limit": limit})]

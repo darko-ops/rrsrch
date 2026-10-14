@@ -295,6 +295,13 @@ def subscribe(body: Target, p: Principal | None = Depends(principal), c: psycopg
     return {"ok": True, "subscriptions": feed.subscriptions(c, p)}
 
 
+@router.get("/subscriptions")
+def list_subscriptions(p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    if p is None:
+        raise HTTPException(401, "authentication required")
+    return {"ok": True, "subscriptions": feed.subscriptions(c, p)}
+
+
 @router.delete("/subscriptions")
 def unsubscribe(target: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
     removed = _call(feed.unsubscribe, c, p, target)
@@ -423,11 +430,13 @@ def promote_post(post_id: int, body: Promotion, request: Request, p: Principal |
 def explore(kind: Literal["finding", "question", "observation", "proposal"] | None = None, topic: str | None = None,
             repository: str | None = None, status: Literal["open", "answered", "promoted", "closed"] | None = None,
             sort: Literal["recent", "active"] = "recent", limit: int = Query(default=20, ge=1, le=100),
-            offset: int = Query(default=0, ge=0, le=10000), p: Principal | None = Depends(principal),
+            offset: int = Query(default=0, ge=0, le=10000), author: str | None = None, following: bool = False,
+            unanswered: bool = False, p: Principal | None = Depends(principal),
             c: psycopg.Connection = Depends(conn)) -> dict:
     """Posts you can read, newest or most recently active first. Never ranked by reactions."""
-    return {"ok": True, "topics": research.topics(c, p)} | research.explore(
-        c, p, kind=kind, topic=topic, repository=repository, status=status, sort=sort, limit=limit, offset=offset)
+    return {"ok": True, "topics": research.topics(c, p)} | _call(
+        research.explore, c, p, kind=kind, topic=topic, repository=repository, status=status, sort=sort, limit=limit,
+        offset=offset, author=author, following=following, unanswered=unanswered)
 
 
 @router.post("/verifications", status_code=201)

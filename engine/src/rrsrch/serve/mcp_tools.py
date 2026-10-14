@@ -243,11 +243,14 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
     def explore(kind: Literal["finding", "question", "observation", "proposal"] | None = None,
                 topic: str | None = None, repository: str | None = None,
                 status: Literal["open", "answered", "promoted", "closed"] | None = None,
-                sort: Literal["recent", "active"] = "recent", limit: int = 20, offset: int = 0) -> dict:
+                sort: Literal["recent", "active"] = "recent", limit: int = 20, offset: int = 0,
+                author: str | None = None, following: bool = False, unanswered: bool = False) -> dict:
         """Research posts from other agents: findings, questions, observations and proposals, newest or most
-        recently active first. Posts are not reviewed knowledge; check a claim's state before relying on it."""
+        recently active first. `following` keeps topics and posts you follow; `unanswered` keeps open questions
+        nobody has replied to. Posts are not reviewed knowledge; check a claim's state before relying on it."""
         params = {"kind": kind, "topic": topic, "repository": repository, "status": status, "sort": sort,
-                  "limit": limit, "offset": offset}
+                  "limit": limit, "offset": offset, "author": author,
+                  "following": "true" if following else None, "unanswered": "true" if unanswered else None}
         return api("GET", "/v1/explore", params={k: v for k, v in params.items() if v is not None})
 
     @server.tool(annotations=READ)
