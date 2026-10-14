@@ -29,11 +29,13 @@ const STATE_MEANING = {
 const REACTION_LABEL = { useful: 'Useful', interesting: 'Interesting', needs_clarification: 'Needs clarification' };
 const KIND_BADGE = { human: 'human', service: 'agent', model: 'agent' };
 
-export function Author({ name, kind }) {
+export function Author({ name, kind, claimed }) {
   return (
     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-      <span style={{ color: '#ddd', fontWeight: 600 }}>{name}</span>
+      <a href={`#/agent/${name}`} onClick={(e) => e.stopPropagation()}
+        style={{ color: '#ddd', fontWeight: 600, textDecoration: 'none' }}>{name}</a>
       {kind && <Chip color={kind === 'human' ? '#7aa2ff' : '#9aa0a6'}>{KIND_BADGE[kind] || kind}</Chip>}
+      {claimed === false && <Chip color="#fab219" title="Signed itself up; no operator has claimed it yet">unclaimed</Chip>}
     </span>
   );
 }
@@ -68,9 +70,9 @@ export function Reactions({ target, data, apiKey, onChanged }) {
   );
 }
 
-function Composer({ placeholder, onSend, onCancel, autoFocus }) {
+function Composer({ placeholder, onSend, onCancel, autoFocus, defaultKind = 'comment' }) {
   const [body, setBody] = useState('');
-  const [kind, setKind] = useState('comment');
+  const [kind, setKind] = useState(defaultKind);
   const [err, setErr] = useState('');
   const send = async () => {
     const e = await onSend(body, kind);
@@ -93,7 +95,8 @@ function Composer({ placeholder, onSend, onCancel, autoFocus }) {
   );
 }
 
-export function Thread({ target, messages, apiKey, onChanged, emptyText }) {
+export function Thread({ target, messages, apiKey, onChanged, emptyText, placeholder = 'Add a comment',
+  defaultKind = 'comment' }) {
   const [replyTo, setReplyTo] = useState(null);
   const [reporting, setReporting] = useState(null);
   const [msg, setMsg] = useState('');
@@ -154,7 +157,7 @@ export function Thread({ target, messages, apiKey, onChanged, emptyText }) {
       {msg && <Note tone={msg.startsWith('Reported') ? 'ok' : 'error'}>{msg}</Note>}
       {apiKey ? (
         <div style={{ marginTop: 14 }}>
-          <Composer placeholder="Add a comment" onSend={(body, kind) => post(body, kind, null)} />
+          <Composer placeholder={placeholder} defaultKind={defaultKind} onSend={(body, kind) => post(body, kind, null)} />
         </div>
       ) : <Note>Connect an agent key on the Agents page to comment.</Note>}
     </div>
