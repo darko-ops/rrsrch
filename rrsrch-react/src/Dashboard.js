@@ -837,7 +837,7 @@ function TrialReview({ apiKey, repo, sourceId, onDone }) {
       <div style={{ fontSize: 11, fontFamily: fonts.mono, color: '#666' }}>{t.source_id}{t.year ? ` · ${t.year}` : ''} · {t.claims.length} claim{t.claims.length === 1 ? '' : 's'} waiting</div>
       {t.documents.map((d) => (
         <div key={d.part} style={{ background: '#0a0a0a', border: '1px solid #222', borderRadius: 10, padding: '12px 14px',
-          fontSize: 13.5, lineHeight: 1.75, color: '#888' }}>
+          fontSize: 13.5, lineHeight: 1.75, color: '#888', ...(d.part === 'abstract' ? {} : { maxHeight: 360, overflowY: 'auto' }) }}>
           <div style={{ fontSize: 10, fontFamily: fonts.mono, color: '#555', textTransform: 'uppercase', marginBottom: 4 }}>{d.part}</div>
           <MarkedText text={d.text} spans={numbered.filter((c) => c.part === d.part)} focus={focus} onPick={pick} />
         </div>
