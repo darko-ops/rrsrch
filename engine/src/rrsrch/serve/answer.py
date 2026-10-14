@@ -152,18 +152,61 @@ def _pubmed_url(source_id: str | None) -> str | None:
     return None
 
 
-def _citations_map(shown: list[Candidate]) -> dict[str, dict]:
-    """Site CitationPanel expects report.citations[id] = {text, src, verdict, url}."""
+def _trust(conn: psycopg.Connection, ids: list[int]) -> dict[int, dict]:
+    """Where each claim stands in review: state, version, open challenges, and the public claims the
+    skeptic found contradicting it."""
+    out = {cid: {"open_challenges": 0, "contradicted_by": [], "version": None} for cid in ids}
+    for cid, n in conn.execute("SELECT claim_id, count(*) FROM challenges WHERE claim_id = ANY(%s) "
+                               "AND state = 'open' GROUP BY 1", (ids,)):
+        out[cid]["open_challenges"] = n
+    for cid, v in conn.execute("SELECT claim_id, max(version) FROM claim_revisions WHERE claim_id = ANY(%s) "
+                               "GROUP BY 1", (ids,)):
+        out[cid]["version"] = v
+    for a, b in conn.execute(
+            "SELECT ag.claim_a_id, ag.claim_b_id FROM claim_agreements ag "
+            "JOIN claims ca ON ca.id = ag.claim_a_id JOIN repositories ra ON ra.id = ca.repository_id "
+            "JOIN claims cb ON cb.id = ag.claim_b_id JOIN repositories rb ON rb.id = cb.repository_id "
+            "WHERE ag.verdict = 'contradicts' AND (ag.claim_a_id = ANY(%s) OR ag.claim_b_id = ANY(%s)) "
+            "AND ra.visibility = 'public' AND rb.visibility = 'public'", (ids, ids)):
+        if a in out:
+            out[a]["contradicted_by"].append(b)
+        if b in out:
+            out[b]["contradicted_by"].append(a)
+    return out
+
+
+def _citations_map(conn: psycopg.Connection, shown: list[Candidate]) -> dict[str, dict]:
+    """Site CitationPanel expects report.citations[id] = {text, src, verdict, url}, plus where the claim
+    stands in review, so a reader can see what an answer rests on."""
+    trust = _trust(conn, [c.id for c in shown])
     out: dict[str, dict] = {}
     for c in shown:
         effect = _claim_effect(c) or "uncertain"
+        t = trust.get(c.id, {})
         out[str(c.id)] = {
             "text": c.text,
             "src": c.title or c.source_id,
             "verdict": effect,
             "url": _pubmed_url(c.source_id),
+            "claim_id": c.id,
+            "repository": c.repository,
+            "state": c.state,
+            "version": t.get("version"),
+            "open_challenges": t.get("open_challenges", 0),
+            "contradicted_by": sorted(t.get("contradicted_by", [])),
         }
     return out
+
+
+def _trust_summary(citations: dict[str, dict], cited: set[str]) -> dict:
+    """How the claims the answer actually cites stand in review."""
+    used = [citations[i] for i in cited if i in citations]
+    by_state: dict[str, int] = {}
+    for c in used:
+        by_state[c["state"]] = by_state.get(c["state"], 0) + 1
+    return {"claims": len(used), "by_state": by_state,
+            "challenged": sum(1 for c in used if c["open_challenges"]),
+            "contradicted": sum(1 for c in used if c["contradicted_by"])}
 
 
 def answer(conn: psycopg.Connection, llm: LLM, question: str,
@@ -180,7 +223,8 @@ def answer(conn: psycopg.Connection, llm: LLM, question: str,
     kept = rep.kept
     refused = len(rep.sentences) - len(kept)
     groups = _groups(conn, rep.shown) if rep.shown else []
-    citations = _citations_map(rep.shown)
+    citations = _citations_map(conn, rep.shown)
+    trust = _trust_summary(citations, {str(i) for s in kept for i in s.cites})
 
     if rep.bad_reply and not kept:
         headline = "No matching claims in the ledger yet."
@@ -207,6 +251,7 @@ def answer(conn: psycopg.Connection, llm: LLM, question: str,
             for s in kept
         ],
         "citations": citations,
+        "trust": trust,
         "refused": refused,
         "groups": groups,
         "faithfulness": rep.faithfulness,

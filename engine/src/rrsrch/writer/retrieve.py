@@ -28,6 +28,16 @@ class Candidate:
     full_text: bool
     context: dict
     score: float = 0.0
+    state: str = "structurally_valid"
+    repository: str = ""
+
+
+# What a public answer may rest on: claims in public repositories that review hasn't rejected, retracted or
+# replaced. Contested claims stay in, so an answer can say the evidence is disputed, and are marked as such.
+USABLE_STATES = ("structurally_valid", "under_review", "supported", "contested", "stale")
+# Review moves ranking a little, never past relevance: a supported claim beats an equally relevant
+# unreviewed one; a stale one, waiting for re-checking, gives way.
+STATE_BONUS = {"supported": 1.0, "stale": -0.5}
 
 
 STOP = frozenset("""a an and are as at be between by compared control did do does for from has have how in into is
@@ -72,15 +82,16 @@ def candidates(conn: psycopg.Connection, question: str, scope: dict | None = Non
     terms = question_terms(question, scope)
     rows = conn.execute(
         "SELECT c.id, c.text, c.fields, c.scope, s.id, s.title, s.pub_year, s.has_full_text, "
-        "  (SELECT text FROM documents a WHERE a.source_id = s.id AND a.part = 'abstract') "
+        "  (SELECT text FROM documents a WHERE a.source_id = s.id AND a.part = 'abstract'), c.state, r.slug "
         "FROM claims c JOIN documents d ON d.id = c.document_id JOIN sources s ON s.id = d.source_id "
-        "ORDER BY c.id").fetchall()
+        "JOIN repositories r ON r.id = c.repository_id "
+        "WHERE r.visibility = 'public' AND c.state = ANY(%s) ORDER BY c.id", (list(USABLE_STATES),)).fetchall()
     contexts: dict[str, dict] = {}
     scored: list[Candidate] = []
-    for cid, text, flds, cscope, sid, title, year, full, abstract in rows:
+    for cid, text, flds, cscope, sid, title, year, full, abstract, state, repo in rows:
         if sid not in contexts:
             contexts[sid] = gate.source_context(title, abstract or "")
-        c = Candidate(cid, text, sid, title, year, full, contexts[sid])
+        c = Candidate(cid, text, sid, title, year, full, contexts[sid], state=state, repository=repo)
         if not _in_scope(c, cscope or {}):
             continue
         ents = (flds or {}).get("entities", {})
@@ -112,7 +123,7 @@ def candidates(conn: psycopg.Connection, question: str, scope: dict | None = Non
         # a claim must share what the question is about (outcome, comparator, follow-up);
         # cell type alone matches nearly every claim, since claims inherit their study's
         asked = {g for g in ("outcome", "comparator", "months") if terms[g]} or {"words", "cell_type"}
-        c.score = score
+        c.score = score + STATE_BONUS.get(state, 0.0)
         if topical & asked:
             scored.append(c)
     scored.sort(key=lambda c: (-c.score, c.id))
