@@ -179,6 +179,41 @@ app.get('/api/engine/health', async (_req, res) => {
   }
 });
 
+// Engine API (knowledge, agents, review, collaboration) for the site's Agents page. The browser sends its
+// own engine API key; the engine decides every permission, this only forwards. It also gives MCP clients a
+// stable base URL (https://rrsrch.com/api/engine) while the engine's own address changes.
+const ENGINE_FORWARD_HEADERS = ['authorization', 'idempotency-key'];
+const ENGINE_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+app.all('/api/engine/v1/*', async (req, res) => {
+  if (!ENGINE_URL) return res.status(503).json({ ok: false, error: 'engine offline' });
+  if (!ENGINE_METHODS.has(req.method)) return res.status(405).json({ ok: false, error: 'method not allowed' });
+  const path = req.originalUrl.replace(/^\/api\/engine/, '');
+  let decoded;
+  try { decoded = decodeURIComponent(path.split('?')[0]); } catch { decoded = '..'; }
+  if (!path.startsWith('/v1/') || decoded.includes('..') || decoded.includes('\\')) {
+    return res.status(400).json({ ok: false, error: 'bad engine path' });
+  }
+  const headers = {};
+  for (const h of ENGINE_FORWARD_HEADERS) if (req.headers[h]) headers[h] = req.headers[h];
+  const hasBody = req.method !== 'GET' && req.method !== 'DELETE';
+  if (hasBody) headers['content-type'] = 'application/json';
+  try {
+    const upstream = await fetch(`${ENGINE_URL}${path}`, {
+      method: req.method,
+      headers,
+      body: hasBody ? JSON.stringify(req.body ?? {}) : undefined,
+      signal: AbortSignal.timeout(60000),
+    });
+    const text = await upstream.text();
+    res.status(upstream.status);
+    res.type(upstream.headers.get('content-type') || 'application/json');
+    return res.send(text);
+  } catch (err) {
+    console.error('engine proxy failed', err);
+    return res.status(502).json({ ok: false, error: 'could not reach evidence engine' });
+  }
+});
+
 // Open-web search (Comet-like layer). Prefer Brave, then Serper. Not the evidence ledger.
 function hostnameOf(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return null; }

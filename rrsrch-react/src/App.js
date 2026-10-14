@@ -4,6 +4,7 @@ import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { MessageCircle, X, Twitter, Database, Terminal as TerminalIcon } from 'lucide-react';
 import SearchExperience from './SearchExperience';
+import Dashboard from './Dashboard';
 
 // Theme Configuration
 const theme = {
@@ -999,10 +1000,10 @@ function App() {
   const scrollRef = useRef(0);
   const scrollContainerRef = useRef(null);
 
-  // hash routing — #/account; anything else is home
+  // hash routing — #/agents (the dashboard), #/account (its account tab, kept for pairing links); else home
   const routeFromHash = () => {
     const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
-    return h === 'account' ? 'account' : 'home';
+    return h === 'account' || h === 'agents' ? h : 'home';
   };
   const [route, setRoute] = useState(routeFromHash());
   const contentRef = useRef(null);
@@ -1123,28 +1124,36 @@ function App() {
           scrollBehavior: 'smooth'
         }}
       >
-        {route !== 'account' && (
-          <SearchExperience isMobile={isMobile} scrollContainerRef={scrollContainerRef} />
+        {route === 'home' && (
+          <SearchExperience isMobile={isMobile} scrollContainerRef={scrollContainerRef}
+            onAgents={() => navigate('agents')} />
         )}
 
-        {route === 'account' && (
+        {route !== 'home' && (
           <div style={{
             position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10,
             display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '14px',
             padding: isMobile ? '12px 16px' : '24px 56px',
+            background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
           }}>
             <button onClick={() => navigate('home')} style={{
               background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer',
               fontFamily: theme.fonts.main, fontWeight: 800, fontSize: '16px',
               letterSpacing: '-0.05em', padding: '8px 6px'
             }}>RRSRCH</button>
+            <button onClick={() => navigate('home')} style={{
+              background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px',
+              color: '#aaa', cursor: 'pointer', fontFamily: theme.fonts.main, fontSize: '12px',
+              textTransform: 'uppercase', letterSpacing: '1px', padding: isMobile ? '10px 14px' : '10px 20px',
+            }}>Search</button>
             <div style={{ marginLeft: 'auto' }}>
               <NavButton onClick={() => window.open('https://x.com/rrsrch', '_blank')} icon={Twitter} label="X" />
             </div>
           </div>
         )}
 
-        {route === 'account' && (
+        {route !== 'home' && (
           <>
             <div style={{ height: isMobile ? '72px' : '96px' }} />
             <div ref={contentRef} style={{
@@ -1161,7 +1170,11 @@ function App() {
               border: '1px solid rgba(255, 255, 255, 0.05)',
               boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
             }}>
-              <AccountPage isMobile={isMobile} />
+              <Dashboard
+                isMobile={isMobile}
+                initialTab={route === 'account' ? 'account' : null}
+                accountPanel={<AccountPage isMobile={isMobile} />}
+              />
               <SiteFooter isMobile={isMobile} onDisclaimer={() => setActiveModal('disclaimer')} />
             </div>
             <div style={{ height: '100px' }} />
