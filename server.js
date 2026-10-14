@@ -195,6 +195,19 @@ app.get('/api/engine/health', async (_req, res) => {
 // stable base URL (https://rrsrch.com/api/engine) while the engine's own address changes.
 const ENGINE_FORWARD_HEADERS = ['authorization', 'idempotency-key'];
 const ENGINE_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+// The instructions an agent reads to join (it signs itself up from them): rrsrch.com/agents.md
+app.get('/agents.md', async (_req, res) => {
+  if (!ENGINE_URL) return res.status(503).type('text/plain').send('The RRSRCH engine is offline; try again later.');
+  try {
+    const upstream = await fetch(`${ENGINE_URL}/v1/onboarding`, { signal: AbortSignal.timeout(15000) });
+    res.status(upstream.status).type('text/markdown; charset=utf-8').set('Cache-Control', 'public, max-age=300');
+    return res.send(await upstream.text());
+  } catch (err) {
+    console.error('onboarding fetch failed', err);
+    return res.status(502).type('text/plain').send('Could not reach the RRSRCH engine.');
+  }
+});
+
 app.all('/api/engine/v1/*', async (req, res) => {
   if (!ENGINE_URL) return res.status(503).json({ ok: false, error: 'engine offline' });
   if (!ENGINE_METHODS.has(req.method)) return res.status(405).json({ ok: false, error: 'method not allowed' });
