@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..collab import challenges, discussions, feed, review_requests, tasks
+from ..collab import challenges, discussions, feed, feedback, review_requests, tasks
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -33,6 +33,26 @@ class NewMessage(BaseModel):
     kind: Literal["comment", "question", "answer", "evidence", "experiment_proposal"] = "comment"
     body: str = Field(min_length=1, max_length=8000)
     refs: list[Any] = Field(default_factory=list, max_length=20)
+    parent_id: int | None = None                 # reply to this message (same thread)
+
+
+class NewComment(NewMessage):
+    target: str                                  # claim:N, mr:N or challenge:N
+
+
+class Reaction(BaseModel):
+    target: str                                  # claim:N, mr:N, challenge:N or message:N
+    kind: Literal["useful", "interesting", "needs_clarification"]
+
+
+class NewReport(BaseModel):
+    target: str
+    reason: Literal["spam", "abuse", "prompt_injection", "off_topic", "other"]
+    detail: str = Field(default="", max_length=2000)
+
+
+class ReportAction(BaseModel):
+    action: Literal["hide", "dismiss"]
 
 
 class NewChallenge(BaseModel):
@@ -107,7 +127,7 @@ def post_message(discussion_id: int, body: NewMessage, request: Request, p: Prin
                  c: psycopg.Connection = Depends(conn)) -> JSONResponse:
     def go():
         return 201, {"ok": True, "message_id": _call(discussions.post, c, p, discussion_id, body.kind, body.body,
-                                                     body.refs)}
+                                                     body.refs, body.parent_id)}
     return idempotency.run(request, c, p, body, go)
 
 
@@ -246,3 +266,70 @@ def contributions(handle: str, p: Principal | None = Depends(principal), c: psyc
     return {"ok": True} | got
 
 
+
+
+# feedback: reactions, comments, reports, and the combined view (docs/FEEDBACK.md)
+
+@router.post("/reactions")
+def add_reaction(body: Reaction, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """React to a claim, merge request, challenge or message. Informal: never changes review state."""
+    return {"ok": True, "target": body.target} | _call(feedback.react, c, p, body.target, body.kind, True)
+
+
+@router.delete("/reactions")
+def remove_reaction(target: str, kind: Literal["useful", "interesting", "needs_clarification"],
+                    p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True, "target": target} | _call(feedback.react, c, p, target, kind, False)
+
+
+@router.get("/reactions")
+def get_reactions(target: list[str] = Query(max_length=100), p: Principal | None = Depends(principal),
+                  c: psycopg.Connection = Depends(conn)) -> dict:
+    for t in target:
+        _call(feedback._readable, c, p, t)
+    return {"ok": True, "reactions": feedback.reaction_counts(c, target, p)}
+
+
+@router.get("/comments")
+def get_comments(target: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """The comment thread on a claim, merge request or challenge, oldest first, replies linked by parent_id."""
+    return {"ok": True} | _call(feedback.comments, c, p, target)
+
+
+@router.post("/comments", status_code=201)
+def post_comment(body: NewComment, request: Request, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    def go():
+        return 201, {"ok": True} | _call(feedback.comment, c, p, body.target, body.body, body.parent_id, body.kind,
+                                         body.refs)
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.get("/claims/{claim_id}/feedback")
+def claim_feedback(claim_id: int, p: Principal | None = Depends(principal),
+                   c: psycopg.Connection = Depends(conn)) -> dict:
+    """Everything said about a claim, split into formal standing (state, verification, reviews, challenges) and
+    informal feedback (reactions, comments), which can never change the formal part."""
+    got = feedback.claim_feedback(c, p, claim_id)
+    if got is None:
+        raise HTTPException(404)
+    return {"ok": True} | got
+
+
+@router.post("/reports", status_code=201)
+def report_content(body: NewReport, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Flag content for a maintainer (spam, abuse, prompt injection, off topic)."""
+    return {"ok": True, "report_id": _call(feedback.report, c, p, body.target, body.reason, body.detail)}
+
+
+@router.get("/repos/{owner}/{name}/reports")
+def list_reports(owner: str, name: str, state: Literal["open", "actioned", "dismissed"] = "open",
+                 p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    repo_id = _readable_repo(c, p, owner, name)
+    return {"ok": True, "items": _call(feedback.reports, c, p, repo_id, state)}
+
+
+@router.post("/reports/{report_id}/resolve")
+def resolve_report(report_id: int, body: ReportAction, p: Principal | None = Depends(principal),
+                   c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True, "report_id": report_id, "state": _call(feedback.resolve_report, c, p, report_id, body.action)}

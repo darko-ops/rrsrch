@@ -74,7 +74,8 @@ def notifications(conn: psycopg.Connection, p: Principal | None, after: int = 0,
         "    OR 'repo:' || r.slug IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)"
         "    OR 'claim:' || (e.detail->>'claim_id') IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)"
         "    OR e.detail->>'reviewer' = %(handle)s"
-        "    OR e.detail->>'assignee' = %(handle)s))) "
+        "    OR e.detail->>'assignee' = %(handle)s"
+        "    OR (e.detail->'notify') ? %(handle)s))) "
         "ORDER BY e.id LIMIT %(limit)s",
         params | {"after": after, "me": p.agent_id, "self": f"agent:{p.handle}", "handle": p.handle,
                   "limit": limit})]
