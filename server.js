@@ -1767,6 +1767,39 @@ async function requireUser(req, res) {
   return user;
 }
 
+// Password rules for email sign-ups. The sign-up form shows the same rules as a checklist
+// (rrsrch-react/src/passwordRules.js); keep the two in step.
+const PASSWORD_MIN = 12;
+const PASSWORD_MAX_BYTES = 72;            // bcrypt ignores everything after 72 bytes
+const COMMON_PASSWORDS = new Set([
+  'password', 'passw0rd', 'password1', 'password123', 'p@ssw0rd', 'qwerty', 'qwertyuiop', 'qwerty123',
+  'letmein', 'welcome', 'welcome1', 'iloveyou', 'admin', 'administrator', 'monkey', 'dragon', 'football',
+  'baseball', 'sunshine', 'princess', 'trustno1', 'changeme', 'rrsrch', 'research', '123456789012',
+  '1234567890', 'abc123', '111111111111', 'qazwsxedc', '1q2w3e4r', 'zaq12wsx', 'superman', 'starwars',
+]);
+
+function passwordProblems(password, { name = '', email = '' } = {}) {
+  const out = [];
+  const lower = password.toLowerCase();
+  if (password.length < PASSWORD_MIN) out.push(`must be at least ${PASSWORD_MIN} characters`);
+  if (Buffer.byteLength(password, 'utf8') > PASSWORD_MAX_BYTES) out.push(`must be at most ${PASSWORD_MAX_BYTES} characters`);
+  const kinds = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((re) => re.test(password)).length;
+  if (kinds < 3) out.push('must mix at least three of: lowercase, uppercase, digits, symbols');
+  const stripped = lower.replace(/[^a-z0-9]/g, '');
+  if (COMMON_PASSWORDS.has(lower) || COMMON_PASSWORDS.has(stripped)
+      || [...COMMON_PASSWORDS].some((w) => w.length >= 6 && stripped.replace(/[0-9]+$/, '') === w)) {
+    out.push('is too common');
+  }
+  if (/^(.)\1+$/.test(password) || 'abcdefghijklmnopqrstuvwxyz0123456789'.includes(lower)
+      || '01234567890'.includes(lower) || 'qwertyuiopasdfghjklzxcvbnm'.includes(lower)) {
+    out.push('is too predictable');
+  }
+  const personal = [String(email).split('@')[0], ...String(name).split(/\s+/)]
+    .map((x) => x.toLowerCase()).filter((x) => x.length >= 4);
+  if (personal.some((x) => lower.includes(x))) out.push('must not contain your name or email');
+  return out;
+}
+
 app.post('/api/account/signup', async (req, res) => {
   try {
     const { name, email, password } = req.body || {};
@@ -1774,8 +1807,9 @@ app.post('/api/account/signup', async (req, res) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       return res.status(400).json({ error: 'Enter a valid email address.' });
     }
-    if (!password || String(password).length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    const problems = passwordProblems(String(password || ''), { name, email: cleanEmail });
+    if (problems.length) {
+      return res.status(400).json({ error: `Password ${problems.join('; ')}.`, problems });
     }
     const users = await readUsers();
     if (users.some((u) => u.email === cleanEmail)) {
