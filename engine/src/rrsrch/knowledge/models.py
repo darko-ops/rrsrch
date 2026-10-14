@@ -136,16 +136,22 @@ class ClaimContent(_Model):
     """What a claim says and rests on. This, and only this, is hashed into a revision."""
     repository: str = Field(pattern=REPO_SLUG)
     type: ClaimType
-    proposition: str = Field(min_length=1)
+    proposition: str = Field(min_length=1, max_length=2000)
     scope: dict[str, Any] = Field(default_factory=dict)
     fields: dict[str, Any] = Field(default_factory=dict)
-    evidence: tuple[tuple[Relation, Span], ...] = Field(min_length=1)
+    evidence: tuple[tuple[Relation, Span], ...] = Field(min_length=1, max_length=50)
+    derived_from: tuple[int, ...] = Field(default=(), max_length=20)   # claims (same repository) this builds on
     parent_hash: str | None = Field(default=None, pattern=SHA256)
 
     def canonical(self) -> dict[str, Any]:
         d = self.model_dump(mode="json")
         # evidence order is not content: sort so the same set hashes the same
         d["evidence"] = sorted(d["evidence"], key=canonical.dumps)
+        # added after the first revisions were hashed: left out when empty so their hashes still hold
+        if d["derived_from"]:
+            d["derived_from"] = sorted(set(d["derived_from"]))
+        else:
+            del d["derived_from"]
         return d
 
     def content_hash(self) -> str:

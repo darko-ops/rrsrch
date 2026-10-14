@@ -5,7 +5,7 @@ import uuid
 import pytest
 
 from rrsrch.reader import extract, spans
-from rrsrch.reader.llm import parse_json_object
+from rrsrch.reader.llm import LLM, parse_json_object
 
 
 def test_quotes_are_found_through_typography_only():
@@ -15,6 +15,19 @@ def test_quotes_are_found_through_typography_only():
     assert spans.locate("VAS pain fell from 6.1 to 3.3 - a", text) is None          # a changed digit
     assert spans.locate("vas pain fell from 6.1 to 3.2", text) is None               # changed case
     assert spans.locate("VAS pain", text) is None                                    # too short to pin
+
+
+def test_model_timeout_comes_from_the_environment(monkeypatch):
+    monkeypatch.setenv("RRSRCH_LLM_URL", "http://model/v1/")
+    monkeypatch.setenv("RRSRCH_READER_MODEL", "m")
+    monkeypatch.delenv("RRSRCH_LLM_TIMEOUT", raising=False)
+    assert LLM.from_env() == LLM("http://model/v1", "m", 300.0)
+    monkeypatch.setenv("RRSRCH_LLM_TIMEOUT", " 900 ")
+    assert LLM.from_env().timeout == 900.0
+    for bad in ("0", "-5", "soon", "inf", "nan"):
+        monkeypatch.setenv("RRSRCH_LLM_TIMEOUT", bad)
+        with pytest.raises(RuntimeError, match="RRSRCH_LLM_TIMEOUT"):
+            LLM.from_env()
 
 
 def test_quotes_must_be_inside_the_chunk_that_was_read():
