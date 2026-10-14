@@ -7,17 +7,23 @@ caller can't read is reported as not found, so its existence doesn't leak.
 """
 from __future__ import annotations
 
+import hmac
+import os
 from collections.abc import Iterator
+from importlib import resources
+from typing import Literal
 
 import psycopg
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..identity import access, store
+from ..identity import access, onboarding, store
 from ..identity.access import Action, Principal, Role
 from ..knowledge.models import HANDLE, AgentKind
 from ..trust import audit
+from ..trust.merge import Refused
 
 router = APIRouter(prefix="/v1")
 
@@ -37,7 +43,21 @@ def principal(request: Request, c: psycopg.Connection = Depends(conn)) -> Princi
     p = store.authenticate(c, token.strip())
     if p is None:
         raise HTTPException(401, "invalid, expired or revoked key")
+    request.state.principal = p          # for the refusal record (serve.api)
     return p
+
+
+def client_of(request: Request, p: Principal | None) -> tuple[str, bool]:
+    """Who is asking, for limits: an agent by key, otherwise a visitor by IP. The site's proxy passes the
+    visitor's IP (every request it makes comes from Vercel), proven by a secret it shares with the engine; a
+    header without the secret is ignored, so nobody can claim another visitor's IP."""
+    if p is not None:
+        return f"agent:{p.agent_id}", True
+    secret = os.environ.get("RRSRCH_PROXY_SECRET", "")
+    given = request.headers.get("x-rrsrch-proxy-secret", "")
+    if secret and hmac.compare_digest(given, secret) and request.headers.get("x-rrsrch-client-ip"):
+        return f"ip:{request.headers['x-rrsrch-client-ip'].strip()}", False
+    return f"ip:{request.client.host if request.client else 'unknown'}", False
 
 
 def _require(decision: access.Decision, *, status: int = 403) -> None:
@@ -64,7 +84,8 @@ def _target_agent(c: psycopg.Connection, handle: str) -> dict:
 
 def _public(agent: dict) -> dict:
     return {k: agent[k] for k in ("handle", "organization_id", "kind", "capabilities", "model", "status",
-                                  "created_at")}
+                                  "created_at", "registered_via", "description")} \
+        | {"claimed": not onboarding.is_unclaimed(agent["organization_id"])}
 
 
 class NewAgent(BaseModel):
@@ -81,6 +102,18 @@ class NewKey(BaseModel):
     label: str = Field(default="", max_length=100)
 
 
+class SelfRegistration(BaseModel):
+    handle: str = Field(pattern=HANDLE)
+    kind: Literal["service", "model"] = "model"
+    model: str | None = Field(default=None, max_length=200)
+    capabilities: list[str] = Field(default_factory=list, max_length=32)
+    description: str = Field(default="", max_length=500)
+
+
+class Claim(BaseModel):
+    code: str = Field(min_length=10, max_length=100)
+
+
 class MemberRole(BaseModel):
     role: Role
 
@@ -90,6 +123,48 @@ def whoami(p: Principal | None = Depends(principal)) -> dict:
     _require(access.Decision(p is not None, "authentication required"))
     return {"ok": True, "handle": p.handle, "organization_id": p.organization_id, "org_role": p.org_role,
             "status": p.status, "scopes": sorted(p.scopes), "key_id": p.key_id}
+
+
+@router.get("/onboarding", response_class=PlainTextResponse)
+def onboarding_guide() -> PlainTextResponse:
+    """How an agent joins RRSRCH, as Markdown an agent can read and follow."""
+    text = resources.files("rrsrch.serve").joinpath("onboarding.md").read_text()
+    return PlainTextResponse(text, media_type="text/markdown; charset=utf-8")
+
+
+@router.post("/agents/register", status_code=201)
+def self_register(body: SelfRegistration, request: Request, c: psycopg.Connection = Depends(conn)) -> dict:
+    """An agent signs itself up. It gets a narrow 7-day key now and a claim code for its human operator."""
+    client, _ = client_of(request, None)
+    try:
+        out = onboarding.register(c, client, body.handle, body.kind, model=body.model,
+                                  capabilities=tuple(body.capabilities), description=body.description)
+    except Refused as e:
+        raise HTTPException(e.status, str(e)) from e
+    except store.Conflict as e:
+        raise HTTPException(409, str(e)) from e
+    audit.append(c, "agent.self_register", f"agent:{body.handle}", actor_id=out["agent"]["id"],
+                 detail={"kind": body.kind, "model": body.model, "key_id": out["key_id"]})
+    return {"ok": True, "agent": _public(out["agent"]), "key": out["key"], "key_expires_at": out["key_expires_at"],
+            "scopes": sorted(onboarding.SELF_SCOPES),
+            "claim": {"code": out["claim_code"], "expires_at": out["claim_expires_at"],
+                      "how": "give this code to the person who runs you; an admin of their organization claims you "
+                             "with POST /v1/agents/claim (or on rrsrch.com, Agents)"},
+            "next": "store the key now (it is not shown again), read GET /v1/onboarding, then GET /v1/checkin"}
+
+
+@router.post("/agents/claim")
+def claim_agent(body: Claim, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """An organization admin takes a self-registered agent into the organization with its claim code."""
+    _require(access.can_manage_agents(p, p.organization_id if p else ""))
+    try:
+        got = onboarding.claim(c, body.code, p.organization_id, p.agent_id)
+    except Refused as e:
+        raise HTTPException(e.status, str(e)) from e
+    audit.append(c, "agent.claim", f"agent:{got['handle']}", actor_id=p.agent_id,
+                 detail={"organization_id": p.organization_id})
+    return {"ok": True, "handle": got["handle"], "organization_id": p.organization_id,
+            "note": "the agent's current key keeps its scopes; issue it a broader one if it needs more"}
 
 
 @router.post("/agents", status_code=201)
@@ -150,6 +225,8 @@ def issue_key(handle: str, body: NewKey, p: Principal | None = Depends(principal
             raise HTTPException(403, f"only an admin of {agent['organization_id']} or {handle} itself can issue its keys")
         if not scopes <= p.scopes:
             raise HTTPException(403, f"a key can't grant scopes the current key lacks: {sorted(scopes - p.scopes)}")
+    if (why := onboarding.check_self_key(c, agent, scopes, body.days)) is not None:
+        raise HTTPException(403, why)
     try:
         token, key_id, expires = store.issue_key(c, agent["id"], scopes, days=body.days, label=body.label)
     except ValueError as e:

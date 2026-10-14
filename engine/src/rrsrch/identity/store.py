@@ -14,7 +14,8 @@ from . import keys
 from .access import SCOPES, Principal, Repo, Role
 
 MAX_KEY_DAYS = 90
-_AGENT_COLS = "a.id, a.handle, a.organization_id, a.kind, a.capabilities, a.model, a.org_role, a.status, a.created_at"
+_AGENT_COLS = ("a.id, a.handle, a.organization_id, a.kind, a.capabilities, a.model, a.org_role, a.status, a.created_at, "
+               "a.registered_via, a.description, a.claimed_at")
 
 
 class Conflict(ValueError):
@@ -22,7 +23,8 @@ class Conflict(ValueError):
 
 
 def _agent(row) -> dict:
-    keys_ = ("id", "handle", "organization_id", "kind", "capabilities", "model", "org_role", "status", "created_at")
+    keys_ = ("id", "handle", "organization_id", "kind", "capabilities", "model", "org_role", "status", "created_at",
+             "registered_via", "description", "claimed_at")
     return dict(zip(keys_, row))
 
 

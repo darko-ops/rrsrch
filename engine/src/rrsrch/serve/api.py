@@ -13,8 +13,8 @@ block other requests while it does.
 """
 from __future__ import annotations
 
-import hmac
 import os
+import re
 from collections.abc import Callable
 
 import uvicorn
@@ -23,6 +23,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException
 
@@ -32,9 +33,12 @@ from ..reader.llm import LLM
 from . import answer as answer_mod
 from . import jobs as jobs_mod
 from . import collab_routes, identity_routes, knowledge_routes, trust_routes
+from .identity_routes import client_of
 
 MAX_QUESTION = 800
 MAX_BODY = 256 * 1024
+WRITES = ("POST", "PUT", "PATCH", "DELETE")
+_EVIDENCE = re.compile(r"^evidence|passage|unknown source|span", re.I)
 
 
 class AnswerRequest(BaseModel):
@@ -45,17 +49,25 @@ def _error(code: int, message: str, headers: dict | None = None) -> JSONResponse
     return JSONResponse({"ok": False, "error": message}, status_code=code, headers=headers)
 
 
-def client_of(request: Request, p: Principal | None) -> tuple[str, bool]:
-    """Who is asking, for answer limits: an agent by key, otherwise a visitor by IP. The site's proxy passes the
-    visitor's IP (every request it makes comes from Vercel), proven by a secret it shares with the engine; a
-    header without the secret is ignored, so nobody can claim another visitor's IP."""
-    if p is not None:
-        return f"agent:{p.agent_id}", True
-    secret = os.environ.get("RRSRCH_PROXY_SECRET", "")
-    given = request.headers.get("x-rrsrch-proxy-secret", "")
-    if secret and hmac.compare_digest(given, secret) and request.headers.get("x-rrsrch-client-ip"):
-        return f"ip:{request.headers['x-rrsrch-client-ip'].strip()}", False
-    return f"ip:{request.client.host if request.client else 'unknown'}", False
+def refusal_category(status: int, reason: str) -> str:
+    if status == 429:
+        return "rate_limit"
+    if status in (401, 403):
+        return "permission"
+    if _EVIDENCE.search(reason):
+        return "evidence"
+    return "conflict" if status == 409 else "invalid"
+
+
+def _log_refusal(connect: Callable, agent_id: int, method: str, path: str, status: int, reason: str) -> None:
+    """Record a refused write in its own transaction: the request's own was rolled back."""
+    try:
+        with connect() as c:
+            c.execute("INSERT INTO refusals (agent_id, method, path, status, category, reason) "
+                      "VALUES (%s, %s, %s, %s, %s, %s)",
+                      (agent_id, method, path[:300], status, refusal_category(status, reason), reason[:500]))
+    except Exception:            # the record is for standing; never let it break the response
+        pass
 
 
 def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM.from_env,
@@ -84,19 +96,35 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
             return _error(413, f"request body over {MAX_BODY // 1024} KB")
         return await call_next(request)
 
+    @app.middleware("http")
+    async def record_refusals(request: Request, call_next):
+        """A write an agent attempted and the engine refused goes on the agent's record (rrsrch.collab.standing).
+        Not found is left out: it's what a private repository looks like from outside."""
+        response = await call_next(request)
+        p = getattr(request.state, "principal", None)
+        if p is not None and request.method in WRITES and 400 <= response.status_code < 500 \
+                and response.status_code != 404:
+            await run_in_threadpool(_log_refusal, app.state.connect, p.agent_id, request.method, request.url.path,
+                                    response.status_code, getattr(request.state, "error", ""))
+        return response
+
     @app.exception_handler(HTTPException)
-    def http_error(_req: Request, exc: HTTPException) -> JSONResponse:
-        return _error(exc.status_code, "not found" if exc.status_code == 404 else str(exc.detail).lower())
+    def http_error(req: Request, exc: HTTPException) -> JSONResponse:
+        message = "not found" if exc.status_code == 404 else str(exc.detail).lower()
+        req.state.error = message
+        return _error(exc.status_code, message)
 
     @app.exception_handler(RequestValidationError)
-    def bad_body(_req: Request, exc: RequestValidationError) -> JSONResponse:
+    def bad_body(req: Request, exc: RequestValidationError) -> JSONResponse:
         errors = exc.errors()
         if any(e.get("type") == "json_invalid" for e in errors):
-            return _error(400, "body must be JSON")
-        field = ".".join(str(x) for x in errors[0]["loc"] if x != "body")
-        if field == "question":
-            return _error(400, "question must be a string")
-        return _error(400, f"{field}: {errors[0]['msg']}" if field else errors[0]["msg"])
+            message = "body must be JSON"
+        else:
+            field = ".".join(str(x) for x in errors[0]["loc"] if x != "body")
+            message = ("question must be a string" if field == "question" else
+                       f"{field}: {errors[0]['msg']}" if field else errors[0]["msg"])
+        req.state.error = message
+        return _error(400, message)
 
     @app.get("/v1/health")
     @app.get("/health", include_in_schema=False)

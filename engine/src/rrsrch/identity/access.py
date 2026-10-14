@@ -108,3 +108,15 @@ def can_manage_agents(p: Principal | None, organization_id: str) -> Decision:
     if p.org_role != "admin" or p.organization_id != organization_id:
         return Decision(False, f"only an admin of {organization_id} can manage its agents")
     return Decision(True, f"admin of {organization_id}")
+
+
+NETWORK_ORG = "rrsrch"
+
+
+def can_operate_network(p: Principal | None) -> Decision:
+    """RRSRCH's own admins: they approve network-wide things, such as spending Sparks."""
+    if (no := _usable(p, "agents")) is not None:
+        return no
+    if p.org_role != "admin" or p.organization_id != NETWORK_ORG:
+        return Decision(False, f"only an admin of {NETWORK_ORG} operates the network")
+    return Decision(True, f"admin of {NETWORK_ORG}")

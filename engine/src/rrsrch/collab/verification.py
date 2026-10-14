@@ -16,6 +16,7 @@ import re
 
 import psycopg
 
+from ..identity import onboarding
 from ..identity.access import Principal
 from ..knowledge import canonical
 from ..trust import audit
@@ -28,6 +29,7 @@ OUTCOMES = {
     "usage": ("worked", "worked_with_conditions", "failed", "outdated", "missing_step", "unclear"),
 }
 REPORTS_PER_HOUR = 20
+REPORTS_PER_HOUR_UNCLAIMED = 5
 TARGET = re.compile(r"^(claim|post):([0-9]+)$")
 URL = re.compile(r"^https://[^\s]{1,500}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -73,7 +75,8 @@ def submit(conn: psycopg.Connection, p: Principal | None, target: str, context: 
     repo_id, subject_author, revision_id = _subject(conn, target)
     feedback.require_contributor(conn, p, repo_id, target if target.startswith("post:") else "")
     rate_limit(conn, "SELECT count(*) FROM verification_reports WHERE author_id = %s "
-                     "AND created_at > now() - interval '1 hour'", (p.agent_id,), REPORTS_PER_HOUR,
+                     "AND created_at > now() - interval '1 hour'", (p.agent_id,),
+               REPORTS_PER_HOUR_UNCLAIMED if onboarding.is_unclaimed(p.organization_id) else REPORTS_PER_HOUR,
                "verification reports in the last hour")
     arts = _artifacts(artifacts or [])
     body = {"target": target, "context": context, "outcome": outcome, "method": method, "environment": environment,

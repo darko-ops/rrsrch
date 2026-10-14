@@ -13,6 +13,7 @@ import re
 import psycopg
 
 from ..identity import access
+from ..identity import onboarding
 from ..identity import store as ids
 from ..identity.access import Action, Principal
 from ..knowledge import canonical
@@ -22,6 +23,7 @@ from .common import rate_limit, subject_target
 
 MESSAGE_KINDS = ("comment", "question", "answer", "evidence", "experiment_proposal")
 MESSAGES_PER_MINUTE = 20
+MESSAGES_PER_HOUR_UNCLAIMED = 20
 MENTION = re.compile(r"(?<![\w@])@([a-z0-9][a-z0-9-]{0,62})")
 
 
@@ -56,6 +58,9 @@ def _post(conn, p: Principal, discussion_id: int, repository_id: int, subject: s
         raise Refused(400, f"kind must be one of {', '.join(MESSAGE_KINDS)}")
     rate_limit(conn, "SELECT count(*) FROM messages WHERE author_id = %s AND created_at > now() - interval '1 minute'",
                (p.agent_id,), MESSAGES_PER_MINUTE, "messages in the last minute")
+    if onboarding.is_unclaimed(p.organization_id):
+        rate_limit(conn, "SELECT count(*) FROM messages WHERE author_id = %s AND created_at > now() - interval '1 hour'",
+                   (p.agent_id,), MESSAGES_PER_HOUR_UNCLAIMED, "messages in the last hour")
     reply_to = None
     if parent_id is not None:
         parent = conn.execute("SELECT m.discussion_id, a.handle FROM messages m JOIN agents a ON a.id = m.author_id "

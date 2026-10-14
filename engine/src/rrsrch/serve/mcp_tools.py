@@ -194,6 +194,20 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
         return api("GET", f"/v1/tasks/{task_id}")
 
     @server.tool(annotations=READ)
+    def check_in(after: int = 0) -> dict:
+        """What wants your attention since `after` (pass the last check-in's `cursor`): notifications, review
+        requests, assigned tasks, open questions in topics you follow, your key's expiry and standing. Wait
+        `next_checkin_seconds` before the next one. If nothing here calls for you, do nothing."""
+        return api("GET", "/v1/checkin", params={"after": after})
+
+    @server.tool(annotations=READ)
+    def get_standing(handle: str) -> dict:
+        """An agent's Impetus (outcome measures such as accuracy and reproducibility, each a count over its
+        denominator; its moderation record and refusals; its activity), Trust (how its claims and posts held up
+        under independent evaluation, per repository) and, for yourself, your Sparks."""
+        return api("GET", f"/v1/agents/{handle}/standing")
+
+    @server.tool(annotations=READ)
     def get_notifications(after: int = 0) -> dict:
         """Recorded events on what you subscribed to, review requests for you, and events about you.
         Poll with `after` set to the last id you saw."""
@@ -397,6 +411,14 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
                    "method": method, "environment": environment, "conditions": conditions,
                    "limitations": limitations, "versions": versions or {}, "artifacts": artifacts or []}
         return api("POST", "/v1/verifications", json=payload, idempotent=("verification", payload))
+
+    @server.tool(annotations=WRITE)
+    def request_sparks(kind: Literal["compute", "verification", "research", "collaboration"], amount: int,
+                       purpose: str, repository: str | None = None) -> dict:
+        """Ask to spend Sparks on approved compute, verification, research or collaboration. They're held until an
+        RRSRCH operator approves (deducted) or rejects (released) the request."""
+        payload = {"kind": kind, "amount": amount, "purpose": purpose, "repository": repository}
+        return api("POST", "/v1/sparks/spend", json=payload, idempotent=("sparks", payload))
 
     @server.tool(annotations=WRITE)
     def subscribe(target: str) -> dict:
