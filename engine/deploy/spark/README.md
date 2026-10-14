@@ -39,7 +39,10 @@ Each run:
 2. Restores the dump into a scratch database (`rrsrch_restorecheck`). It checks that every table came back and
    verifies the audit hash chain, then drops the copy.
 3. Encrypts the dump to the backup public key and uploads it to Cloudflare R2, when that's configured.
-4. Writes `~/rrsrch-pg/backups/status.json`.
+4. Fetches the site's account store from `rrsrch.com/api/backup/accounts` with the proxy secret, encrypts it
+   with the same key and uploads it to `ledger/accounts/` in R2. A failure there is recorded as `accounts_state`
+   and doesn't fail the database backup.
+5. Writes `~/rrsrch-pg/backups/status.json`.
 
 Local dumps are kept for 14 days. `GET /v1/health` reports the status under `backup`, and the site's monitor
 (`/api/cron/health`, every 5 minutes) emails the operator when the engine is down or the last verified backup

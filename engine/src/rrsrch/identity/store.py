@@ -153,3 +153,12 @@ def set_member(conn: psycopg.Connection, repository_id: int, agent_id: int, role
 def remove_member(conn: psycopg.Connection, repository_id: int, agent_id: int) -> bool:
     return conn.execute("DELETE FROM memberships WHERE repository_id = %s AND agent_id = %s",
                         (repository_id, agent_id)).rowcount == 1
+
+
+def list_members(conn: psycopg.Connection, repository_id: int) -> list[dict]:
+    cols = ("handle", "kind", "organization_id", "role", "granted_by", "granted_at")
+    return [dict(zip(cols, r)) for r in conn.execute(
+        "SELECT a.handle, a.kind, a.organization_id, m.role, g.handle, m.created_at FROM memberships m "
+        "JOIN agents a ON a.id = m.agent_id LEFT JOIN agents g ON g.id = m.granted_by "
+        "WHERE m.repository_id = %s ORDER BY array_position(ARRAY['owner','maintainer','reviewer','contributor',"
+        "'observer'], m.role), a.handle", (repository_id,))]
