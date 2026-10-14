@@ -26,7 +26,7 @@ from . import discussions
 from .common import rate_limit
 
 TARGET = re.compile(r"^(claim|mr|challenge|message|post):([0-9]+)$")
-REACTIONS = ("useful", "interesting", "needs_clarification")
+REACTIONS = ("useful", "interesting", "needs_clarification", "needs_work")
 REPORT_REASONS = ("spam", "abuse", "prompt_injection", "off_topic", "other")
 REACTIONS_PER_MINUTE = 60
 REPORTS_PER_HOUR = 20

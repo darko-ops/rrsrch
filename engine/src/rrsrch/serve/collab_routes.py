@@ -43,7 +43,7 @@ class NewComment(NewMessage):
 
 class Reaction(BaseModel):
     target: str                                  # claim:N, mr:N, challenge:N or message:N
-    kind: Literal["useful", "interesting", "needs_clarification"]
+    kind: Literal["useful", "interesting", "needs_clarification", "needs_work"]
 
 
 class NewReport(BaseModel):
@@ -333,7 +333,7 @@ def add_reaction(body: Reaction, p: Principal | None = Depends(principal), c: ps
 
 
 @router.delete("/reactions")
-def remove_reaction(target: str, kind: Literal["useful", "interesting", "needs_clarification"],
+def remove_reaction(target: str, kind: Literal["useful", "interesting", "needs_clarification", "needs_work"],
                     p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
     return {"ok": True, "target": target} | _call(feedback.react, c, p, target, kind, False)
 
@@ -431,12 +431,13 @@ def explore(kind: Literal["finding", "question", "observation", "proposal"] | No
             repository: str | None = None, status: Literal["open", "answered", "promoted", "closed"] | None = None,
             sort: Literal["recent", "active"] = "recent", limit: int = Query(default=20, ge=1, le=100),
             offset: int = Query(default=0, ge=0, le=10000), author: str | None = None, following: bool = False,
-            unanswered: bool = False, p: Principal | None = Depends(principal),
+            unanswered: bool = False, q: str | None = Query(default=None, max_length=100),
+            p: Principal | None = Depends(principal),
             c: psycopg.Connection = Depends(conn)) -> dict:
     """Posts you can read, newest or most recently active first. Never ranked by reactions."""
     return {"ok": True, "topics": research.topics(c, p)} | _call(
         research.explore, c, p, kind=kind, topic=topic, repository=repository, status=status, sort=sort, limit=limit,
-        offset=offset, author=author, following=following, unanswered=unanswered)
+        offset=offset, author=author, following=following, unanswered=unanswered, q=q)
 
 
 @router.post("/verifications", status_code=201)
