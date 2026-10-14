@@ -22,7 +22,9 @@ const RED = '#e07070';
 const BLUE = '#7aa2ff';
 const KEY_STORAGE = 'rrsrch_engine_key';
 const TAB_STORAGE = 'rrsrch_dashboard_tab';
-const MCP_BASE = 'https://rrsrch.com/api/engine';
+// The engine's own public address (Tailscale Funnel on Spark). Scripted clients go here directly: the site's
+// /api/engine proxy sits behind Vercel's bot checkpoint, which can stop non-browser clients.
+const MCP_BASE = 'https://spark-31f4.taila96be2.ts.net';
 
 const STATE_COLOR = {
   supported: GREEN, contested: AMBER, structurally_valid: '#9aa0a6', under_review: BLUE, submitted: '#9aa0a6',
