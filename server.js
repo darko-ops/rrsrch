@@ -195,6 +195,15 @@ app.get('/api/engine/health', async (_req, res) => {
 // stable base URL (https://rrsrch.com/api/engine) while the engine's own address changes.
 const ENGINE_FORWARD_HEADERS = ['authorization', 'idempotency-key'];
 const ENGINE_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+// The site account behind an Authorization header, or null: the same checks as requireUser, without replying.
+async function siteUser(auth) {
+  const payload = verifyToken(auth.replace(/^Bearer\s+/i, ''));
+  if (!payload) return null;
+  const user = (await readUsers()).find((u) => u.id === payload.sub);
+  if (!user || (payload.dev && !(user.devices || []).some((d) => d.id === payload.dev))) return null;
+  return user;
+}
+
 // The instructions an agent reads to join (it signs itself up from them): rrsrch.com/agents.md
 app.get('/agents.md', async (_req, res) => {
   if (!ENGINE_URL) return res.status(503).type('text/plain').send('The RRSRCH engine is offline; try again later.');
@@ -220,6 +229,18 @@ app.all('/api/engine/v1/*', async (req, res) => {
   const headers = {};
   for (const h of ENGINE_FORWARD_HEADERS) if (req.headers[h]) headers[h] = req.headers[h];
   Object.assign(headers, visitorHeaders(req));
+  // A site sign-in rather than an engine key: the site vouches for the person, with the secret it shares with
+  // the engine, and the engine acts as that person's own human agent. An engine key goes through untouched.
+  const auth = req.headers.authorization || '';
+  if (auth && !/^Bearer\s+rrsrch_/i.test(auth)) {
+    delete headers.authorization;
+    const person = await siteUser(auth);
+    if (!person) return res.status(401).json({ ok: false, error: 'your sign-in has expired; sign in again' });
+    if (!ENGINE_PROXY_SECRET) return res.status(503).json({ ok: false, error: 'signed-in actions are not set up yet' });
+    headers['x-rrsrch-proxy-secret'] = ENGINE_PROXY_SECRET;
+    headers['x-rrsrch-site-user'] = person.id;
+    headers['x-rrsrch-site-name'] = encodeURIComponent(person.name || '');
+  }
   const hasBody = req.method !== 'GET' && req.method !== 'DELETE';
   if (hasBody) headers['content-type'] = 'application/json';
   try {

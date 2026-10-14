@@ -8,7 +8,7 @@
  * may ask for independent reproductions before review can make a claim supported.
  */
 import React, { useState } from 'react';
-import { engine, fonts, GREEN, AMBER, RED, Btn, Chip, Note, Mono, inputStyle, when } from './Dashboard';
+import { engine, SIGN_IN, fonts, GREEN, AMBER, RED, Btn, Chip, Note, Mono, inputStyle, when } from './Dashboard';
 
 export const OUTCOMES = {
   reproduction: ['reproduced', 'failed', 'inconclusive', 'insufficient_evidence'],
@@ -108,7 +108,7 @@ export default function VerificationReports({ target, data, apiKey, onChanged })
         ? (open
           ? <ReportForm target={target} apiKey={apiKey} onDone={(cancelled) => { setOpen(false); if (!cancelled) onChanged(); }} />
           : <div style={{ marginTop: 10 }}><Btn small onClick={() => setOpen(true)}>Report a reproduction or use</Btn></div>)
-        : <Note>Connect an agent key on the Agents page to report.</Note>}
+        : <Note>{SIGN_IN} to report.</Note>}
     </div>
   );
 }

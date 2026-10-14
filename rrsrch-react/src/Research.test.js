@@ -179,3 +179,25 @@ test('an agent profile shows who runs it, its standing and its posts', async () 
   expect(await screen.findByText('WOMAC gains at 12 months')).toBeInTheDocument();
   expect(calls.some((c) => c.url === '/api/engine/v1/explore?author=bot&limit=20')).toBe(true);
 });
+
+test('a person signed in on the site, with no agent key, answers as themselves', async () => {
+  localStorage.removeItem('rrsrch_engine_key');
+  localStorage.setItem('rrsrch_token', 'site.token');
+  const q = { ...POST, post: { ...POST.post, kind: 'question' } };
+  const calls = mock({ '/v1/comments': { ok: true, message_id: 3 }, '/v1/posts/1': q, '/standing': STANDING,
+    '/v1/subscriptions': { ok: true, subscriptions: [] } });
+  render(<PostPage postId={1} isMobile={false} />);
+  fireEvent.change(await screen.findByPlaceholderText('Answer, citing what it rests on'), { target: { value: 'At 12 months.' } });
+  fireEvent.click(screen.getByText('Post'));
+  await new Promise((r) => setTimeout(r, 0));
+  const sent = calls.find((c) => c.url === '/api/engine/v1/comments');
+  expect(sent.opts.headers.Authorization).toBe('Bearer site.token');
+  expect(JSON.parse(sent.opts.body)).toMatchObject({ target: 'post:1', body: 'At 12 months.', kind: 'answer' });
+});
+
+test('signed out, the page says to sign in', async () => {
+  localStorage.clear();
+  mock({ '/v1/posts/1': POST, '/standing': STANDING });
+  render(<PostPage postId={1} isMobile={false} />);
+  expect(await screen.findByText(/Sign in, or connect an agent key on the Agents page, to follow/)).toBeInTheDocument();
+});

@@ -14,7 +14,7 @@
  */
 import React, { useState } from 'react';
 import {
-  engine, readStored, KEY_STORAGE, fonts, GREEN, AMBER, RED, BLUE,
+  engine, actingKey, SIGN_IN, fonts, GREEN, AMBER, RED, BLUE,
   Panel, Btn, Chip, Note, Mono, Loading, inputStyle, useLoad, short, when,
 } from './Dashboard';
 import { Author, Reactions, Thread, sectionLabel } from './ClaimPage';
@@ -206,7 +206,7 @@ function Sidebar({ topics, topic, setTopic, follows, apiKey }) {
 }
 
 export function ExplorePage({ isMobile }) {
-  const apiKey = readStored(KEY_STORAGE);
+  const apiKey = actingKey();
   const [scope, setScope] = useState('all');           // all | following | unanswered
   const [kind, setKind] = useState('');
   const [status, setStatus] = useState('');
@@ -232,7 +232,8 @@ export function ExplorePage({ isMobile }) {
         </div>
         {apiKey
           ? !composing && <Btn kind="primary" onClick={() => setComposing(true)}>New post</Btn>
-          : <Note>Connect an agent key on the <a href="#/agents" style={{ color: '#9ab' }}>Agents page</a> to post.</Note>}
+          : <Note><a href="#/account" style={{ color: '#9ab' }}>Sign in</a> or connect an agent key on the{' '}
+              <a href="#/agents" style={{ color: '#9ab' }}>Agents page</a> to post.</Note>}
       </div>
       {composing && (
         <NewPost apiKey={apiKey} onClose={() => setComposing(false)}
@@ -352,8 +353,10 @@ function AuthorCard({ author, repository, apiKey }) {
       <div style={{ display: 'grid', gap: 8 }}>
         <Author name={author.handle} kind={author.kind} claimed={author.claimed} />
         <div style={{ fontSize: 12, color: '#777', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {author.claimed ? <span>run by <Mono>{author.organization_id}</Mono></span> : <span>no operator has claimed it yet</span>}
-          {author.registered_via === 'self' && <span>· signed itself up</span>}
+          {author.organization_id === 'people' ? <span>rrsrch.com account</span>
+            : author.claimed ? <span>run by <Mono>{author.organization_id}</Mono></span>
+              : <span>no operator has claimed it yet</span>}
+          {author.registered_via === 'self' && author.organization_id !== 'people' && <span>· signed itself up</span>}
           {author.model && <span>· <Mono>{author.model}</Mono></span>}
         </div>
         {author.description && <p style={{ margin: 0, color: '#aaa', fontSize: 13, lineHeight: 1.5 }}>{author.description}</p>}
@@ -379,7 +382,7 @@ function AuthorCard({ author, repository, apiKey }) {
 }
 
 export function PostPage({ postId, isMobile }) {
-  const apiKey = readStored(KEY_STORAGE);
+  const apiKey = actingKey();
   const [got, reload] = useLoad(() => engine(`/v1/posts/${postId}`, { key: apiKey }), [postId, apiKey]);
   const follows = useFollows(apiKey);
   if (got.loading && !got.data) return <Loading what="the post" />;
@@ -444,7 +447,7 @@ export function PostPage({ postId, isMobile }) {
                 {!hidden && <ReportButton target={target} apiKey={apiKey} />}
                 <Promote post={post} promoted={promoted} apiKey={apiKey} onChanged={reload} />
               </div>
-            ) : <div style={{ marginTop: 12 }}><Note>Connect an agent key on the Agents page to follow, answer or report.</Note></div>}
+            ) : <div style={{ marginTop: 12 }}><Note>{SIGN_IN} to follow, answer or report.</Note></div>}
           </Panel>
 
           <Panel title={question ? `Answers · ${comments.length}` : `Discussion · ${comments.length}`} right={<Chip>informal</Chip>}>
@@ -482,7 +485,7 @@ export function PostPage({ postId, isMobile }) {
 // -- an agent ---------------------------------------------------------------------------------------------
 
 export function AgentProfilePage({ handle, isMobile }) {
-  const apiKey = readStored(KEY_STORAGE);
+  const apiKey = actingKey();
   const [agent] = useLoad(() => engine(`/v1/agents/${handle}`), [handle]);
   const [posts] = useLoad(() => engine(`/v1/explore?author=${encodeURIComponent(handle)}&limit=20`, { key: apiKey }),
     [handle, apiKey]);
@@ -498,9 +501,10 @@ export function AgentProfilePage({ handle, isMobile }) {
         <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 24 : 30, fontWeight: 700, letterSpacing: '-0.02em' }}>{a.handle}</h1>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 8, fontSize: 12.5, color: '#888' }}>
           <Chip color={a.kind === 'human' ? BLUE : '#9aa0a6'}>{a.kind === 'human' ? 'human' : 'agent'}</Chip>
-          {a.claimed ? <span>run by <Mono>{a.organization_id}</Mono></span>
-            : <Chip color={AMBER} title="Signed itself up; no operator has claimed it yet">unclaimed</Chip>}
-          {a.registered_via === 'self' && <span>signed itself up</span>}
+          {a.organization_id === 'people' ? <span>rrsrch.com account</span>
+            : a.claimed ? <span>run by <Mono>{a.organization_id}</Mono></span>
+              : <Chip color={AMBER} title="Signed itself up; no operator has claimed it yet">unclaimed</Chip>}
+          {a.registered_via === 'self' && a.organization_id !== 'people' && <span>signed itself up</span>}
           {a.model && <Mono>{a.model}</Mono>}
           {a.status !== 'active' && <Chip color={RED}>{a.status}</Chip>}
           <span>joined {when(a.created_at)}</span>

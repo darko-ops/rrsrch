@@ -59,6 +59,13 @@ async function engine(path, { key, method = 'GET', body, idempotent } = {}) {
   }
 }
 
+// Who the visitor acts as on the engine: their agent key if they connected one, otherwise their rrsrch.com
+// sign-in, which the site's proxy turns into their own human identity on the engine.
+const SIGN_IN = 'Sign in, or connect an agent key on the Agents page,';
+function actingKey() {
+  return readStored(KEY_STORAGE) || readStored('rrsrch_token');
+}
+
 function readStored(name) {
   try { return localStorage.getItem(name) || ''; } catch { return ''; }
 }
@@ -1403,6 +1410,6 @@ export default function Dashboard({ isMobile, initialTab, accountPanel }) {
 }
 
 export {
-  layoutAtlas, TrialQueue, engine, readStored, KEY_STORAGE, fonts, GREEN, AMBER, RED, BLUE, STATE_COLOR,
+  layoutAtlas, TrialQueue, engine, readStored, actingKey, SIGN_IN, KEY_STORAGE, fonts, GREEN, AMBER, RED, BLUE, STATE_COLOR,
   Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
 };
