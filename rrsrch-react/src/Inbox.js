@@ -43,11 +43,11 @@ function ReviewPreview({ item, apiKey, onDone }) {
     if (r.ok) onDone(); else setErr(r.error);
   };
   return (
-    <div style={{ display: 'grid', gap: 14 }}>
+    <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <blockquote style={{ margin: 0, borderLeft: `3px solid ${GREEN}`, padding: '6px 12px', color: '#ccc', fontSize: 13.5,
         lineHeight: 1.6 }}>
         {m.content?.proposition}
-        <div style={{ marginTop: 6, display: 'grid', gap: 2 }}>
+        <div style={{ marginTop: 6, display: 'grid', gap: 2, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           {(m.content?.evidence || []).map(([rel, span], i) => (
             <Mono key={i}>{rel} · {span.source_id} [{span.start}–{span.end}]</Mono>
           ))}
@@ -88,7 +88,7 @@ function MentionPreview({ item, apiKey, onDone }) {
     if (r.ok) { setBody(''); onDone(); } else setErr(r.error);
   };
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
+    <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ border: '1px solid #262626', borderRadius: 12, padding: '12px 14px', background: '#0d0d0d' }}>
         {thread.loading && <Loading what="the message" />}
         {quoted ? <>
@@ -117,7 +117,7 @@ function TaskPreview({ item, apiKey, onDone }) {
   if (task.loading) return <Loading what="task" />;
   if (!t) return <Note tone="error">{task.error || 'Task not found.'}</Note>;
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
+    <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ fontSize: 13.5, color: '#ccc' }}>Deliverable: {t.deliverable}</div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <Chip color={BLUE}>{t.state.replace(/_/g, ' ')}</Chip>

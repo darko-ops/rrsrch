@@ -100,7 +100,7 @@ export function GoogleSignIn({ onSignedIn, onError, link = false, divider = true
   }, [clientId, onSignedIn, onError, link, width]);
   if (!clientId) return null;
   return (
-    <div style={{ display: 'grid', gap: 14 }}>
+    <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       {divider && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#555', fontSize: 12 }}>
           <span style={{ flex: 1, borderTop: '1px solid #222' }} />or<span style={{ flex: 1, borderTop: '1px solid #222' }} />
@@ -152,7 +152,7 @@ function KeyConnect({ onKey, compact }) {
     onKey(key.trim(), r.data);
   };
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', gap: 8, ...(compact ? {} : { flexDirection: 'column' }) }}>
         <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="rrsrch_…"
           aria-label="agent key" autoComplete="off" spellCheck={false}
@@ -241,7 +241,7 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey }) {
           <GoogleSignIn onSignedIn={onGoogle} onError={setErr} width={isMobile ? 300 : 370} />
         </form>
         <div style={card}>
-          <div style={{ display: 'grid', gap: 4 }}>
+          <div style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}>
             <span style={{ color: '#fff', fontSize: 16, fontWeight: 700 }}>Connect an agent key</span>
             <span style={{ fontSize: 13, color: '#888', lineHeight: 1.55 }}>
               Act as an agent your organization runs. The key stays in this browser.</span>
@@ -276,9 +276,9 @@ function IdentityCard({ user, me, apiKey }) {
   if (s.data?.sparks) rows.push(['Sparks', String(s.data.sparks.available), '#fff']);
   const isHuman = !me || me.organization_id === 'people' || !readStored(KEY_STORAGE);
   return (
-    <div style={{ ...panelStyle, padding: 20, display: 'grid', gap: 14 }}>
+    <div style={{ ...panelStyle, padding: 20, display: 'grid', gap: 14, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <Avatar name={user.name} size={56} />
-      <div style={{ display: 'grid', gap: 4 }}>
+      <div style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}>
         <span style={{ color: '#fff', fontSize: 18, fontWeight: 700 }}>{user.name}</span>
         <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           {handle
@@ -369,9 +369,9 @@ function ProfileTab({ user, me, apiKey, onUserChange }) {
 function Row({ title, desc, children, danger, below }) {
   return (
     <div style={{ border: `1px solid ${danger ? 'rgba(224,112,112,0.3)' : '#262626'}`, borderRadius: 12,
-      padding: '14px 16px', display: 'grid', gap: 12 }}>
+      padding: '14px 16px', display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 200, display: 'grid', gap: 3 }}>
+        <div style={{ flex: 1, minWidth: 200, display: 'grid', gap: 3, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           <span style={{ color: danger ? RED : '#fff', fontSize: 13.5 }}>{title}</span>
           <span style={{ fontSize: 12, color: '#777' }}>{desc}</span>
         </div>
@@ -506,7 +506,7 @@ function OrganizationTab({ user }) {
     const o = org.data?.organization;
     return (
       <div style={{ display: 'grid', gap: 14, maxWidth: 620 }}>
-        <div style={{ ...panelStyle, padding: 18, display: 'grid', gap: 8 }}>
+        <div style={{ ...panelStyle, padding: 18, display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ color: '#fff', fontWeight: 700, fontSize: 16 }}>{o?.name || orgId}</span>
             <Mono>{orgId}</Mono>
@@ -533,17 +533,17 @@ function OrganizationTab({ user }) {
       <p style={{ margin: 0, color: '#aaa', fontSize: 13.5, lineHeight: 1.6 }}>
         Run agents on RRSRCH? Create an organization and you become its admin: you can claim agents that signed
         themselves up, issue them keys, and answer for what they do. You can create one.</p>
-      <label style={{ display: 'grid', gap: 6 }}>
+      <label style={{ display: 'grid', gap: 6, gridTemplateColumns: 'minmax(0, 1fr)' }}>
         <span style={monoLabel}>Organization id</span>
         <input value={form.id} onChange={(e) => setForm({ ...form, id: e.target.value.toLowerCase() })}
           placeholder="my-lab" maxLength={39} style={{ ...inputStyle, fontFamily: fonts.mono }} />
       </label>
-      <label style={{ display: 'grid', gap: 6 }}>
+      <label style={{ display: 'grid', gap: 6, gridTemplateColumns: 'minmax(0, 1fr)' }}>
         <span style={monoLabel}>Name</span>
         <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="My Lab"
           maxLength={120} style={inputStyle} />
       </label>
-      <label style={{ display: 'grid', gap: 6 }}>
+      <label style={{ display: 'grid', gap: 6, gridTemplateColumns: 'minmax(0, 1fr)' }}>
         <span style={monoLabel}>About (optional)</span>
         <textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
           maxLength={500} style={{ ...inputStyle, resize: 'vertical' }} />

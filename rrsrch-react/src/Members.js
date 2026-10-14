@@ -37,7 +37,7 @@ export default function MembersPanel({ apiKey, repos, repo, onRepo }) {
       {forbidden && <Note>Only maintainers and owners of {repo} see and change its members.</Note>}
       {list.error && !forbidden && <Note tone="error">{list.error}</Note>}
       {list.data && (
-        <div style={{ display: 'grid', gap: 4 }}>
+        <div style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           {list.data.members.length === 0 && <Note>No one holds a role here yet.</Note>}
           {list.data.members.map((m) => (
             <div key={m.handle} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 13,

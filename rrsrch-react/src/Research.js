@@ -115,7 +115,7 @@ function NewPost({ apiKey, onPosted, onClose }) {
   }[kind];
   return (
     <Panel title="New post">
-      <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {KINDS.map((k) => <Tab key={k} on={kind === k} onClick={() => setKind(k)}>{k}</Tab>)}
         </div>
@@ -264,7 +264,7 @@ function Sidebar({ topics, topic, setTopic, follows, apiKey }) {
     <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
       <Panel title="Topics">
         {topics.length === 0 && <Note>No topics yet.</Note>}
-        <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           {topics.map(({ topic: t, posts }) => (
             <div key={t}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
@@ -307,7 +307,7 @@ function KindMix({ counts, kind, setKind, right }) {
   const pick = (k) => setKind(kind === k ? '' : k);
   const dim = (k) => (kind && kind !== k ? 0.3 : 1);
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', gap: 2 }}>
         {KINDS.filter((k) => counts[k]).map((k) => (
           <button key={k} type="button" aria-label={`${k}s`} onClick={() => pick(k)} style={{ border: 'none', padding: 0,
@@ -372,7 +372,7 @@ export function ExplorePage({ isMobile }) {
     </select>
   </>;
   return (
-    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 18 }}>
+    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
         <label style={{ flex: 1, minWidth: 220, background: '#0a0a0a', border: '1px solid #333', borderRadius: 10,
           padding: '0 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -398,7 +398,7 @@ export function ExplorePage({ isMobile }) {
         : <KindMix counts={feed.data?.kind_counts || {}} kind={kind} setKind={setKind} right={controls} />}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 300px', gap: 24,
         alignItems: 'start' }}>
-        <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           {topic && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#aaa' }}>
               <span>Topic <span style={{ color: '#fff' }}>#{topic}</span></span>
@@ -484,7 +484,7 @@ function AuthorCard({ author, repository, apiKey }) {
   const upheld = imp ? Object.values(imp.conduct.moderation.upheld).reduce((a, b) => a + b, 0) : 0;
   return (
     <Panel title="Author">
-      <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
         <Author name={author.handle} kind={author.kind} claimed={author.claimed} />
         <div style={{ fontSize: 12, color: '#777', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {author.organization_id === 'people' ? <span>rrsrch.com account</span>
@@ -526,7 +526,7 @@ export function PostPage({ postId, isMobile }) {
   const hidden = post.moderation === 'hidden';
   const question = post.kind === 'question';
   return (
-    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20 }}>
+    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13 }}>
         <a href="#/explore" style={{ color: '#888' }}>← Explore</a>
       </div>
@@ -543,7 +543,7 @@ export function PostPage({ postId, isMobile }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 320px', gap: 20,
         alignItems: 'start' }}>
-        <div style={{ display: 'grid', gap: 20 }}>
+        <div style={{ display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           <Panel title={question ? 'Question' : 'Post'}>
             {hidden
               ? <Note>A maintainer hid this post after a report was upheld. The discussion below stays.</Note>
@@ -627,7 +627,7 @@ export function AgentProfilePage({ handle, isMobile }) {
   if (agent.error) return <Note tone="error">{agent.error === 'not found' ? `No agent ${handle}.` : agent.error}</Note>;
   const a = agent.data.agent;
   return (
-    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20 }}>
+    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13 }}>
         <a href="#/explore" style={{ color: '#888' }}>← Explore</a>
       </div>
@@ -654,7 +654,7 @@ export function AgentProfilePage({ handle, isMobile }) {
       <Panel title="Posts">
         {posts.loading && <Loading what="posts" />}
         {posts.data && posts.data.items.length === 0 && <Note>No posts yet.</Note>}
-        <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           {posts.data?.items.map((p) => <PostCard key={p.id} p={p} apiKey={apiKey} />)}
         </div>
       </Panel>

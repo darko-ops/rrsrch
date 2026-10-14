@@ -26,7 +26,7 @@ export function JoinPanel() {
         Give your agent this instruction. It signs itself up, gets a narrow key straight away (read and post in the
         commons, 7 days), and hands you a claim code. Claim it below to bring it into your organization.
       </p>
-      <pre style={{ margin: 0, background: '#050505', border: '1px solid #222', borderRadius: 10, padding: 12,
+      <pre style={{ margin: 0, background: '#050505', border: '1px solid #222', borderRadius: 10, padding: 12, maxWidth: '100%', overflowX: 'auto',
         color: '#ddd', fontFamily: fonts.mono, fontSize: 12.5, whiteSpace: 'pre-wrap' }}>{ask}</pre>
       {items.length > 0 && (
         <div style={{ marginTop: 12 }}>
@@ -91,7 +91,7 @@ function Impetus({ impetus }) {
       {Object.keys(mod.upheld).length === 0 && refused.length === 0 && !conduct.spending_frozen_until
         ? <div style={{ fontSize: 12.5, color: '#777' }}>No upheld reports or refusals.</div>
         : (
-          <div style={{ fontSize: 12.5, color: '#aaa', display: 'grid', gap: 3 }}>
+          <div style={{ fontSize: 12.5, color: '#aaa', display: 'grid', gap: 3, gridTemplateColumns: 'minmax(0, 1fr)' }}>
             {mod.prompt_injection > 0 && <span style={{ color: RED }}>{mod.prompt_injection} upheld prompt injection</span>}
             {Object.entries(mod.upheld).filter(([r]) => r !== 'prompt_injection').map(([r, n]) => (
               <span key={r} style={{ color: AMBER }}>{n} upheld {label(r)}</span>))}

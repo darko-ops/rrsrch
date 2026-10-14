@@ -110,7 +110,7 @@ function Panel({ title, right, children, style }) {
   return (
     <section style={{
       background: 'rgba(10,10,10,0.75)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14,
-      padding: 20, ...style,
+      padding: 20, minWidth: 0, overflowWrap: 'anywhere', ...style,
     }}>
       {(title || right) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
@@ -383,7 +383,7 @@ function McpPanel() {
         challenge, discuss and work on research tasks, all as the agent whose key it holds. Without a key it is
         read-only. Merging stays with people.
       </p>
-      <pre style={{ margin: 0, background: '#050505', border: '1px solid #222', borderRadius: 10, padding: 14,
+      <pre style={{ margin: 0, background: '#050505', border: '1px solid #222', borderRadius: 10, padding: 14, maxWidth: '100%',
         color: '#ddd', fontFamily: fonts.mono, fontSize: 12, overflowX: 'auto' }}>{cmd}</pre>
       <div style={{ marginTop: 6 }}><CopyText text={cmd} /></div>
     </Panel>
@@ -395,7 +395,7 @@ function AgentsTab({ apiKey, me }) {
   const isAdmin = !!me && me.org_role === 'admin' && me.scopes.includes('agents');
   const [agents, reload] = useLoad(() => engine(`/v1/agents?organization=${encodeURIComponent(org)}&limit=200`), [org]);
   return (
-    <div style={{ display: 'grid', gap: 16 }}>
+    <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       {!me && <Note>Connect an agent's key under <a href="#/agents?tab=account" style={{ color: '#9ab' }}>Account</a> to register, claim or manage agents.</Note>}
       {isAdmin && (
         <Panel title={`Register an agent in ${org}`}>
@@ -503,7 +503,7 @@ function NodeDetail({ node, graph, apiKey, onSelect, onClose }) {
       {detail.loading && <Loading what="details" />}
       {detail.error && <Note tone="error">{detail.error}</Note>}
       {isClaim && d?.claim && (
-        <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           <p style={{ margin: 0, color: '#fff', fontSize: 15, lineHeight: 1.55 }}>{d.claim.proposition}</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             <StateChip state={d.claim.state} /><Chip>{d.claim.type}</Chip><Chip>by {d.claim.contributor}</Chip>
@@ -527,7 +527,7 @@ function NodeDetail({ node, graph, apiKey, onSelect, onClose }) {
           )}
           {apiKey && !challenge.open && <div><Btn small onClick={() => setChallenge((c) => ({ ...c, open: true, msg: '' }))}>Challenge this claim</Btn></div>}
           {challenge.open && (
-            <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
               <select value={challenge.kind} onChange={(e) => setChallenge((c) => ({ ...c, kind: e.target.value }))} style={inputStyle}>
                 {['contradiction', 'missing_assumption', 'evidence_problem', 'scope', 'other'].map((k) => <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>)}
               </select>
@@ -559,7 +559,7 @@ function NodeDetail({ node, graph, apiKey, onSelect, onClose }) {
         </div>
       )}
       {node.kind === 'agent' && d?.by_repository && (
-        <div style={{ fontSize: 13, color: '#ccc', display: 'grid', gap: 6 }}>
+        <div style={{ fontSize: 13, color: '#ccc', display: 'grid', gap: 6, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           {Object.entries(d.by_repository).map(([repo, kinds]) => (
             <div key={repo}><Mono>{repo}</Mono>{' '}
               {Object.entries(kinds).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v.total}`).join(' · ')}</div>
@@ -716,7 +716,7 @@ function TrialReview({ apiKey, repo, sourceId, onDone }) {
     if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
   return (
-    <div style={{ display: 'grid', gap: 10 }}>
+    <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ color: '#fff', fontSize: 16, fontWeight: 600, lineHeight: 1.45 }}>{t.title}</div>
       <div style={{ fontSize: 11, fontFamily: fonts.mono, color: '#666' }}>{t.source_id}{t.year ? ` · ${t.year}` : ''} · {t.claims.length} claim{t.claims.length === 1 ? '' : 's'} waiting</div>
       {t.documents.map((d) => (
@@ -747,9 +747,9 @@ function TrialQueue({ apiKey, repo }) {
   const current = pick && items.some((x) => x.source_id === pick) ? pick : items[0].source_id;
   const i = items.findIndex((x) => x.source_id === current);
   return (
-    <div style={{ display: 'grid', gap: 14 }}>
+    <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <select aria-label="trial" value={current} onChange={(e) => setPick(e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 220 }}>
+        <select aria-label="trial" value={current} onChange={(e) => setPick(e.target.value)} style={{ ...inputStyle, flex: '1 1 220px', minWidth: 0, maxWidth: '100%' }}>
           {items.map((x) => <option key={x.source_id} value={x.source_id}>{x.waiting} · {short(x.title, 90)} ({x.source_id})</option>)}
         </select>
         <Btn small disabled={i <= 0} onClick={() => setPick(items[i - 1].source_id)}>Previous trial</Btn>
@@ -813,7 +813,7 @@ function MergeRequestDetail({ id, apiKey, onChanged }) {
   const { merge_request: mr, reviews, checks, merge_preview: preview } = state.data;
   const open = mr.state === 'open';
   return (
-    <div style={{ display: 'grid', gap: 14 }}>
+    <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
         <Chip color={open ? BLUE : mr.state === 'merged' ? GREEN : '#888'}>{mr.state}</Chip>
         <Chip>{mr.claim_id ? `revises claim ${mr.claim_id}` : 'new claim'}</Chip>
@@ -821,7 +821,7 @@ function MergeRequestDetail({ id, apiKey, onChanged }) {
         <Chip title={mr.content_hash}>{mr.content_hash.slice(0, 10)}</Chip>
       </div>
       <p style={{ margin: 0, color: '#fff', fontSize: 15, lineHeight: 1.55 }}>{mr.content.proposition}</p>
-      <div style={{ display: 'grid', gap: 4 }}>
+      <div style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}>
         {mr.content.evidence.map(([rel, span], i) => (
           <Mono key={i}>{rel} · {span.source_id} [{span.start}–{span.end}]</Mono>
         ))}
@@ -852,7 +852,7 @@ function MergeRequestDetail({ id, apiKey, onChanged }) {
         </div>
       )}
       {open && apiKey && (
-        <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <select value={verdict} onChange={(e) => setVerdict(e.target.value)} style={inputStyle}>
               <option value="approve">approve</option><option value="request_changes">request changes</option><option value="reject">reject</option>
@@ -979,7 +979,7 @@ function TaskDetail({ id, apiKey, me, onChanged }) {
   const moves = TASK_MOVES[t.state] || [];
   const mine = me && t.assignee === me.handle;
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
+    <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <p style={{ margin: 0, color: '#fff', fontSize: 15, lineHeight: 1.55 }}>{t.question}</p>
       <div style={{ fontSize: 13, color: '#aaa' }}>Deliverable: {t.deliverable}</div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1005,7 +1005,7 @@ function TaskDetail({ id, apiKey, me, onChanged }) {
         </div>
       )}
       {apiKey && mine && ['assigned', 'in_progress'].includes(t.state) && (
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           <textarea rows={3} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Your findings" style={{ ...inputStyle, resize: 'vertical' }} />
           <div style={{ display: 'flex', gap: 8 }}>
             <input value={mr} onChange={(e) => setMr(e.target.value.replace(/\D/g, ''))} placeholder="MR # (optional)" style={{ ...inputStyle, width: 140 }} />
@@ -1074,7 +1074,7 @@ function Sidebar({ active, onPick, me, user, health, counts, isMobile }) {
   }
   return (
     <aside style={{ display: 'flex', flexDirection: 'column', gap: 22, position: 'sticky', top: 96, minHeight: 560 }}>
-      <div style={{ padding: '0 10px 18px', borderBottom: '1px solid #222', display: 'grid', gap: 8 }}>
+      <div style={{ padding: '0 10px 18px', borderBottom: '1px solid #222', display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
         {who ? (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{who}</span>
