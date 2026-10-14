@@ -1,7 +1,8 @@
 /**
  * One claim and everything said about it (#/claims/N): docs/FEEDBACK.md, phase 1.
  *
- *   Evidence and standing   formal: review state, verification, evidence, reviews, challenges and responses.
+ *   Evidence and standing   formal: review state, verification, evidence, reviews, challenges and responses,
+ *                           and reproduction and usage reports (evidence for reviewers, phase 2).
  *                           Only the repository's policy and the trust engine change this.
  *   Community feedback      informal: reactions and threaded comments. Helps people find and improve
  *                           knowledge; never changes the claim's review state.
@@ -9,6 +10,7 @@
  * Writes use the visitor's engine key from the Agents page; the engine decides what they may do.
  */
 import React, { useMemo, useState } from 'react';
+import VerificationReports from './Verification';
 import {
   engine, readStored, KEY_STORAGE, fonts, GREEN, AMBER, RED, STATE_COLOR,
   Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
@@ -27,7 +29,7 @@ const STATE_MEANING = {
 const REACTION_LABEL = { useful: 'Useful', interesting: 'Interesting', needs_clarification: 'Needs clarification' };
 const KIND_BADGE = { human: 'human', service: 'agent', model: 'agent' };
 
-function Author({ name, kind }) {
+export function Author({ name, kind }) {
   return (
     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
       <span style={{ color: '#ddd', fontWeight: 600 }}>{name}</span>
@@ -36,7 +38,7 @@ function Author({ name, kind }) {
   );
 }
 
-function Reactions({ target, data, apiKey, onChanged }) {
+export function Reactions({ target, data, apiKey, onChanged }) {
   const [err, setErr] = useState('');
   const toggle = async (kind) => {
     const on = !data.mine.includes(kind);
@@ -91,7 +93,7 @@ function Composer({ placeholder, onSend, onCancel, autoFocus }) {
   );
 }
 
-function Thread({ target, messages, apiKey, onChanged, emptyText }) {
+export function Thread({ target, messages, apiKey, onChanged, emptyText }) {
   const [replyTo, setReplyTo] = useState(null);
   const [reporting, setReporting] = useState(null);
   const [msg, setMsg] = useState('');
@@ -297,6 +299,10 @@ export default function ClaimPage({ claimId, isMobile }) {
               )}
               <div style={{ marginTop: 8 }}><ChallengeForm claimId={claimId} apiKey={apiKey} onChanged={reload} /></div>
             </div>
+            <div>
+              <div style={sectionLabel}>Reproduction and use</div>
+              <VerificationReports target={target} data={formal.verification_reports} apiKey={apiKey} onChanged={reload} />
+            </div>
           </div>
         </Panel>
 
@@ -314,5 +320,5 @@ export default function ClaimPage({ claimId, isMobile }) {
   );
 }
 
-const sectionLabel = { fontSize: 11, color: '#888', fontFamily: fonts.mono, textTransform: 'uppercase',
+export const sectionLabel = { fontSize: 11, color: '#888', fontFamily: fonts.mono, textTransform: 'uppercase',
   letterSpacing: '0.08em', marginBottom: 6 };
