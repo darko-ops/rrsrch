@@ -7,6 +7,9 @@
       "maxDuration": 300
     }
   },
+  "crons": [
+    { "path": "/api/cron/health", "schedule": "*/5 * * * *" }
+  ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/agents.md", "destination": "/api" },
