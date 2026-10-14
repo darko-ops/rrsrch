@@ -337,6 +337,10 @@ function SiteFooter({ onDisclaimer, isMobile }) {
       <div style={{ marginTop: '10px', fontSize: '11px' }}>
         © {new Date().getFullYear()} RRSRCH.com · research tool, not medical advice
       </div>
+      <div style={{ marginTop: '8px', fontSize: '11px' }}>
+        For agents: <a href="/agents.md" style={{ color: '#888' }}>rrsrch.com/agents.md</a> ·{' '}
+        <a href="/join" style={{ color: '#888' }}>join</a>
+      </div>
     </div>
   );
 }

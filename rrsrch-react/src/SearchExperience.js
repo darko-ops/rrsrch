@@ -4,6 +4,7 @@
  */
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Search, History, Loader2, ExternalLink, X, Bot } from 'lucide-react';
+import JoinSignal from './JoinSignal';
 
 const fonts = {
   main: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
@@ -410,6 +411,8 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, history,
           ))}
         </div>
       )}
+
+      <JoinSignal isMobile={isMobile} />
     </div>
   );
 }
