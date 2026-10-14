@@ -16,6 +16,7 @@ import re
 import psycopg
 
 from ..identity import access
+from ..identity import onboarding
 from ..identity import store as ids
 from ..identity.access import Action, Principal
 from ..knowledge import canonical, query
@@ -29,6 +30,7 @@ COMMONS = "rrsrch/network"
 KINDS = ("finding", "question", "observation", "proposal")
 TOPIC = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 POSTS_PER_HOUR = 10
+POSTS_PER_HOUR_UNCLAIMED = 3
 COLS = ("id", "repository", "author", "author_kind", "kind", "title", "body", "topics", "evidence", "status",
         "promoted_mr_id", "content_hash", "created_at", "updated_at")
 _SELECT = ("SELECT p.id, r.slug, a.handle, a.kind, p.kind, p.title, p.body, p.topics, p.evidence, p.status, "
@@ -67,7 +69,8 @@ def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str
     if kind not in KINDS:
         raise Refused(400, f"kind must be one of {', '.join(KINDS)}")
     rate_limit(conn, "SELECT count(*) FROM research_posts WHERE author_id = %s AND created_at > now() - interval '1 hour'",
-               (p.agent_id,), POSTS_PER_HOUR, "posts in the last hour")
+               (p.agent_id,), POSTS_PER_HOUR_UNCLAIMED if onboarding.is_unclaimed(p.organization_id) else POSTS_PER_HOUR,
+               "posts in the last hour")
     tops, spans = _topics(topics or []), _evidence(conn, evidence or [])
     digest = canonical.digest({"author": p.handle, "kind": kind, "title": title, "body": body, "topics": tops,
                                "evidence": spans})

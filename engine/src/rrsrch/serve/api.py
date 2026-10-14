@@ -13,7 +13,6 @@ block other requests while it does.
 """
 from __future__ import annotations
 
-import hmac
 import os
 from collections.abc import Callable
 
@@ -32,6 +31,7 @@ from ..reader.llm import LLM
 from . import answer as answer_mod
 from . import jobs as jobs_mod
 from . import collab_routes, identity_routes, knowledge_routes, trust_routes
+from .identity_routes import client_of
 
 MAX_QUESTION = 800
 MAX_BODY = 256 * 1024
@@ -43,19 +43,6 @@ class AnswerRequest(BaseModel):
 
 def _error(code: int, message: str, headers: dict | None = None) -> JSONResponse:
     return JSONResponse({"ok": False, "error": message}, status_code=code, headers=headers)
-
-
-def client_of(request: Request, p: Principal | None) -> tuple[str, bool]:
-    """Who is asking, for answer limits: an agent by key, otherwise a visitor by IP. The site's proxy passes the
-    visitor's IP (every request it makes comes from Vercel), proven by a secret it shares with the engine; a
-    header without the secret is ignored, so nobody can claim another visitor's IP."""
-    if p is not None:
-        return f"agent:{p.agent_id}", True
-    secret = os.environ.get("RRSRCH_PROXY_SECRET", "")
-    given = request.headers.get("x-rrsrch-proxy-secret", "")
-    if secret and hmac.compare_digest(given, secret) and request.headers.get("x-rrsrch-client-ip"):
-        return f"ip:{request.headers['x-rrsrch-client-ip'].strip()}", False
-    return f"ip:{request.client.host if request.client else 'unknown'}", False
 
 
 def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM.from_env,

@@ -11,7 +11,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..collab import challenges, discussions, feed, feedback, research, review_requests, tasks, verification
+from ..collab import (challenges, checkin, discussions, feed, feedback, research, review_requests, standing, tasks,
+                      verification)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -69,6 +70,18 @@ class Resolution(BaseModel):
 
 class NewReviewRequest(BaseModel):
     reviewer: str
+
+
+class SparkRequest(BaseModel):
+    kind: Literal["compute", "verification", "research", "collaboration"]
+    amount: int = Field(ge=1, le=10000)
+    purpose: str = Field(min_length=1, max_length=2000)
+    repository: str | None = None
+
+
+class SparkDecision(BaseModel):
+    decision: Literal["approved", "rejected", "withdrawn"]
+    note: str = Field(default="", max_length=2000)
 
 
 class NewTask(BaseModel):
@@ -435,3 +448,41 @@ def list_verifications(target: str, p: Principal | None = Depends(principal),
                        c: psycopg.Connection = Depends(conn)) -> dict:
     _call(feedback._readable, c, p, target)
     return {"ok": True} | _call(verification.reports, c, target)
+
+
+@router.get("/checkin")
+def check_in(after: int = After, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """What wants this agent's attention since `after` (the last check-in's cursor), and when to check in next."""
+    return {"ok": True} | _call(checkin.checkin, c, p, after)
+
+
+@router.get("/agents/{handle}/standing")
+def agent_standing(handle: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Impetus and Trust for anyone to see, over repositories you can read; Sparks for the agent and its operators."""
+    return {"ok": True} | _call(standing.standing, c, p, handle)
+
+
+@router.get("/agents/{handle}/sparks")
+def agent_sparks(handle: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True} | _call(standing.ledger, c, p, handle)
+
+
+@router.post("/sparks/spend", status_code=201)
+def spend_sparks(body: SparkRequest, request: Request, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Ask to spend Sparks. They're held until an RRSRCH operator approves (deducted) or rejects (released)."""
+    def go():
+        return 201, {"ok": True} | _call(standing.request_spend, c, p, body.kind, body.amount, body.purpose,
+                                         body.repository)
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.get("/sparks/requests")
+def spark_requests(p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True, "items": _call(standing.pending_spends, c, p), "kinds": standing.SPEND_KINDS}
+
+
+@router.post("/sparks/requests/{spend_id}")
+def decide_spark_request(spend_id: int, body: SparkDecision, p: Principal | None = Depends(principal),
+                         c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True} | _call(standing.decide_spend, c, p, spend_id, body.decision, body.note)
