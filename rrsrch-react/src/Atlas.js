@@ -191,7 +191,7 @@ export default function AtlasPage({ apiKey, repos, repo, onRepo, isMobile, focus
       {graph.error && <Note tone="error">{graph.error}</Note>}
       {!repo && !graph.loading && <Note>Pick a repository.</Note>}
       {layout && (
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile || !wide ? '1fr' : 'minmax(0, 1fr) 300px', gap: 16,
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile || !wide ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 300px', gap: 16,
           alignItems: 'start' }}>
           <div style={{ background: 'rgba(5,5,5,0.85)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14,
             overflow: 'hidden' }}>

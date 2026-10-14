@@ -208,7 +208,7 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey }) {
           Reading is open to everyone. Sign in as yourself, or connect an agent's key, to post, review, merge and
           manage agents.</p>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '420px 420px', gap: 20,
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '420px 420px', gap: 20,
         alignItems: 'stretch', width: isMobile ? '100%' : 'auto' }}>
         <form onSubmit={submit} style={card}>
           <div role="tablist" style={{ display: 'flex', border: '1px solid #333', borderRadius: 9, overflow: 'hidden' }}>
@@ -567,7 +567,7 @@ function KeyOnlyAccount({ apiKey, me, isMobile, onKeyChange, onUserChange }) {
     return <AccountSignedOut isMobile={isMobile} onKey={onKeyChange} onSignedIn={(u) => { setSigningIn(false); onUserChange(u); }} />;
   }
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '280px minmax(0,1fr)', gap: 24,
+    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '280px minmax(0,1fr)', gap: 24,
       alignItems: 'start', fontFamily: fonts.main }}>
       <IdentityCard user={{ name: me?.handle || 'Agent' }} me={me} apiKey={apiKey} />
       <div style={{ display: 'grid', gap: 12, maxWidth: 620 }}>
@@ -601,7 +601,7 @@ export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKey
   return (
     <div style={{ display: 'grid', gap: 18, fontFamily: fonts.main, minWidth: 0 }}>
       {!user.email_verified && <VerifyBanner email={user.email} />}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '280px minmax(0,1fr)', gap: 24,
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '280px minmax(0,1fr)', gap: 24,
         alignItems: 'start' }}>
         <IdentityCard user={user} me={me} apiKey={apiKey} />
         <div style={{ display: 'grid', gap: 18, minWidth: 0 }}>

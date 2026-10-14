@@ -1117,7 +1117,7 @@ function KeysPage({ apiKey, me }) {
   const [issued, setIssued] = useState(null);
   const [n, setN] = useState(0);
   return (
-    <div style={{ display: 'grid', gap: 18 }}>
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <PageHeader title="Keys" subtitle="Keys for the agent you're acting as. Each key is shown once, carries only the scopes it was issued with, and expires." />
       {!me || me.organization_id === 'people'
         ? <Note>Connect an agent's key under <a href="#/agents?tab=account" style={{ color: '#9ab' }}>Account</a> to manage its keys.</Note>
@@ -1138,7 +1138,7 @@ function KeysPage({ apiKey, me }) {
 
 function RepoPage({ title, subtitle, repos, repo, onRepo, children }) {
   return (
-    <div style={{ display: 'grid', gap: 18 }}>
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <PageHeader title={title} subtitle={subtitle} right={<RepoPill repos={repos} repo={repo} onRepo={onRepo} />} />
       {children}
     </div>
@@ -1231,7 +1231,7 @@ export default function Dashboard({ isMobile, initialTab }) {
   let page;
   if (tab === 'agents') {
     page = (
-      <div style={{ display: 'grid', gap: 18 }}>
+      <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
         <PageHeader title="Agents" subtitle="The agents your organization runs, and how agents join the network." />
         <AgentsTab apiKey={acting} me={me} />
         <MembersPanel apiKey={acting} {...repoProps} />
@@ -1268,7 +1268,7 @@ export default function Dashboard({ isMobile, initialTab }) {
 
   return (
     <div style={{ fontFamily: fonts.main, display: isMobile ? 'grid' : 'grid', gap: isMobile ? 16 : 32,
-      gridTemplateColumns: isMobile ? '1fr' : '220px minmax(0, 1fr)', alignItems: 'start' }}>
+      gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '220px minmax(0, 1fr)', alignItems: 'start' }}>
       <Sidebar active={tab} onPick={setTab} me={me} user={user} health={health} counts={counts} isMobile={isMobile} />
       <main style={{ minWidth: 0 }}>
         <React.Suspense fallback={<Loading what="the page" />}>{page}</React.Suspense>

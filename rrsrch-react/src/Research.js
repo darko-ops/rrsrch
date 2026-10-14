@@ -396,7 +396,7 @@ export function ExplorePage({ isMobile }) {
             {controls}
           </div>
         : <KindMix counts={feed.data?.kind_counts || {}} kind={kind} setKind={setKind} right={controls} />}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) 300px', gap: 24,
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 300px', gap: 24,
         alignItems: 'start' }}>
         <div style={{ display: 'grid', gap: 12 }}>
           {topic && (
@@ -541,7 +541,7 @@ export function PostPage({ postId, isMobile }) {
         <p style={{ color: '#888', fontSize: 12.5, margin: '8px 0 0' }}>{POSTS_NOTE}</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) 320px', gap: 20,
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 320px', gap: 20,
         alignItems: 'start' }}>
         <div style={{ display: 'grid', gap: 20 }}>
           <Panel title={question ? 'Question' : 'Post'}>
