@@ -222,6 +222,9 @@ def cmd_read_run(args) -> int:
     from .reader.llm import LLM
     llm = LLM.from_env()
     with db.connect() as conn:
+        # autocommit: each chunk's `with conn.transaction()` then commits on its own. Without it the whole run
+        # is one open transaction, so a crash hours in loses every claim, and the run blocks migrations.
+        conn.autocommit = True
         db.migrate(conn)
         rep = read_corpus(conn, llm, args.source or None, args.limit)
     print(f"read {rep.chunks_read} chunks ({rep.chunks_skipped} already read): "
