@@ -8,8 +8,7 @@ Everything runs as user services on Spark (`systemctl --user`, with lingering on
 | `rrsrch-serve` | The engine API on `127.0.0.1:8787`, published by Tailscale Funnel (below) |
 | `rrsrch-reader` | Claim extraction over the corpus; commits per chunk, restarts 20 s after a crash, stops when done |
 
-Settings live in `~/.config/rrsrch/engine.env` (see `engine.env.example`). `backup.sh` runs nightly from
-cron at 03:15 and keeps 14 days of dumps in `~/rrsrch-pg/backups`.
+Settings live in `~/.config/rrsrch/engine.env` (see `engine.env.example`). Backups are below.
 
 ## Public address: Tailscale Funnel
 
@@ -26,6 +25,68 @@ tailscale funnel --https=443 off    # unpublish
 
 One-time setup: install Tailscale, `sudo tailscale up --operator=rrsrch`, enable HTTPS certificates and
 Funnel for the tailnet in the admin console.
+
+## Backups
+
+`backup.sh` runs every 6 hours from cron, out of the deployed checkout:
+
+```
+15 */6 * * * /bin/bash /home/rrsrch/rrsrch-engine/deploy/spark/backup.sh 2>> /home/rrsrch/rrsrch-pg/backups/backup.log
+```
+
+Each run:
+1. Dumps the ledger.
+2. Restores the dump into a scratch database (`rrsrch_restorecheck`). It checks that every table came back and
+   verifies the audit hash chain, then drops the copy.
+3. Encrypts the dump to the backup public key and uploads it to Cloudflare R2, when that's configured.
+4. Writes `~/rrsrch-pg/backups/status.json`.
+
+Local dumps are kept for 14 days. `GET /v1/health` reports the status under `backup`, and the site's monitor
+(`/api/cron/health`, every 5 minutes) emails the operator when the engine is down or the last verified backup
+is too old.
+
+**Off-site (R2), one-time setup:**
+1. In Cloudflare, create an R2 bucket (for example `rrsrch-backups`). Add a bucket lock rule, for example 30
+   days, so objects can't be deleted early. Add a lifecycle rule to expire objects after, for example, 90 days.
+2. Create an R2 API token with **Object Read & Write** on that bucket only.
+3. On Spark, create `~/.config/rrsrch/r2.env` (mode 600):
+   ```
+   R2_ACCOUNT_ID=...
+   R2_BUCKET=rrsrch-backups
+   R2_ACCESS_KEY_ID=...
+   R2_SECRET_ACCESS_KEY=...
+   ```
+4. Make the encryption key off Spark, on your own computer, with a passphrase. Keep the private key in your
+   password manager. Copy only the public key to Spark as `~/.config/rrsrch/backup-pubkey.asc`:
+   ```bash
+   gpg --quick-generate-key "rrsrch backups" default default never
+   gpg --armor --export "rrsrch backups" > backup-pubkey.asc            # public: goes to Spark
+   gpg --armor --export-secret-keys "rrsrch backups" > backup-private.asc   # private: password manager, then delete
+   ```
+   Spark never holds the private key, so a compromise of Spark can't read old backups.
+
+**Restore:**
+- From a local dump:
+  `pg_restore --clean --no-owner -d postgresql://rrsrch:rrsrch@127.0.0.1:5434/rrsrch <dump>`.
+- From R2: download the object, `gpg --decrypt` it with the private key, then restore it the same way.
+
+## Rebuilding on a new machine
+
+If Spark is lost, this brings the engine back from the latest off-site backup:
+
+1. **Prepare the machine:** install Postgres 16 with pgvector, `uv` and Tailscale. Clone the repo.
+2. **Create the database:** `initdb` into `~/rrsrch-pg/data` (port 5434, `listen_addresses = '127.0.0.1'`), then
+   start it and create the `rrsrch` role and database.
+3. **Restore the data:** download the newest `ledger/YYYY/MM/*.dump.gpg` from R2, decrypt it and `pg_restore`
+   it. Then run `rrsrch.trust.audit.verify` to check the chain.
+4. **Restore the settings:** put back `~/.config/rrsrch/engine.env`. Keep a copy of it in your password manager,
+   because the proxy secret must match Vercel's `RRSRCH_PROXY_SECRET`.
+5. **Start the engine:** run `deploy.sh` from a checkout. It installs dependencies, applies any newer migrations
+   and restarts `rrsrch-serve`. Then copy the unit files and enable the services, as in the one-time setup at
+   the end of this file.
+6. **Republish:** run `tailscale funnel --bg 8787`. If the hostname changed, update `RRSRCH_ENGINE_URL` in
+   Vercel and redeploy.
+7. **Restart backups:** reinstall the cron line above, and put back `r2.env` and `backup-pubkey.asc`.
 
 ## Deploying
 

@@ -182,6 +182,71 @@ async function siteUser(auth) {
   return user;
 }
 
+// --- Monitor ----------------------------------------------------------------------------
+// Vercel Cron calls this every 5 minutes (vercel.json), with Authorization: Bearer $CRON_SECRET. It checks the
+// engine through its public address and the ledger backup it reports, and emails ALERT_EMAIL through Resend when
+// the set of problems changes (and every 12 hours while something stays wrong). State lives in Upstash Redis.
+const BACKUP_MAX_HOURS = 13;           // backups run every 6 hours: alert after a second missed run
+const REMIND_MS = 12 * 3600 * 1000;
+
+async function engineProblems() {
+  if (!ENGINE_URL) return ['RRSRCH_ENGINE_URL is not set'];
+  let health;
+  try {
+    const r = await fetch(`${ENGINE_URL}/v1/health`, { signal: AbortSignal.timeout(15000) });
+    health = await r.json().catch(() => ({}));
+    if (!r.ok || !health.ok) return [`engine unhealthy (HTTP ${r.status}): ${String(health.error || '').slice(0, 120)}`];
+  } catch (err) {
+    return [`engine unreachable: ${err.message}`];
+  }
+  const b = health.backup;
+  if (!b) return ['engine reports no backup status'];
+  const problems = [];
+  const hours = (iso) => (iso ? (Date.now() - Date.parse(iso)) / 3600000 : Infinity);
+  if (!(b.verified_age_hours < BACKUP_MAX_HOURS)) {
+    problems.push(`no verified backup for ${Number.isFinite(b.verified_age_hours) ? b.verified_age_hours.toFixed(1) : '?'} hours`);
+  }
+  if (b.last_state === 'failed') problems.push(`last backup failed at step "${b.last_step}"`);
+  if (String(b.offsite || '').startsWith('r2:') && !(hours(b.last_offsite_at) < BACKUP_MAX_HOURS)) {
+    problems.push('no off-site copy in the last 13 hours');
+  }
+  return problems;
+}
+
+async function sendAlert(subject, text) {
+  const to = process.env.ALERT_EMAIL || '';
+  if (!RESEND_KEY || !to) { console.error(`monitor: can't email (${subject})`); return false; }
+  const r = await fetch('https://api.resend.com/emails', { method: 'POST', signal: AbortSignal.timeout(10000),
+    headers: { Authorization: `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: MAIL_FROM, to: [to], subject, text }) }).catch(() => null);
+  return !!(r && r.ok);
+}
+
+app.get('/api/cron/health', async (req, res) => {
+  const secret = process.env.CRON_SECRET || '';
+  const given = String(req.headers.authorization || '');
+  if (!secret || given.length !== `Bearer ${secret}`.length
+      || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(`Bearer ${secret}`))) {
+    return res.status(401).json({ ok: false });
+  }
+  const problems = await engineProblems();
+  const now = Date.now();
+  const prev = (await kv([['GET', 'monitor:state']]))?.[0];
+  const before = prev ? JSON.parse(prev) : { problems: [], alerted_at: 0 };
+  const changed = JSON.stringify(before.problems) !== JSON.stringify(problems);
+  let alerted_at = before.alerted_at || 0;
+  if (changed || (problems.length && now - alerted_at > REMIND_MS)) {
+    const sent = problems.length
+      ? await sendAlert(`RRSRCH: ${problems.length} problem${problems.length === 1 ? '' : 's'}`,
+        `${problems.map((p) => `- ${p}`).join('\n')}\n\nChecked ${new Date(now).toISOString()} via ${ENGINE_URL}.\n`
+        + 'Runbook: engine/deploy/spark/README.md\n')
+      : await sendAlert('RRSRCH: all clear', `The engine and backups are healthy again as of ${new Date(now).toISOString()}.\n`);
+    if (sent) alerted_at = now;
+  }
+  await kv([['SET', 'monitor:state', JSON.stringify({ problems, alerted_at, checked_at: now })]]);
+  res.json({ ok: problems.length === 0, problems });
+});
+
 // The instructions an agent reads to join (it signs itself up from them): rrsrch.com/agents.md
 app.get('/agents.md', async (_req, res) => {
   if (!ENGINE_URL) return res.status(503).type('text/plain').send('The RRSRCH engine is offline; try again later.');
@@ -1689,6 +1754,8 @@ async function readUsers() {
   }
 }
 
+const USERS_KEEP = 30;
+
 async function writeUsers(users) {
   if (useBlob) {
     const { put, del, list } = require('@vercel/blob');
@@ -1698,9 +1765,10 @@ async function writeUsers(users) {
       contentType: 'application/json',
       addRandomSuffix: false,
     });
-    try {   // best-effort prune of superseded versions
+    try {   // best-effort prune, keeping the last USERS_KEEP versions so a bad write can be rolled back
       const { blobs } = await list({ prefix: USERS_PREFIX });
-      const old = blobs.filter((b) => b.pathname < key).map((b) => b.url);
+      const old = blobs.filter((b) => b.pathname < key).sort((a, b) => (a.pathname < b.pathname ? 1 : -1))
+        .slice(USERS_KEEP - 1).map((b) => b.url);
       if (old.length) await del(old);
     } catch (err) {
       console.error('users prune failed (harmless):', err.message);
