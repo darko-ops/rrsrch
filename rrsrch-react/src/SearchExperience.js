@@ -3,7 +3,7 @@
  * Landing keeps the parent's 3D planet behind it. Results use a solid black column.
  */
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { Search, History, Loader2, ExternalLink, X } from 'lucide-react';
+import { Search, History, Loader2, ExternalLink, X, Bot } from 'lucide-react';
 
 const fonts = {
   main: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
@@ -257,18 +257,6 @@ function AbstractSnippet({ html }) {
   );
 }
 
-function VerdictDot({ color, label, size = 13 }) {
-  return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: '8px',
-      fontSize: size, fontWeight: 600, color, fontFamily: fonts.main,
-    }}>
-      <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
-      {label}
-    </span>
-  );
-}
-
 function SearchBox({
   value, onChange, onSubmit, searching, isMobile, compact, placeholder,
 }) {
@@ -351,51 +339,8 @@ function SearchBox({
   );
 }
 
-function SuggestionCard({ item, onPick, searching, showFindingsLink }) {
-  const v = VERDICT[item.v] || VERDICT.uncertain;
-  return (
-    <button
-      type="button"
-      disabled={searching}
-      onClick={() => onPick(item)}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 14,
-        padding: 24,
-        borderRadius: 16,
-        background: 'rgba(40,40,40,0.85)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        cursor: searching ? 'wait' : 'pointer',
-        textAlign: 'left',
-        fontFamily: fonts.main,
-        transition: 'background 0.15s, border-color 0.15s',
-        width: '100%',
-        backdropFilter: 'blur(8px)',
-      }}
-      onMouseEnter={(e) => {
-        if (searching) return;
-        e.currentTarget.style.background = 'rgba(55,55,55,0.92)';
-        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)';
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'rgba(40,40,40,0.85)';
-        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)';
-      }}
-    >
-      <VerdictDot color={v.color} label={v.label} />
-      <span style={{ color: '#fff', fontSize: 18, lineHeight: 1.4, fontWeight: 600 }}>{item.q}</span>
-      <span style={{ color: '#999', fontSize: 15, lineHeight: 1.55 }}>{item.answer}</span>
-      {showFindingsLink && (
-        <span style={{ marginTop: 'auto', paddingTop: 6, color: '#00ff88', fontSize: 14, fontWeight: 500 }}>
-          See {item.claims} findings →
-        </span>
-      )}
-    </button>
-  );
-}
-
-function Landing({ isMobile, query, onQueryChange, onSearch, searching, onPickPreview }) {
+function Landing({ isMobile, query, onQueryChange, onSearch, searching, history, onPickHistory }) {
+  const recent = (history || []).slice(0, 6);
   return (
     <div style={{
       minHeight: '100vh',
@@ -405,6 +350,7 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, onPickPr
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
+      justifyContent: 'center',
       textAlign: 'center',
       fontFamily: fonts.main,
     }}>
@@ -435,33 +381,35 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, onPickPr
         />
       </div>
 
-      <div style={{
-        width: '100%', marginTop: 72, display: 'flex', alignItems: 'baseline',
-        gap: 12, marginBottom: 20, flexWrap: 'wrap', justifyContent: isMobile ? 'center' : 'flex-start',
-        textAlign: 'left',
-      }}>
-        <span style={{ fontSize: 15, color: '#ccc', fontWeight: 600 }}>
-          Or check this out:
-        </span>
-      </div>
-
-      <div style={{
-        width: '100%',
-        display: 'grid',
-        gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))',
-        gap: 16,
-        textAlign: 'left',
-      }}>
-        {PREVIEW_QUESTIONS.map((item) => (
-          <SuggestionCard
-            key={item.id}
-            item={item}
-            onPick={onPickPreview}
-            searching={searching}
-            showFindingsLink
-          />
-        ))}
-      </div>
+      {recent.length > 0 && (
+        <div style={{
+          width: '100%', marginTop: 28, display: 'flex', flexWrap: 'wrap', gap: 8,
+          justifyContent: 'center', alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 12, color: '#777', letterSpacing: '0.06em', textTransform: 'uppercase', marginRight: 4 }}>
+            Recent
+          </span>
+          {recent.map((q) => (
+            <button
+              key={q}
+              type="button"
+              disabled={searching}
+              onClick={() => onPickHistory?.(q)}
+              title={q}
+              style={{
+                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 999, color: '#ccc', padding: '7px 14px', fontSize: 13,
+                fontFamily: fonts.main, cursor: searching ? 'wait' : 'pointer',
+                maxWidth: isMobile ? '100%' : 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'rgba(0,255,136,0.4)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = '#ccc'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; }}
+            >
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2310,7 +2258,7 @@ function clearSearchHistory() {
 
 function TopBar({
   isMobile, showSearch, query, onQueryChange, onSearch, searching, onHome,
-  history, onPickHistory, onClearHistory,
+  history, onPickHistory, onClearHistory, onAgents,
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -2368,9 +2316,26 @@ function TopBar({
         </div>
       )}
 
+      <button
+        type="button"
+        onClick={onAgents}
+        style={{
+          marginLeft: showSearch ? 0 : 'auto', flexShrink: 0,
+          background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
+          color: '#aaa', padding: isMobile ? '10px 14px' : '10px 20px', cursor: 'pointer',
+          fontFamily: fonts.main, fontSize: 12, textTransform: 'uppercase', letterSpacing: '1px',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = '#aaa'; e.currentTarget.style.background = 'transparent'; }}
+      >
+        <Bot size={14} />
+        {isMobile ? null : 'Agents'}
+      </button>
+
       <div
         ref={wrapRef}
-        style={{ marginLeft: showSearch ? 0 : 'auto', flexShrink: 0, position: 'relative' }}
+        style={{ flexShrink: 0, position: 'relative' }}
       >
         <button
           type="button"
@@ -2521,7 +2486,7 @@ function readUserProfile() {
   return {};
 }
 
-export default function SearchExperience({ isMobile, scrollContainerRef }) {
+export default function SearchExperience({ isMobile, scrollContainerRef, onAgents }) {
   const [query, setQuery] = useState('');
   // landing | results
   const [mode, setMode] = useState('landing');
@@ -2697,7 +2662,6 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
     setSearching(false);
   };
 
-  const onPickPreview = (item) => runSearch(item, { preferDemo: true });
   const onAskNext = (qOrItem) => {
     const q = typeof qOrItem === 'string' ? qOrItem : qOrItem?.q;
     if (q) runSearch(q);
@@ -2719,6 +2683,7 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
         history={history}
         onPickHistory={(q) => runSearch(q)}
         onClearHistory={() => setHistory(clearSearchHistory())}
+        onAgents={onAgents}
       />
 
       {mode === 'landing' && (
@@ -2728,7 +2693,8 @@ export default function SearchExperience({ isMobile, scrollContainerRef }) {
           onQueryChange={setQuery}
           onSearch={runSearch}
           searching={searching}
-          onPickPreview={onPickPreview}
+          history={history}
+          onPickHistory={(q) => runSearch(q)}
         />
       )}
 
