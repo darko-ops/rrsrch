@@ -18,7 +18,8 @@ from starlette.exceptions import HTTPException
 from ..identity import access
 from ..identity import store as ids
 from ..identity.access import Action, Principal
-from ..trust import merge
+from ..knowledge import query
+from ..trust import claim_review, merge
 from . import idempotency
 from .identity_routes import conn, principal
 
@@ -98,6 +99,31 @@ def close(mr_id: int, body: Close, p: Principal | None = Depends(principal),
           c: psycopg.Connection = Depends(conn)) -> dict:
     _call(merge.close, c, p, mr_id, body.state)
     return {"ok": True, "merge_request_id": mr_id, "state": body.state}
+
+
+class ClaimReview(BaseModel):
+    verdict: Literal["approve", "reject"]
+    findings: str = Field(default="", max_length=4000)
+
+
+@router.post("/claims/{claim_id}/reviews")
+def review_claim(claim_id: int, body: ClaimReview, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """Review a claim already in a repository. The response says where the claim now stands, and why."""
+    return {"ok": True} | _call(claim_review.review, c, p, claim_id, body.verdict, body.findings)
+
+
+@router.get("/repos/{owner}/{name}/review-queue")
+def review_queue(owner: str, name: str,
+                 state: Literal["structurally_valid", "under_review", "stale"] | None = None,
+                 after: int = Query(default=0, ge=0), limit: int = Query(default=20, ge=1, le=100),
+                 p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Claims waiting for review (unreviewed, part-reviewed, or stale), with their passages in context."""
+    repo = ids.get_repo(c, f"{owner}/{name}")
+    if repo is None or not access.decide(p, Action.READ, repo, ids.role_in(c, p.agent_id if p else None, repo.id)):
+        raise HTTPException(404)
+    states = (state,) if state else claim_review.REVIEWABLE
+    return {"ok": True, "repository": repo.slug} | query.review_queue(c, repo.id, states, after, limit)
 
 
 @router.get("/repos/{owner}/{name}/merge-requests")

@@ -204,6 +204,12 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
         """Merge requests you've been asked to review and haven't yet."""
         return api("GET", "/v1/review-requests")
 
+    @server.tool(annotations=READ)
+    def get_review_queue(repository: str, limit: int = 10) -> dict:
+        """Claims in a repository waiting for review, oldest first, each with its passage in context and the
+        reviews so far. Check the claim against the passage, not against what you believe."""
+        return api("GET", f"/v1/repos/{_slug(repository)}/review-queue", params={"limit": limit})
+
     if read_only:
         return server
 
@@ -233,6 +239,12 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
         Approve only if the cited spans support the proposition as worded."""
         return api("POST", f"/v1/merge-requests/{merge_request_id}/reviews",
                    json={"verdict": verdict, "findings": findings})
+
+    @server.tool(annotations=WRITE)
+    def review_claim(claim_id: int, verdict: Literal["approve", "reject"], findings: str = "") -> dict:
+        """Review a claim already in a repository: approve only if its passage supports it exactly as worded.
+        Returns the claim's state afterwards and anything still holding it back (policy, objections, challenges)."""
+        return api("POST", f"/v1/claims/{claim_id}/reviews", json={"verdict": verdict, "findings": findings})
 
     @server.tool(annotations=WRITE)
     def submit_challenge(claim_id: int,
