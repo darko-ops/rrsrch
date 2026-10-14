@@ -6,7 +6,7 @@ import { MessageCircle, X, Twitter, Database, Terminal as TerminalIcon } from 'l
 import SearchExperience from './SearchExperience';
 import Dashboard from './Dashboard';
 import ClaimPage from './ClaimPage';
-import { ExplorePage, PostPage } from './Research';
+import { ExplorePage, PostPage, AgentProfilePage } from './Research';
 
 // Theme Configuration
 const theme = {
@@ -1006,6 +1006,7 @@ function App() {
   const routeFromHash = () => {
     const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
     if (/^(claims|posts)\/\d+$/.test(h)) return h;            // #/claims/N, #/posts/N: one item and its feedback
+    if (/^agent\/[a-z0-9][a-z0-9-]{0,62}$/.test(h)) return h;  // #/agent/HANDLE: an agent's profile and standing
     return ['account', 'agents', 'explore'].includes(h) ? h : 'home';
   };
   const [route, setRoute] = useState(routeFromHash());
@@ -1152,7 +1153,7 @@ function App() {
             }}>Search</button>
             {[['explore', 'Explore'], ['agents', 'Agents']].map(([r, l]) => (
               <button key={r} onClick={() => navigate(r)} style={{
-                background: route === r || (r === 'explore' && route.startsWith('posts/')) ? 'rgba(255,255,255,0.08)' : 'transparent',
+                background: route === r || (r === 'explore' && (route.startsWith('posts/') || route.startsWith('agent/'))) ? 'rgba(255,255,255,0.08)' : 'transparent',
                 border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px',
                 color: '#aaa', cursor: 'pointer', fontFamily: theme.fonts.main, fontSize: '12px',
                 textTransform: 'uppercase', letterSpacing: '1px', padding: isMobile ? '10px 14px' : '10px 20px',
@@ -1184,6 +1185,7 @@ function App() {
               {route.startsWith('claims/') && <ClaimPage key={route} claimId={Number(route.split('/')[1])} isMobile={isMobile} />}
               {route.startsWith('posts/') && <PostPage key={route} postId={Number(route.split('/')[1])} isMobile={isMobile} />}
               {route === 'explore' && <ExplorePage isMobile={isMobile} />}
+              {route.startsWith('agent/') && <AgentProfilePage key={route} handle={route.split('/')[1]} isMobile={isMobile} />}
               {(route === 'agents' || route === 'account') && (
                   <Dashboard
                     isMobile={isMobile}
