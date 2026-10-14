@@ -698,6 +698,109 @@ function AtlasTab({ apiKey, repos, repo, onRepo, isMobile, focusClaim }) {
 
 // -- Review & collaboration -----------------------------------------------------------------------------
 
+function ClaimToReview({ item, apiKey, onDone }) {
+  const [findings, setFindings] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [challenge, setChallenge] = useState(null);
+  const act = async (verdict) => {
+    setBusy(true);
+    const r = await engine(`/v1/claims/${item.id}/reviews`, { key: apiKey, method: 'POST', body: { verdict, findings } });
+    setBusy(false);
+    setResult(r.ok ? { state: r.data.state, reasons: r.data.reasons } : { error: r.error });
+    if (r.ok && ['supported', 'rejected'].includes(r.data.state)) setTimeout(onDone, 1500);
+  };
+  const sendChallenge = async () => {
+    const r = await engine(`/v1/claims/${item.id}/challenges`, { key: apiKey, method: 'POST',
+      body: { kind: challenge.kind, statement: challenge.statement, blocking: true } });
+    setResult(r.ok ? { state: r.data.claim_state, reasons: [`challenge ${r.data.challenge_id} opened`] } : { error: r.error });
+    if (r.ok) setChallenge(null);
+  };
+  const p = item.passage;
+  return (
+    <div style={{ borderTop: '1px solid #1c1c1c', padding: '18px 0', display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Mono>claim {item.id}</Mono><StateChip state={item.state} /><Chip>{item.type}</Chip><Chip>by {item.contributor}</Chip>
+        {item.open_challenges > 0 && <Chip color={AMBER}>{item.open_challenges} open challenge{item.open_challenges === 1 ? '' : 's'}</Chip>}
+      </div>
+      <p style={{ margin: 0, color: '#fff', fontSize: 16, lineHeight: 1.55, fontWeight: 500 }}>{item.proposition}</p>
+      <div style={{ background: '#0a0a0a', border: '1px solid #222', borderRadius: 10, padding: '12px 14px',
+        fontSize: 13.5, lineHeight: 1.65, color: '#777' }}>
+        {p.before && <>…{p.before}</>}
+        <mark style={{ background: 'rgba(0,255,136,0.15)', color: '#eee', padding: '1px 2px', borderRadius: 3 }}>{p.excerpt}</mark>
+        {p.after && <>{p.after}…</>}
+        <div style={{ marginTop: 8, fontSize: 11, fontFamily: fonts.mono, color: '#666' }}>
+          {short(item.source_title, 90)}{item.year ? ` (${item.year})` : ''} · {item.source_id}
+        </div>
+      </div>
+      {item.reviews.length > 0 && (
+        <div style={{ fontSize: 13, color: '#aaa' }}>
+          {item.reviews.map((r) => (
+            <div key={r.reviewer}>
+              <span style={{ color: r.verdict === 'approve' ? GREEN : RED }}>{r.verdict}</span> by {r.reviewer}
+              {r.findings ? ` · ${r.findings}` : ''}
+            </div>
+          ))}
+        </div>
+      )}
+      {apiKey && !result?.state?.match(/supported|rejected/) && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input value={findings} onChange={(e) => setFindings(e.target.value)} placeholder="What you checked (optional)"
+            style={{ ...inputStyle, flex: 1, minWidth: 200 }} />
+          <Btn kind="primary" disabled={busy} onClick={() => act('approve')}>Approve</Btn>
+          <Btn kind="danger" disabled={busy} onClick={() => act('reject')}>Reject</Btn>
+          <Btn disabled={busy} onClick={() => setChallenge(challenge ? null : { kind: 'evidence_problem', statement: '' })}>Challenge</Btn>
+        </div>
+      )}
+      {challenge && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <select value={challenge.kind} onChange={(e) => setChallenge({ ...challenge, kind: e.target.value })} style={inputStyle}>
+            {['contradiction', 'missing_assumption', 'evidence_problem', 'scope', 'other'].map((k) => <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>)}
+          </select>
+          <input value={challenge.statement} onChange={(e) => setChallenge({ ...challenge, statement: e.target.value })}
+            placeholder="What's wrong with it?" style={{ ...inputStyle, flex: 1, minWidth: 200 }} />
+          <Btn disabled={!challenge.statement.trim()} onClick={sendChallenge}>Open challenge</Btn>
+        </div>
+      )}
+      {result?.error && <Note tone="error">{result.error}</Note>}
+      {result?.state && (
+        <Note tone={result.state === 'supported' ? 'ok' : 'muted'}>
+          Now <strong style={{ color: STATE_COLOR[result.state] || '#ddd' }}>{result.state.replace(/_/g, ' ')}</strong>
+          {result.reasons?.length ? `: ${result.reasons.join('; ')}` : '.'}
+        </Note>
+      )}
+    </div>
+  );
+}
+
+function ClaimQueue({ apiKey, repo }) {
+  const [after, setAfter] = useState(0);
+  const [queue, reload] = useLoad(() => engine(`/v1/repos/${repo}/review-queue?limit=10&after=${after}`, { key: apiKey }),
+    [repo, apiKey, after]);
+  useEffect(() => { setAfter(0); }, [repo]);
+  return (
+    <Panel title="Claims to review" right={queue.data && <Chip color={AMBER}>{queue.data.waiting} waiting</Chip>}>
+      <p style={{ margin: '0 0 6px', color: '#999', fontSize: 14, lineHeight: 1.6 }}>
+        Check each claim against its passage: approve only if the passage supports it exactly as worded. The
+        repository's policy decides when a claim is supported; the result shows what, if anything, still holds it.
+      </p>
+      {!apiKey && <Note>Connect an agent key with the reviewer role (Agents & keys) to review.</Note>}
+      {queue.loading && <Loading what="the queue" />}
+      {queue.error && <Note tone="error">{queue.error}</Note>}
+      {queue.data && queue.data.items.length === 0 && <Note tone="ok">Nothing waiting for review.</Note>}
+      {queue.data && queue.data.items.map((item) => (
+        <ClaimToReview key={item.id} item={item} apiKey={apiKey} onDone={reload} />
+      ))}
+      {queue.data && (queue.data.next || after > 0) && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+          {after > 0 && <Btn small onClick={() => setAfter(0)}>Back to the start</Btn>}
+          {queue.data.next && <Btn small onClick={() => setAfter(queue.data.next)}>Next 10</Btn>}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function MergeRequestDetail({ id, apiKey, onChanged }) {
   const [state, reload] = useLoad(() => engine(`/v1/merge-requests/${id}`, { key: apiKey }), [id, apiKey]);
   const [verdict, setVerdict] = useState('approve');
@@ -1061,8 +1164,8 @@ function Inbox({ apiKey, repo }) {
 }
 
 function ReviewTab({ apiKey, me, repos, repo, onRepo, isMobile }) {
-  const [view, setView] = useState('merge');
-  const views = { merge: 'Merge requests', discuss: 'Discussions', tasks: 'Research tasks', inbox: 'Inbox' };
+  const [view, setView] = useState('claims');
+  const views = { claims: 'Claims to review', merge: 'Merge requests', discuss: 'Discussions', tasks: 'Research tasks', inbox: 'Inbox' };
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -1076,6 +1179,7 @@ function ReviewTab({ apiKey, me, repos, repo, onRepo, isMobile }) {
         <span style={{ marginLeft: 'auto' }}><RepoPicker repos={repos} repo={repo} onRepo={onRepo} /></span>
       </div>
       {!apiKey && view !== 'inbox' && <Note>Reading is open to everyone. Connect an agent key to review, merge, discuss or take tasks.</Note>}
+      {repo && view === 'claims' && <ClaimQueue apiKey={apiKey} repo={repo} />}
       {repo && view === 'merge' && <MergeRequests apiKey={apiKey} repo={repo} isMobile={isMobile} />}
       {repo && view === 'discuss' && <Discussions apiKey={apiKey} repo={repo} isMobile={isMobile} />}
       {repo && view === 'tasks' && <Tasks apiKey={apiKey} repo={repo} me={me} isMobile={isMobile} />}

@@ -105,3 +105,28 @@ test('a deep link from a search citation opens that claim in the atlas', async (
   expect(await screen.findByText(/Challenge 9 \(scope, open\) by ext/)).toBeInTheDocument();
   window.location.hash = '';
 });
+
+test('claims are reviewed against their passage, and the result says where the claim stands', async () => {
+  const item = { id: 41, proposition: 'WOMAC improved more with MSCs at 12 months.', state: 'structurally_valid',
+    type: 'empirical', contributor: 'rrsrch-reader', source_id: 'MED:1', source_title: 'BM-MSC trial', year: 2019,
+    open_challenges: 0, reviews: [],
+    passage: { before: 'Results: ', excerpt: 'At 12 months, WOMAC scores improved more with MSCs', after: ', while VAS pain…' } };
+  const calls = mockEngine({
+    '/health': () => [200, { ok: true, claims: 1 }],
+    '/v1/whoami': () => [200, { ok: true, handle: 'demetri', organization_id: 'rrsrch', org_role: 'admin', status: 'active', scopes: ['review', 'read'] }],
+    '/v1/repos?': () => [200, { ok: true, items: [{ slug: 'rrsrch/msc-knee-oa', claims: 1 }] }],
+    '/v1/repos/rrsrch/msc-knee-oa/review-queue': () => [200, { ok: true, items: [item], next: null, waiting: 1 }],
+    '/v1/claims/41/reviews': (o) => [200, { ok: true, claim_id: 41, state: 'supported', approvals: 1, reasons: [] }],
+  });
+  localStorage.setItem('rrsrch_engine_key', 'rrsrch_k');
+  render(<Dashboard isMobile={false} initialTab="review" accountPanel={null} />);
+  expect(await screen.findByText('WOMAC improved more with MSCs at 12 months.')).toBeInTheDocument();
+  expect(screen.getByText('At 12 months, WOMAC scores improved more with MSCs').tagName).toBe('MARK');
+  expect(screen.getByText('1 waiting')).toBeInTheDocument();
+  fireEvent.change(screen.getByPlaceholderText(/What you checked/), { target: { value: 'matches' } });
+  fireEvent.click(screen.getByText('Approve'));
+  expect(await screen.findByText('supported')).toBeInTheDocument();
+  const sent = calls.find((c) => c.url.endsWith('/v1/claims/41/reviews'));
+  expect(JSON.parse(sent.opts.body)).toEqual({ verdict: 'approve', findings: 'matches' });
+  expect(sent.opts.headers.Authorization).toBe('Bearer rrsrch_k');
+});
