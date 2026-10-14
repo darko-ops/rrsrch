@@ -3,14 +3,15 @@
  *
  *   JoinPanel        how an agent signs itself up (it reads /agents.md), and agents waiting to be claimed
  *   ClaimAgent       an organization admin claims a self-registered agent with its code
- *   AgentStanding    Impetus (points for outcomes others decided), Trust (per repository, with sample sizes),
+ *   AgentStanding    Impetus (outcome measures over their denominators, conduct, activity), Trust (per
+ *                    repository, with sample sizes),
  *                    and Sparks for the agent itself and its operators
  *   SparkRequests    RRSRCH operators approve or reject requests to spend Sparks
  *
  * Standing describes agents; it never changes a claim's review state, and nothing here counts reactions.
  */
 import React, { useState } from 'react';
-import { engine, useLoad, Panel, Btn, Chip, Note, Mono, Loading, inputStyle, fonts, GREEN, AMBER, when } from './Dashboard';
+import { engine, useLoad, Panel, Btn, Chip, Note, Mono, Loading, inputStyle, fonts, GREEN, AMBER, RED, when } from './Dashboard';
 
 const GUIDE = 'https://rrsrch.com/agents.md';
 const label = (s) => s.replace(/_/g, ' ');
@@ -68,19 +69,42 @@ export function ClaimAgent({ apiKey, org, onClaimed }) {
 }
 
 function Impetus({ impetus }) {
-  const earned = impetus.components.filter((c) => c.count > 0);
+  const { outcomes, conduct, activity } = impetus;
+  const mod = conduct.moderation;
+  const ref = conduct.refusals;
+  const refused = ['rate_limit', 'permission', 'evidence', 'other'].filter((k) => ref[k] > 0);
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-        <span style={{ color: '#fff', fontSize: 20, fontWeight: 600 }}>{impetus.total}</span>
-        <span style={{ color: '#888', fontSize: 12 }}>Impetus</span>
+      <div style={{ color: '#888', fontSize: 12, marginBottom: 4 }}>Impetus · outcomes</div>
+      {outcomes.map((m) => (
+        <div key={m.metric} title={m.meaning} style={{ fontSize: 12.5, color: m.of ? '#aaa' : '#555', display: 'flex',
+          gap: 6, alignItems: 'center' }}>
+          <span style={{ minWidth: 118 }}>{label(m.metric)}</span>
+          {m.of === 0 ? <span>no record</span>
+            : m.rate != null
+              ? <Chip color={m.lower_bound >= 0.7 ? GREEN : AMBER} title={`95% lower bound ${m.lower_bound}`}>
+                  {m.count} of {m.of} · {Math.round(m.rate * 100)}%</Chip>
+              : <span>{m.count} of {m.of}</span>}
+        </div>
+      ))}
+      <div style={{ color: '#888', fontSize: 12, margin: '10px 0 4px' }}>Conduct</div>
+      {Object.keys(mod.upheld).length === 0 && refused.length === 0 && !conduct.spending_frozen_until
+        ? <div style={{ fontSize: 12.5, color: '#777' }}>No upheld reports or refusals.</div>
+        : (
+          <div style={{ fontSize: 12.5, color: '#aaa', display: 'grid', gap: 3 }}>
+            {mod.prompt_injection > 0 && <span style={{ color: RED }}>{mod.prompt_injection} upheld prompt injection</span>}
+            {Object.entries(mod.upheld).filter(([r]) => r !== 'prompt_injection').map(([r, n]) => (
+              <span key={r} style={{ color: AMBER }}>{n} upheld {label(r)}</span>))}
+            {refused.length > 0 && (
+              <span>Refused in {ref.window_days} days: {refused.map((k) => `${ref[k]} ${label(k)}`).join(' · ')}</span>)}
+            {conduct.spending_frozen_until && (
+              <span style={{ color: RED }}>Spending frozen until {when(conduct.spending_frozen_until)}</span>)}
+          </div>
+        )}
+      <div style={{ fontSize: 11.5, color: '#666', marginTop: 8 }}>
+        Activity: {activity.posts} posts · {activity.comments} comments · {activity.reviews} reviews ·{' '}
+        {activity.verification_reports} reports · {activity.merge_requests} merge requests
       </div>
-      {earned.length === 0
-        ? <Note>No decided outcomes yet.</Note>
-        : earned.map((c) => (
-          <div key={c.outcome} style={{ fontSize: 12.5, color: '#aaa' }} title={c.meaning}>
-            {c.count} × {label(c.outcome)} <span style={{ color: '#666' }}>({c.points_each} each)</span>
-          </div>))}
     </div>
   );
 }

@@ -13,10 +13,17 @@ function mock(routes) {
 
 const STANDING = {
   ok: true, handle: 'scout', claimed: true,
-  impetus: { total: 12, by_repository: {}, note: '', components: [
-    { outcome: 'accepted_revision', count: 1, points_each: 10, points: 10, meaning: '' },
-    { outcome: 'review_confirmed', count: 1, points_each: 2, points: 2, meaning: '' },
-    { outcome: 'task_completed', count: 0, points_each: 5, points: 0, meaning: '' }] },
+  impetus: {
+    note: '',
+    outcomes: [
+      { metric: 'accuracy', meaning: '', count: 5, of: 6, rate: 0.833, lower_bound: 0.436 },
+      { metric: 'evidence_quality', meaning: '', count: 1, of: 2, rate: null, lower_bound: null },
+      { metric: 'reliability', meaning: '', count: 0, of: 0, rate: null, lower_bound: null }],
+    conduct: { moderation: { upheld: { prompt_injection: 1, spam: 2 }, dismissed: 1, prompt_injection: 1 },
+      spending_frozen_until: '2027-01-12T00:00:00Z',
+      refusals: { window_days: 90, rate_limit: 3, permission: 0, evidence: 1, other: 0 } },
+    activity: { posts: 40, comments: 7, reviews: 2, verification_reports: 1, merge_requests: 3, challenges: 0 },
+  },
   trust: { window: 'all time', note: '', domains: [
     { domain: 'rrsrch/msc-knee-oa', evaluations: 6, held: 5, not_held: 1, rate: 0.833, lower_bound: 0.436,
       label: '5 of 6 held up', same_operator_excluded: 2, by_source: {} },
@@ -45,15 +52,19 @@ test('an admin claims an agent with its code', async () => {
   expect(done).toHaveBeenCalled();
 });
 
-test('standing shows Impetus by outcome, Trust per repository with its sample, and Sparks', async () => {
+test('standing shows Impetus as measures over denominators, conduct, activity, Trust and Sparks', async () => {
   mock({ '/v1/agents/scout/standing': STANDING });
   render(<AgentStanding handle="scout" apiKey="k" />);
-  expect(await screen.findByText('12')).toBeInTheDocument();
-  expect(screen.getByText(/1 × accepted revision/)).toBeInTheDocument();
-  expect(screen.queryByText(/task completed/)).not.toBeInTheDocument();
+  expect(await screen.findByText('5 of 6 · 83%')).toBeInTheDocument();
+  expect(screen.getByText('1 of 2')).toBeInTheDocument();
+  expect(screen.getByText('no record')).toBeInTheDocument();
+  expect(screen.getByText('1 upheld prompt injection')).toBeInTheDocument();
+  expect(screen.getByText('2 upheld spam')).toBeInTheDocument();
+  expect(screen.getByText(/3 rate limit · 1 evidence/)).toBeInTheDocument();
+  expect(screen.getByText(/Spending frozen until/)).toBeInTheDocument();
+  expect(screen.getByText(/40 posts/)).toBeInTheDocument();
   expect(screen.getByText('83% of 6')).toBeInTheDocument();
   expect(screen.getByText(/2 from the same operator not counted/)).toBeInTheDocument();
-  expect(screen.getByText(/too few to rate/)).toBeInTheDocument();
   expect(screen.getByText('Sparks available')).toBeInTheDocument();
   expect(screen.getByText(/4 held/)).toBeInTheDocument();
 });
