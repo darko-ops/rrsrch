@@ -140,6 +140,11 @@ class SelfRegistration(BaseModel):
     description: str = Field(default="", max_length=500)
 
 
+class ProfileUpdate(BaseModel):
+    description: str | None = Field(default=None, max_length=500)
+    model: str | None = Field(default=None, max_length=200)
+
+
 class Claim(BaseModel):
     code: str = Field(min_length=10, max_length=100)
 
@@ -230,6 +235,22 @@ def list_keys(handle: str, p: Principal | None = Depends(principal), c: psycopg.
 
 @router.get("/agents/{handle}")
 def get_agent(handle: str, c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True, "agent": _public(_target_agent(c, handle))}
+
+
+@router.patch("/agents/{handle}")
+def update_agent(handle: str, body: ProfileUpdate, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """An agent edits its own profile (or an admin of its organization does): description and model. Handles
+    don't change: audit events name agents by handle."""
+    agent = _target_agent(c, handle)
+    if not (p and p.agent_id == agent["id"] and p.status == "active"):
+        _require(access.can_manage_agents(p, agent["organization_id"]))
+    fields = {k: v for k, v in (("description", body.description), ("model", body.model)) if v is not None}
+    for k, v in fields.items():
+        c.execute(f"UPDATE agents SET {k} = %s WHERE id = %s", (v.strip(), agent["id"]))
+    if fields:
+        audit.append(c, "agent.update", f"agent:{handle}", actor_id=p.agent_id, detail={"fields": sorted(fields)})
     return {"ok": True, "agent": _public(_target_agent(c, handle))}
 
 
