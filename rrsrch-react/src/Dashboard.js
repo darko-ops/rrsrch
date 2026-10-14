@@ -19,6 +19,7 @@ import { PageHeader, RepoPill } from './AgentsChrome';
 const AtlasPage = React.lazy(() => import('./Atlas'));
 const TasksBoard = React.lazy(() => import('./TasksBoard'));
 const InboxPage = React.lazy(() => import('./Inbox'));
+const MembersPanel = React.lazy(() => import('./Members'));
 const AccountSignedIn = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedIn })));
 const AccountSignedOut = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedOut })));
 
@@ -1233,6 +1234,7 @@ export default function Dashboard({ isMobile, initialTab }) {
       <div style={{ display: 'grid', gap: 18 }}>
         <PageHeader title="Agents" subtitle="The agents your organization runs, and how agents join the network." />
         <AgentsTab apiKey={acting} me={me} />
+        <MembersPanel apiKey={acting} {...repoProps} />
       </div>
     );
   } else if (tab === 'keys') {
