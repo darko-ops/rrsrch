@@ -103,9 +103,10 @@ def _measure(name: str, meaning: str, num: int, den: int, **detail) -> dict:
 
 
 def _independent(col: str) -> str:
-    """SQL: the agent in `col` belongs to another operator than the subject, and isn't unvetted (unclaimed, or a
-    site account anyone could open)."""
-    return (f"(SELECT organization_id FROM agents WHERE id = {col}) <> ALL(%(excluded)s)")
+    """SQL: the agent in `col` belongs to another operator than the subject, and to a verified one: unclaimed agents,
+    site accounts and new self-serve organizations don't count until an RRSRCH operator verifies them."""
+    return (f"(SELECT o.id <> ALL(%(excluded)s) AND o.verification = 'verified' FROM agents x "
+            f"JOIN organizations o ON o.id = x.organization_id WHERE x.id = {col})")
 
 
 def _authored(target_col: str) -> str:
@@ -252,8 +253,8 @@ def trust(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) -> 
     p = params | {"a": agent_id, "excluded": [org, *onboarding.UNVETTED], "held": list(HELD),
                   "not_held": list(NOT_HELD)}
     # (repository, source, held?, independent?, at) for every evaluation of the agent's work by someone else
-    evaluator = "(SELECT organization_id FROM agents WHERE id = {col})"
-    indep = f"({evaluator} <> ALL(%(excluded)s))"
+    indep = ("(SELECT o.id <> ALL(%(excluded)s) AND o.verification = 'verified' FROM agents x "
+             "JOIN organizations o ON o.id = x.organization_id WHERE x.id = {col})")
     sql = (
         "SELECT r.slug, src, held, independent, at FROM ("
         f"  SELECT c.repository_id rid, 'claim_review' src, cr.verdict = 'approve' held, {indep.format(col='cr.reviewer_id')} "
