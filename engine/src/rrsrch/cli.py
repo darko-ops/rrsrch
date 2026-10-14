@@ -4,7 +4,7 @@
   rrsrch corpus fetch [--refresh]          snapshot every source and trial locally
   rrsrch corpus verify                     prove local snapshots match the lockfile
   rrsrch corpus status                     what the corpus holds, and what needs review
-  rrsrch ledger load                       migrate Postgres and load the corpus
+  rrsrch ledger load                       migrate Postgres, load the corpus, record claim revisions
   rrsrch read plan                         what the reader would send the model (no model needed)
   rrsrch read run [--source ID] [--limit N] extract claims with the model in RRSRCH_LLM_URL
   rrsrch read stats                        claims, rejections by rule, coverage
@@ -17,6 +17,15 @@
   rrsrch serve [--host] [--port]           HTTP answer API for the site (POST /v1/answer)
   rrsrch bench check                       validate the benchmark against the answer key
   rrsrch bench run [--only ID]             write and score a report for each benchmark question
+  rrsrch org add ID NAME                   create an organization
+  rrsrch agent add HANDLE --org ORG [--kind K] [--admin]   register an agent
+  rrsrch agent key HANDLE --scope S [...] [--days N]       issue an API key (shown once)
+  rrsrch agent revoke HANDLE               revoke an agent and all its keys
+  rrsrch repo member SLUG HANDLE ROLE      grant a repository role (or `none` to remove)
+  rrsrch audit verify                      check every audit event's hash and link
+  rrsrch mcp [--api URL] [--read-only]     MCP server (stdio) over the API, as RRSRCH_API_KEY
+  rrsrch eval run --db URL [...]           run conditions A/B/C on the benchmark (needs RRSRCH_LLM_URL)
+  rrsrch eval report RESULT.json           score a run and print the comparison table
 """
 from __future__ import annotations
 
@@ -170,12 +179,16 @@ def cmd_status(args) -> int:
 
 
 def cmd_ledger_load(args) -> int:
+    from .knowledge import store
     from .ledger import db
     with db.connect() as conn:
         applied = db.migrate(conn)
         if applied:
             print(f"migrations applied: {', '.join(applied)}")
         rep = db.load_corpus(conn, manifest.load())
+        recorded = store.sync(conn, snapshot.Lock().entries)
+    if recorded:
+        print(f"recorded revisions and evidence for {recorded} claim(s)")
     print(f"loaded {rep.sources} sources, documents {rep.documents}, "
           f"{rep.trials} trials, {rep.links} trial links")
     for m in rep.missing_snapshots:
@@ -365,8 +378,8 @@ def cmd_skeptic_run(args) -> int:
 
 
 def cmd_serve(args) -> int:
-    from .serve import http as server
-    server.run(host=args.host, port=args.port)
+    from .serve import api
+    api.run(host=args.host, port=args.port)
     return 0
 
 
@@ -391,6 +404,165 @@ def cmd_skeptic_show(args) -> int:
             print()
     print(f"\n{len(rows)} contradiction(s), {n_agree} agreeing pair(s)")
     return 0
+
+
+def _identity(fn):
+    """Run fn(conn, store, audit) in one transaction on a migrated ledger; ValueErrors become exit code 1."""
+    from .identity import store
+    from .ledger import db
+    from .trust import audit
+    try:
+        with db.connect() as conn:
+            db.migrate(conn)
+            return fn(conn, store, audit) or 0
+    except (ValueError, LookupError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_org_add(args) -> int:
+    def go(conn, store, audit):
+        store.create_organization(conn, args.id, args.name)
+        audit.append(conn, "organization.create", f"org:{args.id}", detail={"name": args.name})
+    return _identity(go)
+
+
+def cmd_agent_add(args) -> int:
+    def go(conn, store, audit):
+        a = store.register_agent(conn, args.org, args.handle, args.kind, model=args.model,
+                                 org_role="admin" if args.admin else "member")
+        audit.append(conn, "agent.register", f"agent:{a['handle']}",
+                     detail={"organization_id": args.org, "kind": args.kind, "org_role": a["org_role"]})
+        print(f"registered {a['handle']} ({a['kind']}, {a['org_role']} of {a['organization_id']})")
+    return _identity(go)
+
+
+def cmd_agent_key(args) -> int:
+    def go(conn, store, audit):
+        agent = store.get_agent(conn, args.handle)
+        if agent is None:
+            raise LookupError(f"no agent {args.handle}")
+        token, key_id, expires = store.issue_key(conn, agent["id"], set(args.scope), days=args.days,
+                                                 label=args.label)
+        audit.append(conn, "key.issue", f"agent:{args.handle}",
+                     detail={"key_id": key_id, "scopes": sorted(args.scope), "days": args.days})
+        print(f"key {key_id} for {args.handle}, scopes {sorted(args.scope)}, expires {expires:%Y-%m-%d}")
+        print("store it now; it is not shown again:")
+        print(token)
+    return _identity(go)
+
+
+def cmd_agent_revoke(args) -> int:
+    def go(conn, store, audit):
+        agent = store.get_agent(conn, args.handle)
+        if agent is None:
+            raise LookupError(f"no agent {args.handle}")
+        n = store.revoke_agent(conn, agent["id"])
+        audit.append(conn, "agent.revoke", f"agent:{args.handle}", detail={"keys_revoked": n})
+        print(f"revoked {args.handle} and {n} live key(s)")
+    return _identity(go)
+
+
+def cmd_repo_member(args) -> int:
+    def go(conn, store, audit):
+        repo, agent = store.get_repo(conn, args.slug), store.get_agent(conn, args.handle)
+        if repo is None or agent is None:
+            raise LookupError(f"no {'repository ' + args.slug if repo is None else 'agent ' + args.handle}")
+        if args.role == "none":
+            removed = store.remove_member(conn, repo.id, agent["id"])
+            audit.append(conn, "member.remove", f"agent:{args.handle}", repository_id=repo.id,
+                         detail={"removed": removed})
+            print("removed" if removed else "was not a member")
+        else:
+            store.set_member(conn, repo.id, agent["id"], args.role, granted_by=None)
+            audit.append(conn, "member.set", f"agent:{args.handle}", repository_id=repo.id,
+                         detail={"role": args.role})
+            print(f"{args.handle} is now {args.role} of {args.slug}")
+    return _identity(go)
+
+
+def cmd_mcp(args) -> int:
+    import os
+
+    from .serve import mcp_tools
+    mcp_tools.run(args.api or os.environ.get("RRSRCH_API_URL", "http://127.0.0.1:8787"),
+                  os.environ.get("RRSRCH_API_KEY"), read_only=args.read_only)
+    return 0
+
+
+def cmd_eval_run(args) -> int:
+    import json
+    import os
+    from pathlib import Path
+
+    import psycopg
+
+    from .bench import questions
+    from .evals import run as ev
+    from .evals import scoring
+    from .evals.agent import LLMAgent
+    from .evals.budget import Budget
+    from .ledger import db
+    from .reader.llm import LLM
+    ledger = os.environ.get("RRSRCH_DATABASE_URL", db.DEFAULT_URL)
+    if ev.same_database(args.db, ledger):
+        print("error: --db is the ledger database, or one of the two couldn't be reached to tell them apart\n"
+              "(check --db and RRSRCH_DATABASE_URL). Run evaluations on a copy, e.g.\n"
+              "  createdb -T rrsrch rrsrch_eval   (or pg_dump rrsrch | psql rrsrch_eval)", file=sys.stderr)
+        return 2
+    conditions = tuple(c.strip().upper() for c in args.conditions.split(",") if c.strip())
+    if not conditions or set(conditions) - set(ev.CONDITIONS):
+        print(f"error: --conditions must be some of {','.join(ev.CONDITIONS)}", file=sys.stderr)
+        return 2
+    if args.model:
+        os.environ["RRSRCH_READER_MODEL"] = args.model
+    try:
+        llm = LLM.from_env()                  # URL, model and RRSRCH_LLM_TIMEOUT, validated
+    except RuntimeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    import httpx
+    model_client = httpx.Client(timeout=llm.timeout)
+    tasks = ev.tasks_from_benchmark(questions.load(), args.only)
+    cfg = ev.Config(conditions=conditions, agents=args.agents, repeats=args.repeats,
+                    seeded_errors=args.seeded_errors,
+                    budget=Budget(max_tool_calls=args.max_tool_calls, max_tokens=args.max_tokens))
+    harness = ev.Harness(lambda: psycopg.connect(args.db), cfg)
+    try:
+        result = harness.run(tasks, lambda cond, i, handle: LLMAgent(handle, llm.base_url, llm.model,
+                                                                     client=model_client), progress=print)
+    finally:
+        model_client.close()
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    raw = out / f"eval-{cfg.run_id}.json"
+    raw.write_text(json.dumps(result, indent=1, default=str))
+    scored = scoring.score(result)
+    (out / f"eval-{cfg.run_id}.md").write_text(scoring.markdown(scored))
+    print(scoring.markdown(scored))
+    print(f"wrote {raw}")
+    return 0
+
+
+def cmd_eval_report(args) -> int:
+    import json
+    from pathlib import Path
+
+    from .evals import scoring
+    print(scoring.markdown(scoring.score(json.loads(Path(args.result).read_text()))))
+    return 0
+
+
+def cmd_audit_verify(args) -> int:
+    from .ledger import db
+    from .trust import audit
+    with db.connect() as conn:
+        n = conn.execute("SELECT count(*) FROM audit_events").fetchone()[0]
+        problems = audit.verify(conn)
+    for pr in problems:
+        print(pr)
+    print(f"{n} event(s), {'chain intact' if not problems else f'{len(problems)} problem(s)'}")
+    return 1 if problems else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -448,6 +620,57 @@ def main(argv: list[str] | None = None) -> int:
     w = sub.add_parser("write", help="answer a question from the ledger, every sentence gated")
     w.add_argument("question")
     w.set_defaults(fn=cmd_write)
+    org = sub.add_parser("org").add_subparsers(dest="cmd", required=True)
+    oa = org.add_parser("add", help="create an organization")
+    oa.add_argument("id")
+    oa.add_argument("name")
+    oa.set_defaults(fn=cmd_org_add)
+    agent = sub.add_parser("agent").add_subparsers(dest="cmd", required=True)
+    aa = agent.add_parser("add", help="register an agent")
+    aa.add_argument("handle")
+    aa.add_argument("--org", required=True)
+    aa.add_argument("--kind", choices=("service", "model", "human"), default="service")
+    aa.add_argument("--model", help="model/provider, if you want it disclosed")
+    aa.add_argument("--admin", action="store_true", help="make it an admin of its organization")
+    aa.set_defaults(fn=cmd_agent_add)
+    ak = agent.add_parser("key", help="issue an API key")
+    ak.add_argument("handle")
+    ak.add_argument("--scope", action="append", required=True,
+                    choices=("read", "propose", "review", "maintain", "administer", "agents"))
+    ak.add_argument("--days", type=int, default=30)
+    ak.add_argument("--label", default="")
+    ak.set_defaults(fn=cmd_agent_key)
+    ar = agent.add_parser("revoke", help="revoke an agent and all its keys")
+    ar.add_argument("handle")
+    ar.set_defaults(fn=cmd_agent_revoke)
+    repo = sub.add_parser("repo").add_subparsers(dest="cmd", required=True)
+    rm = repo.add_parser("member", help="grant a repository role")
+    rm.add_argument("slug")
+    rm.add_argument("handle")
+    rm.add_argument("role", choices=("observer", "contributor", "reviewer", "maintainer", "owner", "none"))
+    rm.set_defaults(fn=cmd_repo_member)
+    au = sub.add_parser("audit").add_subparsers(dest="cmd", required=True)
+    au.add_parser("verify", help="check the audit chain").set_defaults(fn=cmd_audit_verify)
+    mc = sub.add_parser("mcp", help="MCP server over stdio; acts as the agent whose key is in RRSRCH_API_KEY")
+    mc.add_argument("--api", help="API base URL (default $RRSRCH_API_URL or http://127.0.0.1:8787)")
+    mc.add_argument("--read-only", action="store_true", help="offer only the read tools")
+    mc.set_defaults(fn=cmd_mcp)
+    ev = sub.add_parser("eval").add_subparsers(dest="cmd", required=True)
+    er = ev.add_parser("run", help="run the A/B/C experiment on the benchmark questions")
+    er.add_argument("--db", required=True, help="a dedicated evaluation database (a copy of the ledger)")
+    er.add_argument("--conditions", default="A,B,C")
+    er.add_argument("--agents", type=int, default=3)
+    er.add_argument("--repeats", type=int, default=1)
+    er.add_argument("--seeded-errors", type=int, default=2)
+    er.add_argument("--max-tool-calls", type=int, default=30)
+    er.add_argument("--max-tokens", type=int, default=60_000)
+    er.add_argument("--model", help="model name (default $RRSRCH_READER_MODEL)")
+    er.add_argument("--only", nargs="+", help="benchmark question ids")
+    er.add_argument("--out", default="evals")
+    er.set_defaults(fn=cmd_eval_run)
+    ep = ev.add_parser("report", help="score a saved run")
+    ep.add_argument("result")
+    ep.set_defaults(fn=cmd_eval_report)
     args = p.parse_args(argv)
     return args.fn(args)
 
