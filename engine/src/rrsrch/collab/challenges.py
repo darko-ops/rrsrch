@@ -46,15 +46,21 @@ def open_challenge(conn: psycopg.Connection, p: Principal | None, claim_id: int,
         raise Refused(400, f"evidence: {e}") from e
     rate_limit(conn, "SELECT count(*) FROM challenges WHERE author_id = %s AND claim_id = %s AND state = 'open'",
                (p.agent_id, claim_id), 3, "open challenges from you on this claim")
-    cid = conn.execute("INSERT INTO challenges (claim_id, author_id, kind, statement, evidence, blocking) "
-                       "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                       (claim_id, p.agent_id, kind, statement, json.dumps(spans), blocking)).fetchone()[0]
+    head = conn.execute("SELECT id FROM claim_revisions WHERE claim_id = %s ORDER BY version DESC LIMIT 1",
+                        (claim_id,)).fetchone()
+    cid = conn.execute("INSERT INTO challenges (claim_id, author_id, kind, statement, evidence, blocking, revision_id) "
+                       "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                       (claim_id, p.agent_id, kind, statement, json.dumps(spans), blocking,
+                        head[0] if head else None)).fetchone()[0]
+    author = conn.execute("SELECT a.handle FROM claims c JOIN agents a ON a.id = c.agent_id WHERE c.id = %s",
+                          (claim_id,)).fetchone()[0]
     contested = blocking and state == "supported"
     if contested:
         _set_state(conn, claim_id, state, "contested")
     audit.append(conn, "challenge.open", f"claim:{claim_id}", actor_id=p.agent_id, repository_id=repo_id,
                  detail={"challenge_id": cid, "claim_id": claim_id, "kind": kind, "blocking": blocking,
-                         "claim_state": "contested" if contested else state})
+                         "claim_state": "contested" if contested else state,
+                         "notify": [author] if author != p.handle else []})
     return cid
 
 
@@ -109,9 +115,10 @@ def withdraw(conn: psycopg.Connection, p: Principal | None, challenge_id: int) -
 
 
 def list_for_claim(conn: psycopg.Connection, claim_id: int) -> list[dict]:
-    cols = ("id", "author", "kind", "statement", "evidence", "blocking", "state", "resolution", "resolved_by",
-            "created_at", "resolved_at")
+    cols = ("id", "author", "author_kind", "kind", "statement", "evidence", "blocking", "state", "resolution",
+            "resolved_by", "created_at", "resolved_at", "revision")
     return [dict(zip(cols, r)) for r in conn.execute(
-        "SELECT c.id, a.handle, c.kind, c.statement, c.evidence, c.blocking, c.state, c.resolution, r.handle, "
-        "c.created_at, c.resolved_at FROM challenges c JOIN agents a ON a.id = c.author_id "
+        "SELECT c.id, a.handle, a.kind, c.kind, c.statement, c.evidence, c.blocking, c.state, c.resolution, r.handle, "
+        "c.created_at, c.resolved_at, (SELECT version FROM claim_revisions WHERE id = c.revision_id) "
+        "FROM challenges c JOIN agents a ON a.id = c.author_id "
         "LEFT JOIN agents r ON r.id = c.resolved_by WHERE c.claim_id = %s ORDER BY c.id", (claim_id,))]

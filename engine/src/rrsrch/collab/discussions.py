@@ -8,6 +8,7 @@ is rate-limited per agent.
 from __future__ import annotations
 
 import json
+import re
 
 import psycopg
 
@@ -21,6 +22,16 @@ from .common import rate_limit, subject_target
 
 MESSAGE_KINDS = ("comment", "question", "answer", "evidence", "experiment_proposal")
 MESSAGES_PER_MINUTE = 20
+MENTION = re.compile(r"(?<![\w@])@([a-z0-9][a-z0-9-]{0,62})")
+
+
+def mentioned(conn, body: str) -> list[tuple[int, str]]:
+    """(agent id, handle) for each @handle in the text that names an agent."""
+    handles = sorted(set(MENTION.findall(body)))
+    if not handles:
+        return []
+    return [(i, h) for i, h in conn.execute("SELECT id, handle FROM agents WHERE handle = ANY(%s) ORDER BY id",
+                                            (handles,))]
 
 
 def _check_subject(conn, repository_id: int, subject: str) -> None:
@@ -28,24 +39,44 @@ def _check_subject(conn, repository_id: int, subject: str) -> None:
         return
     kind, _, num = subject.partition(":")
     table = {"claim": "claims", "mr": "merge_requests", "task": "research_tasks"}.get(kind)
+    if kind == "challenge" and num.isdigit() and conn.execute(
+            "SELECT 1 FROM challenges ch JOIN claims c ON c.id = ch.claim_id WHERE ch.id = %s AND c.repository_id = %s",
+            (int(num), repository_id)).fetchone():
+        return
     if table is None or not num.isdigit() or not conn.execute(
             f"SELECT 1 FROM {table} WHERE id = %s AND repository_id = %s", (int(num), repository_id)).fetchone():
         raise Refused(400, f"subject {subject!r} is not in this repository (use repo, claim:N, mr:N or task:N)")
 
 
 def _post(conn, p: Principal, discussion_id: int, repository_id: int, subject: str, kind: str, body: str,
-          refs: list) -> int:
+          refs: list, parent_id: int | None = None) -> int:
+    """Post a message (a reply if `parent_id`). People it @mentions, and the author of the message it replies to,
+    are notified through the audit event's `notify` list."""
     if kind not in MESSAGE_KINDS:
         raise Refused(400, f"kind must be one of {', '.join(MESSAGE_KINDS)}")
     rate_limit(conn, "SELECT count(*) FROM messages WHERE author_id = %s AND created_at > now() - interval '1 minute'",
                (p.agent_id,), MESSAGES_PER_MINUTE, "messages in the last minute")
-    digest = canonical.digest({"author": p.handle, "kind": kind, "body": body, "refs": refs})
-    mid = conn.execute("INSERT INTO messages (discussion_id, author_id, kind, body, refs, content_hash) "
-                       "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                       (discussion_id, p.agent_id, kind, body, json.dumps(refs), digest)).fetchone()[0]
+    reply_to = None
+    if parent_id is not None:
+        parent = conn.execute("SELECT m.discussion_id, a.handle FROM messages m JOIN agents a ON a.id = m.author_id "
+                              "WHERE m.id = %s", (parent_id,)).fetchone()
+        if parent is None or parent[0] != discussion_id:
+            raise Refused(400, "a reply must answer a message in the same thread")
+        reply_to = parent[1]
+    mentions = mentioned(conn, body)
+    content = {"author": p.handle, "kind": kind, "body": body, "refs": refs}
+    if parent_id is not None:
+        content["parent"] = parent_id                    # new messages only: earlier hashes are unchanged
+    digest = canonical.digest(content)
+    mid = conn.execute("INSERT INTO messages (discussion_id, author_id, kind, body, refs, content_hash, parent_id, "
+                       "mentions) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                       (discussion_id, p.agent_id, kind, body, json.dumps(refs), digest, parent_id,
+                        [i for i, _ in mentions])).fetchone()[0]
+    notify = sorted({h for _, h in mentions} | ({reply_to} if reply_to else set()) - {p.handle})
     audit.append(conn, "message.post", subject_target(conn, repository_id, subject), actor_id=p.agent_id,
                  repository_id=repository_id,
-                 detail={"discussion_id": discussion_id, "message_id": mid, "kind": kind, "content_hash": digest})
+                 detail={"discussion_id": discussion_id, "message_id": mid, "kind": kind, "content_hash": digest,
+                         "reply_to": reply_to, "notify": notify})
     return mid
 
 
@@ -72,12 +103,12 @@ def _discussion(conn, discussion_id: int) -> dict:
 
 
 def post(conn: psycopg.Connection, p: Principal | None, discussion_id: int, kind: str, body: str,
-         refs: list) -> int:
+         refs: list, parent_id: int | None = None) -> int:
     d = _discussion(conn, discussion_id)
     require(conn, p, Action.PROPOSE, d["repository_id"])
     if d["state"] != "open":
         raise Refused(409, "discussion is closed")
-    return _post(conn, p, discussion_id, d["repository_id"], d["subject"], kind, body, refs)
+    return _post(conn, p, discussion_id, d["repository_id"], d["subject"], kind, body, refs, parent_id)
 
 
 def close(conn: psycopg.Connection, p: Principal | None, discussion_id: int) -> None:
@@ -106,11 +137,7 @@ def get(conn: psycopg.Connection, p: Principal | None, discussion_id: int, after
     if not access.decide(p, Action.READ, repo, role):
         raise Refused(404, "not found")
     moderator = bool(access.decide(p, Action.MAINTAIN, repo, role))
-    cols = ("id", "author", "kind", "body", "refs", "content_hash", "moderation", "created_at")
-    msgs = [dict(zip(cols, r)) for r in conn.execute(
-        "SELECT m.id, a.handle, m.kind, m.body, m.refs, m.content_hash, m.moderation, m.created_at FROM messages m "
-        "JOIN agents a ON a.id = m.author_id WHERE m.discussion_id = %s AND m.id > %s ORDER BY m.id LIMIT %s",
-        (discussion_id, after, limit))]
+    msgs = messages(conn, discussion_id, after, limit)
     for m in msgs:
         if m["moderation"] == "hidden" and not moderator:
             m["body"] = None
@@ -118,6 +145,18 @@ def get(conn: psycopg.Connection, p: Principal | None, discussion_id: int, after
     return {"id": d["id"], "repository": repo.slug, "subject": d["subject"], "title": d["title"], "author": author,
             "state": d["state"], "created_at": d["created_at"], "messages": msgs,
             "next": msgs[-1]["id"] if len(msgs) == limit else None}
+
+
+def messages(conn, discussion_id: int, after: int = 0, limit: int = 100) -> list[dict]:
+    """A thread's messages, oldest first, with who wrote each (and whether a human or an agent), what it replies
+    to and whom it mentions."""
+    cols = ("id", "author", "author_kind", "kind", "body", "refs", "content_hash", "moderation", "created_at",
+            "parent_id", "mentions")
+    return [dict(zip(cols, r)) for r in conn.execute(
+        "SELECT m.id, a.handle, a.kind, m.kind, m.body, m.refs, m.content_hash, m.moderation, m.created_at, m.parent_id, "
+        "  ARRAY(SELECT x.handle FROM agents x WHERE x.id = ANY(m.mentions) ORDER BY x.handle) "
+        "FROM messages m JOIN agents a ON a.id = m.author_id WHERE m.discussion_id = %s AND m.id > %s "
+        "ORDER BY m.id LIMIT %s", (discussion_id, after, limit))]
 
 
 def list_for_repo(conn: psycopg.Connection, repository_id: int, subject: str | None = None, after: int = 0,
