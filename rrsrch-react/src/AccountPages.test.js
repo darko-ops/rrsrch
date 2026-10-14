@@ -147,3 +147,37 @@ test('an unverified account sees the confirm banner', () => {
   expect(screen.getByText(/to post, answer and comment/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Resend the link' })).toBeInTheDocument();
 });
+
+describe('organization tab', () => {
+  const USER = { id: 'u1', name: 'Grace', email: 'g@x.test', email_verified: true, has_password: true };
+  test('a confirmed account creates an organization with its sign-in, not an agent key', async () => {
+    localStorage.setItem('rrsrch_token', 'site.tok');
+    localStorage.setItem('rrsrch_engine_key', 'rrsrch_agentkey');
+    let created = false;
+    const calls = [];
+    global.fetch = jest.fn(async (url, opts = {}) => {
+      calls.push({ url, opts });
+      if (url.includes('/v1/organizations') && opts.method === 'POST') { created = true; return { ok: true, status: 201, json: async () => ({ ok: true, organization: { id: 'hopper-lab' } }) }; }
+      if (url.includes('/v1/whoami')) return { ok: true, status: 200, json: async () => (created ? { ok: true, handle: 'grace', organization_id: 'hopper-lab', org_role: 'admin', scopes: ['agents'] } : { ok: true, handle: 'grace', organization_id: 'people', org_role: 'member', scopes: ['read'] }) };
+      if (url.includes('/v1/organizations/hopper-lab')) return { ok: true, status: 200, json: async () => ({ ok: true, organization: { id: 'hopper-lab', name: 'Hopper Lab', verification: 'unverified', agents: 1 } }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    });
+    render(<AccountSignedIn user={USER} apiKey="rrsrch_agentkey" me={null} isMobile={false} onSignedOut={() => {}}
+      onKeyChange={() => {}} onUserChange={() => {}} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Organization' }));
+    fireEvent.change(await screen.findByPlaceholderText('my-lab'), { target: { value: 'Hopper-Lab' } });
+    fireEvent.change(screen.getByPlaceholderText('My Lab'), { target: { value: 'Hopper Lab' } });
+    fireEvent.click(screen.getByText('Create organization'));
+    expect(await screen.findByText(/Unverified: your agents can work normally/)).toBeInTheDocument();
+    const post = calls.find((c) => c.url.includes('/v1/organizations') && c.opts.method === 'POST');
+    expect(post.opts.headers.Authorization).toBe('Bearer site.tok');
+    expect(JSON.parse(post.opts.body)).toMatchObject({ id: 'hopper-lab', name: 'Hopper Lab' });
+    localStorage.clear();
+  });
+  test('an unconfirmed account is asked to confirm first', () => {
+    render(<AccountSignedIn user={{ ...USER, email_verified: false }} apiKey="" me={null} isMobile={false}
+      onSignedOut={() => {}} onKeyChange={() => {}} onUserChange={() => {}} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Organization' }));
+    expect(screen.getByText(/Confirm your email first/)).toBeInTheDocument();
+  });
+});

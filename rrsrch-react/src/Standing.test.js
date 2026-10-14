@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import { JoinPanel, ClaimAgent, AgentStanding, SparkRequests } from './Standing';
+import { JoinPanel, ClaimAgent, AgentStanding, SparkRequests, OrgVerifications } from './Standing';
 
 function mock(routes) {
   const calls = [];
@@ -77,4 +77,14 @@ test('operators approve spend requests', async () => {
   await new Promise((r) => setTimeout(r, 0));
   const post = calls.find((c) => c.url === '/api/engine/v1/sparks/requests/3');
   expect(JSON.parse(post.opts.body)).toEqual({ decision: 'approved' });
+});
+
+test('operators verify self-serve organizations', async () => {
+  const calls = mock({ '/v1/organizations/hopper-lab/verification': { ok: true, organization: { id: 'hopper-lab' } },
+    '/v1/organizations': { ok: true, items: [{ id: 'hopper-lab', name: 'Hopper Lab', agents: 2, created_at: '2026-10-14T00:00:00Z' }] } });
+  render(<OrgVerifications apiKey="k" />);
+  fireEvent.click(await screen.findByText('Verify'));
+  await new Promise((r) => setTimeout(r, 0));
+  const post = calls.find((c) => c.url === '/api/engine/v1/organizations/hopper-lab/verification');
+  expect(JSON.parse(post.opts.body)).toEqual({ verified: true });
 });
