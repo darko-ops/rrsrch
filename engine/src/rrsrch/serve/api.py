@@ -20,6 +20,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException
@@ -27,6 +28,7 @@ from starlette.exceptions import HTTPException
 from ..ledger import db
 from ..reader.llm import LLM
 from . import answer as answer_mod
+from . import jobs as jobs_mod
 from . import collab_routes, identity_routes, knowledge_routes, trust_routes
 
 MAX_QUESTION = 800
@@ -42,9 +44,10 @@ def _error(code: int, message: str) -> JSONResponse:
 
 
 def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM.from_env,
-               answer: Callable = answer_mod.answer) -> FastAPI:
+               answer: Callable = answer_mod.answer, jobs: jobs_mod.AnswerJobs | None = None) -> FastAPI:
     app = FastAPI(title="rrsrch engine", version="0.1.0")
     app.state.connect = connect
+    app.state.jobs = jobs or jobs_mod.AnswerJobs(connect, make_llm, answer)
     app.add_middleware(CORSMiddleware, allow_origins=[os.environ.get("RRSRCH_CORS_ORIGIN", "*")],
                        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                        allow_headers=["Content-Type", "Authorization", "Idempotency-Key"])
@@ -107,9 +110,47 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
         except Exception as e:  # noqa: BLE001
             return _error(500, str(e)[:400])
 
+    def _job_view(job: dict) -> dict:
+        out = {"ok": True, "job_id": str(job["id"]), "question": job["question"], "status": job["status"],
+               "stage": job["stage"], "created_at": job["created_at"], "finished_at": job["finished_at"]}
+        if job["status"] == "done":
+            out["answer"] = job["result"]
+        if job["status"] == "failed":
+            out["error"] = job["error"]
+        return out
+
+    @app.post("/v1/answers", status_code=202)
+    def start_answer(req: AnswerRequest | None = None) -> JSONResponse:
+        """Start answering; returns at once with a job to poll. Repeats of a question share one job."""
+        question = " ".join((req.question or "").split()) if req else ""
+        if not question:
+            return _error(400, "question required")
+        if len(question) > MAX_QUESTION:
+            return _error(400, "question too long")
+        try:
+            job, created = app.state.jobs.submit(question)
+        except jobs_mod.QueueFull as e:
+            return _error(429, str(e))
+        body = jsonable_encoder(_job_view(job)) | {"reused": not created}
+        return JSONResponse(body, status_code=202 if job["status"] in ("queued", "running") else 200)
+
+    @app.get("/v1/answers/{job_id}")
+    def answer_status(job_id: str) -> JSONResponse:
+        job = app.state.jobs.get(job_id)
+        if job is None:
+            return _error(404, "not found")
+        return JSONResponse(jsonable_encoder(_job_view(job)))
+
     return app
 
 
 def run(host: str = "127.0.0.1", port: int = 8787) -> None:
     print(f"rrsrch engine on http://{host}:{port}  (POST /v1/answer, GET /v1/health, docs at /docs)")
-    uvicorn.run(create_app(), host=host, port=port)
+    app = create_app()
+    try:
+        waiting = app.state.jobs.recover()
+        if waiting:
+            print(f"restarted {waiting} waiting answer job(s)")
+    except Exception as e:  # noqa: BLE001  the API should come up even if the ledger is briefly away
+        print(f"could not recover answer jobs: {e}")
+    uvicorn.run(app, host=host, port=port)

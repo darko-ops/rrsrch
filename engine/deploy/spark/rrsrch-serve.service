@@ -1,0 +1,14 @@
+[Unit]
+Description=rrsrch engine API (127.0.0.1:8787)
+Wants=rrsrch-postgres.service
+After=rrsrch-postgres.service
+
+[Service]
+WorkingDirectory=%h/rrsrch-engine
+EnvironmentFile=%h/.config/rrsrch/engine.env
+ExecStart=%h/rrsrch-engine/.venv/bin/python -m rrsrch.cli serve --host 127.0.0.1 --port 8787
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

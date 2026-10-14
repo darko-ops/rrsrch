@@ -1,0 +1,15 @@
+[Unit]
+Description=rrsrch reader: extract claims from the corpus (commits per chunk; resumes after a crash)
+Wants=rrsrch-postgres.service
+After=rrsrch-postgres.service
+
+[Service]
+WorkingDirectory=%h/rrsrch-engine
+EnvironmentFile=%h/.config/rrsrch/engine.env
+Environment=RRSRCH_LLM_TIMEOUT=900
+ExecStart=%h/rrsrch-engine/.venv/bin/python -m rrsrch.cli read run
+Restart=on-failure
+RestartSec=20
+
+[Install]
+WantedBy=default.target
