@@ -2258,9 +2258,41 @@ function LiteratureResultsPanel({ isMobile, literature }) {
   );
 }
 
+function EngineProgress({ job }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (job.failed) return undefined;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [job.failed]);
+  const secs = job.startedAt ? Math.max(0, Math.round((now - job.startedAt) / 1000)) : 0;
+  const elapsed = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  return (
+    <div role="status" style={{
+      marginTop: 28, padding: '16px 20px', borderRadius: 12,
+      border: `1px solid ${job.failed ? 'rgba(224,112,112,0.35)' : 'rgba(0,255,136,0.25)'}`,
+      background: job.failed ? 'rgba(224,112,112,0.06)' : 'rgba(0,255,136,0.05)',
+      display: 'flex', gap: 14, alignItems: 'flex-start', fontFamily: fonts.main,
+    }}>
+      {!job.failed && <Loader2 size={18} color="#00ff88" style={{ animation: 'rrsrch-spin 1s linear infinite', flexShrink: 0, marginTop: 2 }} />}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ color: job.failed ? '#e07070' : '#fff', fontSize: 15, fontWeight: 600 }}>
+          {job.failed ? 'The evidence engine could not answer this time.' : 'The evidence engine is writing a cited answer'}
+        </span>
+        <span style={{ color: '#999', fontSize: 13, lineHeight: 1.5 }}>
+          {job.failed
+            ? job.failed
+            : <>{job.status === 'queued' ? 'Waiting for the engine' : (job.stage || 'Working')}… <span style={{ fontFamily: fonts.mono }}>{elapsed}</span>.
+              {' '}This takes a few minutes; every sentence is checked against its sources. The overview below is from the web and literature meanwhile.</>}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function SearchResultsPage({
   isMobile, query, report, engineLive, web, literature,
-  followups, onAskNext, searching, tab, onTab,
+  followups, onAskNext, searching, tab, onTab, engineJob,
 }) {
   const webCount = web?.results?.length || 0;
   const litCount = literature?.results?.length || 0;
@@ -2281,6 +2313,7 @@ function SearchResultsPage({
       />
 
       <div>
+        {tab === 'main' && !report && engineJob && <EngineProgress job={engineJob} />}
         {tab === 'main' && (
           <MainAnswer
             isMobile={isMobile}
@@ -2585,8 +2618,12 @@ export default function SearchExperience({ isMobile, scrollContainerRef, onAgent
   const [followups, setFollowups] = useState([]);
   const [history, setHistory] = useState(() => readSearchHistory());
   const resultsTopRef = useRef(null);
+  const searchSeq = useRef(0);
+  const [engineJob, setEngineJob] = useState(null);
 
   const goHome = () => {
+    searchSeq.current += 1;
+    setEngineJob(null);
     setMode('landing');
     setTab('main');
     setLiterature(null);
@@ -2686,7 +2723,9 @@ export default function SearchExperience({ isMobile, scrollContainerRef, onAgent
     await Promise.all([fetchWeb(), fetchLit()]);
   };
 
-  const askEngine = async (q) => {
+  // The engine writes answers as jobs: start one, then check back until it's done. A written answer takes
+  // minutes, longer than the proxies in front of the engine will hold one request open.
+  const askEngineOnce = async (q) => {
     const res = await fetch('/api/engine/answer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2702,6 +2741,34 @@ export default function SearchExperience({ isMobile, scrollContainerRef, onAgent
     return data;
   };
 
+  const SUPERSEDED = 'superseded';
+  const askEngine = async (q, seq) => {
+    const started = await fetch('/api/engine/v1/answers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q }),
+    });
+    if (started.status === 404 || started.status === 405) return askEngineOnce(q); // engine without jobs
+    let job = await started.json().catch(() => ({}));
+    if (started.status === 503) return null;                                        // engine not configured
+    if (!started.ok || job.ok === false) throw new Error(job.error || 'Engine error');
+    if (!job.job_id) return askEngineOnce(q);                                       // not a job: older engine
+    const t0 = Date.now();
+    if (job.status === 'queued' || job.status === 'running') setSearching(false); // free the search box meanwhile
+    while (job.status === 'queued' || job.status === 'running') {
+      if (searchSeq.current !== seq) return SUPERSEDED;                             // a newer search took over
+      setEngineJob({ stage: job.stage, status: job.status, startedAt: t0 });
+      if (Date.now() - t0 > 20 * 60 * 1000) throw new Error('The engine is taking too long; try again later.');
+      await new Promise((r) => setTimeout(r, 3000));
+      const res = await fetch(`/api/engine/v1/answers/${job.job_id}`);
+      const next = await res.json().catch(() => ({}));
+      if (!res.ok || next.ok === false) throw new Error(next.error || 'Engine error');
+      job = next;
+    }
+    if (job.status === 'failed') throw new Error(job.error || 'The engine could not answer');
+    return job.answer;
+  };
+
   const runSearch = async (text, { preferDemo } = {}) => {
     const q = (typeof text === 'string' ? text : text?.q || '').trim();
     if (!q) return;
@@ -2709,6 +2776,9 @@ export default function SearchExperience({ isMobile, scrollContainerRef, onAgent
       PREVIEW_QUESTIONS.find((p) => p.q === q) || ASK_NEXT.find((p) => p.q === q)
     );
 
+    searchSeq.current += 1;
+    const seq = searchSeq.current;
+    setEngineJob(null);
     const nextHistory = pushSearchHistory(q);
     setHistory(nextHistory);
     setQuery(q);
@@ -2725,7 +2795,9 @@ export default function SearchExperience({ isMobile, scrollContainerRef, onAgent
     loadSideSources(q);
 
     try {
-      const live = await askEngine(q);
+      const live = await askEngine(q, seq);
+      if (live === SUPERSEDED || searchSeq.current !== seq) return;  // a newer search took over
+      setEngineJob(null);
       if (live) {
         setReport(live);
         setEngineLive(true);
@@ -2734,6 +2806,8 @@ export default function SearchExperience({ isMobile, scrollContainerRef, onAgent
       }
     } catch (err) {
       console.warn('engine answer failed', err);
+      if (searchSeq.current !== seq) return;
+      setEngineJob({ failed: err.message || 'The engine could not answer' });
     }
 
     if (preferDemo || previewItem) {
@@ -2798,6 +2872,7 @@ export default function SearchExperience({ isMobile, scrollContainerRef, onAgent
             searching={searching || sideLoading}
             tab={tab}
             onTab={setTab}
+            engineJob={engineJob}
           />
         </div>
       )}
