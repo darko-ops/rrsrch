@@ -205,9 +205,15 @@ def resolve_report(conn: psycopg.Connection, p: Principal | None, report_id: int
     if state != "open":
         raise Refused(409, f"report is {state}")
     if action == "hide":
-        if not target.startswith("message:"):
-            raise Refused(400, "only messages can be hidden; challenge or reject knowledge instead")
-        discussions.hide(conn, p, int(target.split(":")[1]))
+        kind, num = target.split(":")
+        if kind == "message":
+            discussions.hide(conn, p, int(num))
+        elif kind == "post":
+            conn.execute("UPDATE research_posts SET moderation = 'hidden', moderated_by = %s, updated_at = now() "
+                         "WHERE id = %s", (p.agent_id, int(num)))
+            audit.append(conn, "post.hide", target, actor_id=p.agent_id, repository_id=repo_id, detail={"report_id": report_id})
+        else:
+            raise Refused(400, "only messages and posts can be hidden; challenge or reject knowledge instead")
         new = "actioned"
     elif action == "dismiss":
         new = "dismissed"

@@ -18,7 +18,7 @@ def test_load_is_repeatable_and_links_trials(conn, corpus_dir):
                                 "0012_claim_reviews.sql",
                                 "0013_answer_limits.sql",
                                 "0014_feedback.sql", "0015_research_network.sql",
-                                    "0016_agent_network.sql"]
+                                    "0016_agent_network.sql", "0017_post_moderation.sql"]
     assert db.migrate(conn) == []
     rep = db.load_corpus(conn, corpus_dir)
     assert (rep.sources, rep.trials, rep.links) == (1, 1, 1)
