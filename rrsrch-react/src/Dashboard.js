@@ -703,7 +703,7 @@ function AtlasTab({ apiKey, repos, repo, onRepo, isMobile, focusClaim }) {
 
 // -- Review & collaboration -----------------------------------------------------------------------------
 
-function ClaimToReview({ item, apiKey, onDone }) {
+function ClaimToReview({ item, apiKey, onDone, number, focused, onFocus }) {
   const [findings, setFindings] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -723,13 +723,16 @@ function ClaimToReview({ item, apiKey, onDone }) {
   };
   const p = item.passage;
   return (
-    <div style={{ borderTop: '1px solid #1c1c1c', padding: '18px 0', display: 'grid', gap: 12 }}>
+    <div id={number ? `review-claim-${item.id}` : undefined} onMouseEnter={onFocus}
+      style={{ borderTop: '1px solid #1c1c1c', padding: '18px 0', display: 'grid', gap: 12,
+        ...(focused ? { background: 'rgba(0,255,136,0.03)' } : {}) }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {number && <span style={{ ...numberBadge, ...(focused ? numberBadgeOn : {}) }}>{number}</span>}
         <Mono>claim {item.id}</Mono><StateChip state={item.state} /><Chip>{item.type}</Chip><Chip>by {item.contributor}</Chip>
         {item.open_challenges > 0 && <Chip color={AMBER}>{item.open_challenges} open challenge{item.open_challenges === 1 ? '' : 's'}</Chip>}
       </div>
       <p style={{ margin: 0, color: '#fff', fontSize: 16, lineHeight: 1.55, fontWeight: 500 }}>{item.proposition}</p>
-      <div style={{ background: '#0a0a0a', border: '1px solid #222', borderRadius: 10, padding: '12px 14px',
+      {p && <div style={{ background: '#0a0a0a', border: '1px solid #222', borderRadius: 10, padding: '12px 14px',
         fontSize: 13.5, lineHeight: 1.65, color: '#777' }}>
         {p.before && <>…{p.before}</>}
         <mark style={{ background: 'rgba(0,255,136,0.15)', color: '#eee', padding: '1px 2px', borderRadius: 3 }}>{p.excerpt}</mark>
@@ -737,8 +740,18 @@ function ClaimToReview({ item, apiKey, onDone }) {
         <div style={{ marginTop: 8, fontSize: 11, fontFamily: fonts.mono, color: '#666' }}>
           {short(item.source_title, 90)}{item.year ? ` (${item.year})` : ''} · {item.source_id}
         </div>
-      </div>
-      {item.reviews.length > 0 && (
+      </div>}
+      {!p && item.reviews.length > 0 && (
+        <div style={{ fontSize: 13, color: '#aaa' }}>
+          {item.reviews.map((r) => (
+            <div key={r.reviewer}>
+              <span style={{ color: r.verdict === 'approve' ? GREEN : RED }}>{r.verdict}</span> by {r.reviewer}
+              {r.findings ? ` · ${r.findings}` : ''}
+            </div>
+          ))}
+        </div>
+      )}
+      {p && item.reviews.length > 0 && (
         <div style={{ fontSize: 13, color: '#aaa' }}>
           {item.reviews.map((r) => (
             <div key={r.reviewer}>
@@ -778,7 +791,94 @@ function ClaimToReview({ item, apiKey, onDone }) {
   );
 }
 
+const numberBadge = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 20, height: 20,
+  borderRadius: 999, border: '1px solid #2f4f40', color: '#8fd9b6', fontSize: 11, fontFamily: fonts.mono, padding: '0 5px' };
+const numberBadgeOn = { background: 'rgba(0,255,136,0.2)', borderColor: GREEN, color: '#fff' };
+
+/** The text with each claim's span marked and numbered; overlapping spans are split into shared segments. */
+function MarkedText({ text, spans, focus, onPick }) {
+  const cuts = [...new Set([0, text.length, ...spans.flatMap((x) => [x.start, x.end])])].sort((a, b) => a - b);
+  const out = [];
+  for (let i = 0; i < cuts.length - 1; i += 1) {
+    const [a, b] = [cuts[i], cuts[i + 1]];
+    const over = spans.filter((x) => x.start <= a && x.end >= b);
+    const seg = text.slice(a, b);
+    if (!over.length) out.push(<span key={a}>{seg}</span>);
+    else {
+      const on = over.some((x) => x.id === focus);
+      out.push(
+        <mark key={a} onClick={() => onPick(over[0].id)} title={over.map((x) => `claim ${x.id}`).join(', ')}
+          style={{ background: on ? 'rgba(0,255,136,0.32)' : 'rgba(0,255,136,0.12)', color: '#eee', cursor: 'pointer',
+            padding: '1px 0', borderRadius: 2 }}>{seg}</mark>);
+    }
+    spans.filter((x) => x.end === b).forEach((x) => out.push(
+      <sup key={`n${x.id}`} onClick={() => onPick(x.id)} style={{ ...numberBadge, ...(x.id === focus ? numberBadgeOn : {}),
+        minWidth: 16, height: 16, fontSize: 10, margin: '0 2px', cursor: 'pointer', verticalAlign: 'super' }}>{x.n}</sup>));
+  }
+  return <>{out}</>;
+}
+
+function TrialReview({ apiKey, repo, sourceId, onDone }) {
+  const [trial, reload] = useLoad(() => engine(`/v1/repos/${repo}/review-queue/trials/${encodeURIComponent(sourceId)}`, { key: apiKey }),
+    [repo, sourceId, apiKey]);
+  const [focus, setFocus] = useState(null);
+  if (trial.loading && !trial.data) return <Loading what="the trial" />;
+  if (trial.error) return <Note tone="error">{trial.error}</Note>;
+  const t = trial.data;
+  const numbered = t.claims.map((c, i) => ({ ...c, n: i + 1 }));
+  const pick = (id) => {
+    setFocus(id);
+    const el = document.getElementById(`review-claim-${id}`);
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div style={{ color: '#fff', fontSize: 16, fontWeight: 600, lineHeight: 1.45 }}>{t.title}</div>
+      <div style={{ fontSize: 11, fontFamily: fonts.mono, color: '#666' }}>{t.source_id}{t.year ? ` · ${t.year}` : ''} · {t.claims.length} claim{t.claims.length === 1 ? '' : 's'} waiting</div>
+      {t.documents.map((d) => (
+        <div key={d.part} style={{ background: '#0a0a0a', border: '1px solid #222', borderRadius: 10, padding: '12px 14px',
+          fontSize: 13.5, lineHeight: 1.75, color: '#888', ...(d.part === 'abstract' ? {} : { maxHeight: 360, overflowY: 'auto' }) }}>
+          <div style={{ fontSize: 10, fontFamily: fonts.mono, color: '#555', textTransform: 'uppercase', marginBottom: 4 }}>{d.part}</div>
+          <MarkedText text={d.text} spans={numbered.filter((c) => c.part === d.part)} focus={focus} onPick={pick} />
+        </div>
+      ))}
+      <p style={{ margin: '4px 0 0', color: '#777', fontSize: 12.5 }}>Click a highlight or number to jump to its claim.</p>
+      {numbered.length === 0 && <Note tone="ok">Every claim on this trial has been reviewed.</Note>}
+      {numbered.map((c) => (
+        <ClaimToReview key={c.id} number={c.n} focused={focus === c.id} onFocus={() => setFocus(c.id)}
+          item={{ ...c, passage: null }} apiKey={apiKey} onDone={() => { reload(); onDone(); }} />
+      ))}
+    </div>
+  );
+}
+
+function TrialQueue({ apiKey, repo }) {
+  const [trials, reload] = useLoad(() => engine(`/v1/repos/${repo}/review-queue/trials?limit=100`, { key: apiKey }), [repo, apiKey]);
+  const [pick, setPick] = useState(null);
+  useEffect(() => { setPick(null); }, [repo]);
+  if (trials.loading && !trials.data) return <Loading what="trials" />;
+  if (trials.error) return <Note tone="error">{trials.error}</Note>;
+  const items = trials.data.items;
+  if (!items.length) return <Note tone="ok">Nothing waiting for review.</Note>;
+  const current = pick && items.some((x) => x.source_id === pick) ? pick : items[0].source_id;
+  const i = items.findIndex((x) => x.source_id === current);
+  return (
+    <div style={{ display: 'grid', gap: 14 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select aria-label="trial" value={current} onChange={(e) => setPick(e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 220 }}>
+          {items.map((x) => <option key={x.source_id} value={x.source_id}>{x.waiting} · {short(x.title, 90)} ({x.source_id})</option>)}
+        </select>
+        <Btn small disabled={i <= 0} onClick={() => setPick(items[i - 1].source_id)}>Previous trial</Btn>
+        <Btn small disabled={i >= items.length - 1} onClick={() => setPick(items[i + 1].source_id)}>Next trial</Btn>
+      </div>
+      <TrialReview key={current} apiKey={apiKey} repo={repo} sourceId={current} onDone={reload} />
+    </div>
+  );
+}
+
 function ClaimQueue({ apiKey, repo }) {
+  const [mode, setMode] = useState(() => readStored('rrsrch_review_mode') || 'trial');
+  const chooseMode = (m) => { setMode(m); writeStored('rrsrch_review_mode', m); };
   const [after, setAfter] = useState(0);
   const [queue, reload] = useLoad(() => engine(`/v1/repos/${repo}/review-queue?limit=10&after=${after}`, { key: apiKey }),
     [repo, apiKey, after]);
@@ -790,6 +890,12 @@ function ClaimQueue({ apiKey, repo }) {
         repository's policy decides when a claim is supported; the result shows what, if anything, still holds it.
       </p>
       {!apiKey && <Note>Connect an agent key with the reviewer role (Agents & keys) to review.</Note>}
+      <div style={{ display: 'flex', gap: 6, margin: '10px 0 4px' }}>
+        <Btn small kind={mode === 'trial' ? 'primary' : 'ghost'} onClick={() => chooseMode('trial')}>By trial</Btn>
+        <Btn small kind={mode === 'single' ? 'primary' : 'ghost'} onClick={() => chooseMode('single')}>One claim at a time</Btn>
+      </div>
+      {mode === 'trial' && <TrialQueue apiKey={apiKey} repo={repo} />}
+      {mode === 'single' && <>
       {queue.loading && <Loading what="the queue" />}
       {queue.error && <Note tone="error">{queue.error}</Note>}
       {queue.data && queue.data.items.length === 0 && <Note tone="ok">Nothing waiting for review.</Note>}
@@ -802,6 +908,7 @@ function ClaimQueue({ apiKey, repo }) {
           {queue.data.next && <Btn small onClick={() => setAfter(queue.data.next)}>Next 10</Btn>}
         </div>
       )}
+      </>}
     </Panel>
   );
 }
@@ -1289,6 +1396,6 @@ export default function Dashboard({ isMobile, initialTab, accountPanel }) {
 }
 
 export {
-  layoutAtlas, engine, readStored, KEY_STORAGE, fonts, GREEN, AMBER, RED, BLUE, STATE_COLOR,
+  layoutAtlas, TrialQueue, engine, readStored, KEY_STORAGE, fonts, GREEN, AMBER, RED, BLUE, STATE_COLOR,
   Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
 };

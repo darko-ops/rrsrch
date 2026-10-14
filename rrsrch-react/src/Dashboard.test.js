@@ -119,6 +119,7 @@ test('claims are reviewed against their passage, and the result says where the c
     '/v1/claims/41/reviews': (o) => [200, { ok: true, claim_id: 41, state: 'supported', approvals: 1, reasons: [] }],
   });
   localStorage.setItem('rrsrch_engine_key', 'rrsrch_k');
+  localStorage.setItem('rrsrch_review_mode', 'single');
   render(<Dashboard isMobile={false} initialTab="review" accountPanel={null} />);
   expect(await screen.findByText('WOMAC improved more with MSCs at 12 months.')).toBeInTheDocument();
   expect(screen.getByText('At 12 months, WOMAC scores improved more with MSCs').tagName).toBe('MARK');
