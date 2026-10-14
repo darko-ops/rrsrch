@@ -210,15 +210,19 @@ def _trust_summary(citations: dict[str, dict], cited: set[str]) -> dict:
 
 
 def answer(conn: psycopg.Connection, llm: LLM, question: str,
-           scope: dict | None = None) -> dict:
-    """Run writer + skeptic packaging. Always returns a JSON-serialisable dict."""
+           scope: dict | None = None, progress=lambda stage: None) -> dict:
+    """Run writer + skeptic packaging. Always returns a JSON-serialisable dict.
+    `progress` hears each stage, for answers run as jobs (rrsrch.serve.jobs)."""
     # refresh skeptic rows so contested bands reflect the current ledger
+    progress("checking where studies disagree")
     try:
         skeptic.scan(conn)
     except Exception:  # noqa: BLE001 — empty table / missing migration shouldn't kill answers
         pass
 
+    progress("finding claims and writing the answer")
     rep = writer.write(conn, llm, question, scope=scope)
+    progress("packaging the answer")
     n_studies = len({c.source_id for c in rep.shown})
     kept = rep.kept
     refused = len(rep.sentences) - len(kept)

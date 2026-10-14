@@ -1,0 +1,11 @@
+[Unit]
+Description=rrsrch ledger (Postgres 16 + pgvector, 127.0.0.1:5434)
+
+[Service]
+ExecStart=/usr/lib/postgresql/16/bin/postgres -D %h/rrsrch-pg/data
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
