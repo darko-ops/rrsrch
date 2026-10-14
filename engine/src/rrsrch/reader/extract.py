@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from dataclasses import dataclass, field
 
 import psycopg
@@ -114,7 +115,29 @@ def _reject(conn, doc_id, doc_sha, quote, claim, reason, detail, extractor, rep:
     rep.rejected[reason] = rep.rejected.get(reason, 0) + 1
 
 
-def read_document(conn: psycopg.Connection, llm: LLM, doc: dict, context: dict, rep: ReadReport) -> None:
+def wait_for_answers(conn: psycopg.Connection, pause=time.sleep, poll: float = 10.0, say=print) -> float:
+    """Answers come first. The reader and the site's answers share one model; while any answer is waiting or
+    being written, the reader holds off so a visitor isn't kept waiting behind corpus extraction.
+    Returns the seconds it waited."""
+    waited = 0.0
+    while True:
+        try:
+            n = conn.execute("SELECT count(*) FROM answer_jobs WHERE status IN ('queued', 'running')").fetchone()[0]
+        except psycopg.errors.UndefinedTable:              # an older ledger without answer jobs
+            conn.rollback()
+            return waited
+        if not n:
+            if waited:
+                say(f"resuming after {int(waited)}s")
+            return waited
+        if not waited:
+            say(f"pausing: {n} answer(s) waiting or being written")
+        pause(poll)
+        waited += poll
+
+
+def read_document(conn: psycopg.Connection, llm: LLM, doc: dict, context: dict, rep: ReadReport,
+                  wait=wait_for_answers) -> None:
     extractor = f"{llm.model}|{PROMPT_VERSION}"
     for ch in chunks(doc["part"], doc["text"]):
         done = conn.execute("SELECT 1 FROM read_chunks WHERE document_id = %s AND chunk_sha = %s "
@@ -122,6 +145,7 @@ def read_document(conn: psycopg.Connection, llm: LLM, doc: dict, context: dict, 
         if done:
             rep.chunks_skipped += 1
             continue
+        wait(conn)
         try:
             reply = llm.json_chat(SYSTEM, USER.format(title=doc["title"], text=ch.text))
             items = reply.get("claims", [])
@@ -179,7 +203,7 @@ def read_document(conn: psycopg.Connection, llm: LLM, doc: dict, context: dict, 
 
 
 def read_corpus(conn: psycopg.Connection, llm: LLM, source_ids: list[str] | None = None,
-                limit: int | None = None, progress=print) -> ReadReport:
+                limit: int | None = None, progress=print, wait=wait_for_answers) -> ReadReport:
     rep = ReadReport()
     rows = conn.execute(
         "SELECT d.id, d.source_id, d.part, d.text, d.sha256, s.title, "
@@ -192,6 +216,6 @@ def read_corpus(conn: psycopg.Connection, llm: LLM, source_ids: list[str] | None
         for r in (r for r in rows if r[1] == sid):
             doc = {"id": r[0], "source_id": r[1], "part": r[2], "text": r[3], "sha256": r[4], "title": r[5]}
             context = gate.source_context(r[5], r[6] or "")
-            read_document(conn, llm, doc, context, rep)
+            read_document(conn, llm, doc, context, rep, wait=wait)
         progress(f"[{i}/{len(sources)}] {sid}: {rep.claims} claims so far, rejected {rep.rejected}")
     return rep

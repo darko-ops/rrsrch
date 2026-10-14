@@ -1,8 +1,10 @@
-"""The HTTP API, with the database, model and writer replaced by fakes."""
+"""The HTTP API, with the model and writer replaced by fakes (and, where nothing is stored, the database too)."""
+import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from rrsrch.serve import api
+from rrsrch.ledger import db
+from rrsrch.serve import api, jobs
 
 
 class FakeConn:
@@ -39,10 +41,31 @@ def client(calls, fail_db=False, answer=None):
     return TestClient(app, raise_server_exceptions=False)
 
 
-def test_answers_a_question_with_whitespace_normalised(calls):
-    r = client(calls).post("/v1/answer", json={"question": "  does MSC   help\nknee OA? "})
+@pytest.fixture
+def answering(db_url):
+    """A client whose answers go through the real job queue on a throwaway database, with a fake writer."""
+    with psycopg.connect(db_url) as c:
+        db.migrate(c)
+    seen = []
+
+    def build(answer=None):
+        def fake(conn, llm, question, progress=lambda s: None):
+            seen.append(question)
+            return {"ok": True, "question": question}
+        connect = lambda: psycopg.connect(db_url)  # noqa: E731
+        runner = jobs.AnswerJobs(connect, lambda: object(), answer or fake)
+        runner.poll = 0.05
+        return TestClient(api.create_app(connect=connect, jobs=runner), raise_server_exceptions=False)
+    build.seen = seen
+    return build
+
+
+@pytest.mark.db
+def test_answers_a_question_with_whitespace_normalised(answering):
+    c = answering()
+    r = c.post("/v1/answer", json={"question": "  does MSC   help\nknee OA? "})
     assert r.status_code == 200 and r.json() == {"ok": True, "question": "does MSC help knee OA?"}
-    assert client(calls).post("/answer", json={"question": "legacy path"}).status_code == 200
+    assert c.post("/answer", json={"question": "legacy path"}).status_code == 200
 
 
 @pytest.mark.parametrize("kwargs, error", [
@@ -59,10 +82,11 @@ def test_bad_requests_get_the_error_shape_the_site_reads(calls, kwargs, error):
     assert calls == []
 
 
-def test_writer_failures_are_500s_not_crashes(calls):
-    def boom(conn, llm, q):
+@pytest.mark.db
+def test_writer_failures_are_500s_not_crashes(answering):
+    def boom(conn, llm, q, progress=None):
         raise RuntimeError("model timed out")
-    r = client(calls, answer=boom).post("/v1/answer", json={"question": "q"})
+    r = answering(boom).post("/v1/answer", json={"question": "q"})
     assert (r.status_code, r.json()) == (500, {"ok": False, "error": "model timed out"})
 
 
@@ -80,8 +104,9 @@ def test_unknown_paths_and_methods(calls):
     assert client(calls).get("/v1/answer").json() == {"ok": False, "error": "method not allowed"}
 
 
-def test_cors_preflight_and_headers(calls):
-    c = client(calls)
+@pytest.mark.db
+def test_cors_preflight_and_headers(answering):
+    c = answering()
     r = c.options("/v1/answer", headers={"Origin": "https://rrsrch.com", "Access-Control-Request-Method": "POST",
                                          "Access-Control-Request-Headers": "Content-Type"})
     assert r.status_code == 200 and r.headers["access-control-allow-origin"] == "*"
