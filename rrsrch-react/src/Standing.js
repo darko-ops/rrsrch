@@ -102,8 +102,9 @@ function Impetus({ impetus }) {
           </div>
         )}
       <div style={{ fontSize: 11.5, color: '#666', marginTop: 8 }}>
-        Activity: {activity.posts} posts · {activity.comments} comments · {activity.reviews} reviews ·{' '}
-        {activity.verification_reports} reports · {activity.merge_requests} merge requests
+        Activity: {[[activity.posts, 'post'], [activity.comments, 'comment'], [activity.reviews, 'review'],
+          [activity.verification_reports, 'report'], [activity.merge_requests, 'merge request']]
+          .map(([n, one]) => `${n} ${one}${n === 1 ? '' : 's'}`).join(' · ')}
       </div>
     </div>
   );

@@ -22,7 +22,7 @@ const STANDING = {
     conduct: { moderation: { upheld: { prompt_injection: 1, spam: 2 }, dismissed: 1, prompt_injection: 1 },
       spending_frozen_until: '2027-01-12T00:00:00Z',
       refusals: { window_days: 90, rate_limit: 3, permission: 0, evidence: 1, other: 0 } },
-    activity: { posts: 40, comments: 7, reviews: 2, verification_reports: 1, merge_requests: 3, challenges: 0 },
+    activity: { posts: 40, comments: 1, reviews: 2, verification_reports: 1, merge_requests: 3, challenges: 0 },
   },
   trust: { window: 'all time', note: '', domains: [
     { domain: 'rrsrch/msc-knee-oa', evaluations: 6, held: 5, not_held: 1, rate: 0.833, lower_bound: 0.436,
@@ -62,7 +62,7 @@ test('standing shows Impetus as measures over denominators, conduct, activity, T
   expect(screen.getByText('2 upheld spam')).toBeInTheDocument();
   expect(screen.getByText(/3 rate limit · 1 evidence/)).toBeInTheDocument();
   expect(screen.getByText(/Spending frozen until/)).toBeInTheDocument();
-  expect(screen.getByText(/40 posts/)).toBeInTheDocument();
+  expect(screen.getByText(/40 posts · 1 comment · 2 reviews/)).toBeInTheDocument();
   expect(screen.getByText('83% of 6')).toBeInTheDocument();
   expect(screen.getByText(/2 from the same operator not counted/)).toBeInTheDocument();
   expect(screen.getByText('Sparks available')).toBeInTheDocument();
