@@ -9,7 +9,7 @@
  * Every call goes to the engine through the site (/api/engine/v1/...), with the visitor's own key. The
  * engine decides what they may do; this page only shows its answers, including its refusals.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bot, Map as MapIcon, GitPullRequest, User, KeyRound, Copy, Check, RefreshCw, X } from 'lucide-react';
 
 const fonts = {
@@ -595,7 +595,7 @@ function NodeDetail({ node, graph, apiKey, onSelect, onClose }) {
   );
 }
 
-function AtlasTab({ apiKey, repos, repo, onRepo, isMobile }) {
+function AtlasTab({ apiKey, repos, repo, onRepo, isMobile, focusClaim }) {
   const [graph] = useLoad(() => (repo ? engine(`/v1/repos/${repo}/atlas?limit=400`, { key: apiKey })
     : Promise.resolve({ ok: true, data: null })), [repo, apiKey]);
   const [filter, setFilter] = useState({ state: 'all', text: '' });
@@ -604,6 +604,11 @@ function AtlasTab({ apiKey, repos, repo, onRepo, isMobile }) {
   const g = graph.data;
   const layout = useMemo(() => (g ? layoutAtlas(g, filter) : null), [g, filter]);
   useEffect(() => { setSelected(null); }, [repo]);
+  useEffect(() => {                            // arriving from a search citation: open that claim
+    if (!g || !focusClaim) return;
+    const n = g.nodes.find((x) => x.id === `claim:${focusClaim}`);
+    if (n) setSelected(n);
+  }, [g, focusClaim]);
   const kindOf = useMemo(() => Object.fromEntries((g?.nodes || []).map((n) => [n.id, n.kind])), [g]);
   const focus = selected?.id || hover;
   const near = useMemo(() => {
@@ -1086,18 +1091,32 @@ const TABS = [
   { id: 'account', label: 'Account', icon: User },
 ];
 
+function hashParams() {
+  return new URLSearchParams(window.location.hash.split('?')[1] || '');
+}
+
 export default function Dashboard({ isMobile, initialTab, accountPanel }) {
-  const [tab, setTabState] = useState(() => initialTab || readStored(TAB_STORAGE) || 'agents');
+  const [link, setLink] = useState(() => hashParams());
+  const [tab, setTabState] = useState(() => initialTab || link.get('tab') || readStored(TAB_STORAGE) || 'agents');
   const [apiKey, setApiKeyState] = useState(() => readStored(KEY_STORAGE));
   const [me, setMe] = useState(null);
   const [meError, setMeError] = useState('');
   const [health, setHealth] = useState(null);
   const [repo, setRepo] = useState('');
-  const firstRepo = useRef(true);
 
   const setTab = (t) => { setTabState(t); writeStored(TAB_STORAGE, t); };
   const setApiKey = useCallback((k) => { setApiKeyState(k); writeStored(KEY_STORAGE, k); }, []);
   useEffect(() => { if (initialTab) setTabState(initialTab); }, [initialTab]);
+  useEffect(() => {
+    const onHash = () => {
+      const p = hashParams();
+      setLink(p);
+      if (p.get('tab')) setTabState(p.get('tab'));
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  useEffect(() => { if (link.get('repo')) setRepo(link.get('repo')); }, [link]);
 
   useEffect(() => {
     let live = true;
@@ -1120,10 +1139,8 @@ export default function Dashboard({ isMobile, initialTab, accountPanel }) {
   const [repos] = useLoad(() => engine('/v1/repos?limit=200', { key: apiKey }), [apiKey]);
   useEffect(() => {
     const items = repos.data?.items || [];
-    if (items.length && (firstRepo.current || !items.some((r) => r.slug === repo))) {
-      firstRepo.current = false;
-      setRepo(items[0].slug);
-    }
+    // keep the chosen (or deep-linked) repository if it exists, otherwise start with the first
+    if (items.length && !items.some((r) => r.slug === repo)) setRepo(items[0].slug);
   }, [repos.data, repo]);
 
   return (
@@ -1151,7 +1168,8 @@ export default function Dashboard({ isMobile, initialTab, accountPanel }) {
         ))}
       </nav>
       {tab === 'agents' && <AgentsTab apiKey={apiKey} setApiKey={setApiKey} me={me} meError={meError} />}
-      {tab === 'atlas' && <AtlasTab apiKey={apiKey} repos={repos.data?.items} repo={repo} onRepo={setRepo} isMobile={isMobile} />}
+      {tab === 'atlas' && <AtlasTab apiKey={apiKey} repos={repos.data?.items} repo={repo} onRepo={setRepo} isMobile={isMobile}
+        focusClaim={link.get('claim')} />}
       {tab === 'review' && <ReviewTab apiKey={apiKey} me={me} repos={repos.data?.items} repo={repo} onRepo={setRepo} isMobile={isMobile} />}
       {tab === 'account' && accountPanel}
       {repos.error && tab !== 'agents' && tab !== 'account' && <Note tone="error">{repos.error}</Note>}
