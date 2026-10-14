@@ -559,6 +559,11 @@ function NodeDetail({ node, graph, apiKey, onSelect, onClose }) {
           {challenge.msg && <Note tone={challenge.open ? 'error' : 'ok'}>{challenge.msg}</Note>}
         </div>
       )}
+      {isClaim && (
+        <a href={`#/claims/${node.claim_id}`} style={{ color: '#ddd', fontSize: 13, textUnderlineOffset: 3 }}>
+          Open the claim page: discussion, reactions, challenges, reviews →
+        </a>
+      )}
       {node.kind === 'source' && d?.source && (
         <div style={{ display: 'grid', gap: 8, fontSize: 13, color: '#ccc' }}>
           <p style={{ margin: 0, color: '#fff', fontSize: 15, lineHeight: 1.5 }}>{d.source.title}</p>
@@ -1283,4 +1288,7 @@ export default function Dashboard({ isMobile, initialTab, accountPanel }) {
   );
 }
 
-export { layoutAtlas, engine };
+export {
+  layoutAtlas, engine, readStored, KEY_STORAGE, fonts, GREEN, AMBER, RED, BLUE, STATE_COLOR,
+  Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
+};
