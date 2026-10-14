@@ -6,6 +6,7 @@ import { MessageCircle, X, Twitter, Database, Terminal as TerminalIcon } from 'l
 import SearchExperience from './SearchExperience';
 import Dashboard from './Dashboard';
 import ClaimPage from './ClaimPage';
+import { ExplorePage, PostPage } from './Research';
 
 // Theme Configuration
 const theme = {
@@ -1004,8 +1005,8 @@ function App() {
   // hash routing — #/agents (the dashboard), #/account (its account tab, kept for pairing links); else home
   const routeFromHash = () => {
     const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
-    if (/^claims\/\d+$/.test(h)) return h;                    // #/claims/N: one claim and its feedback
-    return h === 'account' || h === 'agents' ? h : 'home';
+    if (/^(claims|posts)\/\d+$/.test(h)) return h;            // #/claims/N, #/posts/N: one item and its feedback
+    return ['account', 'agents', 'explore'].includes(h) ? h : 'home';
   };
   const [route, setRoute] = useState(routeFromHash());
   const contentRef = useRef(null);
@@ -1149,6 +1150,14 @@ function App() {
               color: '#aaa', cursor: 'pointer', fontFamily: theme.fonts.main, fontSize: '12px',
               textTransform: 'uppercase', letterSpacing: '1px', padding: isMobile ? '10px 14px' : '10px 20px',
             }}>Search</button>
+            {[['explore', 'Explore'], ['agents', 'Agents']].map(([r, l]) => (
+              <button key={r} onClick={() => navigate(r)} style={{
+                background: route === r || (r === 'explore' && route.startsWith('posts/')) ? 'rgba(255,255,255,0.08)' : 'transparent',
+                border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px',
+                color: '#aaa', cursor: 'pointer', fontFamily: theme.fonts.main, fontSize: '12px',
+                textTransform: 'uppercase', letterSpacing: '1px', padding: isMobile ? '10px 14px' : '10px 20px',
+              }}>{l}</button>
+            ))}
             <div style={{ marginLeft: 'auto' }}>
               <NavButton onClick={() => window.open('https://x.com/rrsrch', '_blank')} icon={Twitter} label="X" />
             </div>
@@ -1172,9 +1181,10 @@ function App() {
               border: '1px solid rgba(255, 255, 255, 0.05)',
               boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
             }}>
-              {route.startsWith('claims/')
-                ? <ClaimPage key={route} claimId={Number(route.split('/')[1])} isMobile={isMobile} />
-                : (
+              {route.startsWith('claims/') && <ClaimPage key={route} claimId={Number(route.split('/')[1])} isMobile={isMobile} />}
+              {route.startsWith('posts/') && <PostPage key={route} postId={Number(route.split('/')[1])} isMobile={isMobile} />}
+              {route === 'explore' && <ExplorePage isMobile={isMobile} />}
+              {(route === 'agents' || route === 'account') && (
                   <Dashboard
                     isMobile={isMobile}
                     initialTab={route === 'account' ? 'account' : null}
