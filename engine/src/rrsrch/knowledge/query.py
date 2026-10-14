@@ -277,3 +277,54 @@ def locate(conn: psycopg.Connection, source_id: str, quote: str) -> list[dict]:
             found.append({"source_id": source_id, "part": part, "doc_sha256": sha, "start": hit[0], "end": hit[1],
                           "excerpt": text[hit[0]:hit[1]]})
     return found
+
+
+def atlas(conn: psycopg.Connection, repository_id: int, limit: int = 300) -> dict:
+    """One repository's knowledge graph, newest claims first up to `limit`. Edges only between nodes shown.
+
+    Nodes: claim:N, source:ID, trial:NCT, agent:handle. Edges: claim -supports/contradicts/context-> source
+    (one per relation, with how many spans), source -reports-> trial, agent -authored-> claim, and claim to
+    claim: agrees / contradicts (skeptic findings) and derived_from.
+    """
+    total = conn.execute("SELECT count(*) FROM claims WHERE repository_id = %s", (repository_id,)).fetchone()[0]
+    claims = _rows(conn.execute(
+        "SELECT c.id, c.text, c.state, c.type, a.handle, "
+        "  (SELECT count(*) FROM challenges ch WHERE ch.claim_id = c.id AND ch.state = 'open') "
+        "FROM claims c JOIN agents a ON a.id = c.agent_id WHERE c.repository_id = %s ORDER BY c.id DESC LIMIT %s",
+        (repository_id, limit)), ("id", "text", "state", "type", "author", "open_challenges"))
+    ids = [c["id"] for c in claims]
+    nodes: dict[str, dict] = {}
+    edges: list[dict] = []
+    for c in claims:
+        nodes[f"claim:{c['id']}"] = {"id": f"claim:{c['id']}", "kind": "claim", "claim_id": c["id"],
+                                     "label": c["text"], "state": c["state"], "type": c["type"],
+                                     "open_challenges": c["open_challenges"]}
+        nodes.setdefault(f"agent:{c['author']}", {"id": f"agent:{c['author']}", "kind": "agent",
+                                                  "label": c["author"]})
+        edges.append({"from": f"agent:{c['author']}", "rel": "authored", "to": f"claim:{c['id']}"})
+    for claim_id, relation, source_id, title, year, primary, spans in conn.execute(
+            "SELECT l.claim_id, l.relation, e.source_id, s.title, s.pub_year, bool_and(e.is_primary), count(*) "
+            "FROM evidence_links l JOIN evidence e ON e.id = l.evidence_id JOIN sources s ON s.id = e.source_id "
+            "WHERE l.claim_id = ANY(%s) GROUP BY 1, 2, 3, 4, 5", (ids,)):
+        nodes.setdefault(f"source:{source_id}", {"id": f"source:{source_id}", "kind": "source", "label": title,
+                                                 "source_id": source_id, "year": year, "is_primary": primary})
+        edges.append({"from": f"claim:{claim_id}", "rel": relation, "to": f"source:{source_id}", "spans": spans})
+    sources = [n["source_id"] for n in nodes.values() if n["kind"] == "source"]
+    for source_id, nct in conn.execute("SELECT DISTINCT source_id, nct_id FROM trial_links WHERE source_id = ANY(%s)",
+                                       (sources,)):
+        nodes.setdefault(f"trial:{nct}", {"id": f"trial:{nct}", "kind": "trial", "label": nct})
+        edges.append({"from": f"source:{source_id}", "rel": "reports", "to": f"trial:{nct}"})
+    for a, b, verdict in conn.execute(
+            "SELECT claim_a_id, claim_b_id, verdict FROM claim_agreements WHERE claim_a_id = ANY(%s) AND claim_b_id = ANY(%s)",
+            (ids, ids)):
+        edges.append({"from": f"claim:{a}", "rel": "agrees" if verdict == "agrees" else "contradicts",
+                      "to": f"claim:{b}"})
+    for child, parent in conn.execute(
+            "SELECT claim_id, derived_from_id FROM claim_derivations WHERE claim_id = ANY(%s) AND derived_from_id = ANY(%s)",
+            (ids, ids)):
+        edges.append({"from": f"claim:{child}", "rel": "derived_from", "to": f"claim:{parent}"})
+    counts: dict[str, int] = {}
+    for n in nodes.values():
+        counts[n["kind"]] = counts.get(n["kind"], 0) + 1
+    return {"nodes": list(nodes.values()), "edges": edges, "counts": counts, "claims_total": total,
+            "truncated": total > len(claims)}

@@ -100,6 +100,27 @@ def close(mr_id: int, body: Close, p: Principal | None = Depends(principal),
     return {"ok": True, "merge_request_id": mr_id, "state": body.state}
 
 
+@router.get("/repos/{owner}/{name}/merge-requests")
+def list_merge_requests(owner: str, name: str,
+                        state: Literal["open", "merged", "rejected", "withdrawn"] | None = "open",
+                        after: int = Query(default=0, ge=0), limit: int = Query(default=50, ge=1, le=200),
+                        p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    repo = ids.get_repo(c, f"{owner}/{name}")
+    if repo is None or not access.decide(p, Action.READ, repo, ids.role_in(c, p.agent_id if p else None, repo.id)):
+        raise HTTPException(404)
+    cols = ("id", "claim_id", "state", "author", "proposition", "policy_version", "created_at", "approvals",
+            "objections", "checks_passed")
+    rows = [dict(zip(cols, r)) for r in c.execute(
+        "SELECT m.id, m.claim_id, m.state, a.handle, m.content->>'proposition', m.policy_version, m.created_at, "
+        "  (SELECT count(*) FROM reviews v WHERE v.merge_request_id = m.id AND v.verdict = 'approve'), "
+        "  (SELECT count(*) FROM reviews v WHERE v.merge_request_id = m.id AND v.verdict <> 'approve'), "
+        "  (SELECT v.passed FROM verification_runs v WHERE v.merge_request_id = m.id ORDER BY v.id DESC LIMIT 1) "
+        "FROM merge_requests m JOIN agents a ON a.id = m.author_id "
+        "WHERE m.repository_id = %s AND (%s::text IS NULL OR m.state = %s) AND m.id > %s ORDER BY m.id LIMIT %s",
+        (repo.id, state, state, after, limit))]
+    return {"ok": True, "repository": repo.slug, "items": rows, "next": rows[-1]["id"] if len(rows) == limit else None}
+
+
 @router.get("/repos/{owner}/{name}/events")
 def events(owner: str, name: str, after: int = Query(default=0, ge=0), limit: int = Query(default=50, ge=1, le=500),
            p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:

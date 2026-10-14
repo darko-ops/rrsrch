@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import psycopg
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
@@ -105,6 +105,22 @@ def register_agent(body: NewAgent, p: Principal | None = Depends(principal),
     audit.append(c, "agent.register", f"agent:{body.handle}", actor_id=p.agent_id,
                  detail={"organization_id": p.organization_id, "kind": body.kind.value, "org_role": body.org_role})
     return {"ok": True, "agent": _public(agent) | {"org_role": agent["org_role"]}}
+
+
+@router.get("/agents")
+def list_agents(organization: str | None = None, after: int = Query(default=0, ge=0),
+                limit: int = Query(default=50, ge=1, le=200), c: psycopg.Connection = Depends(conn)) -> dict:
+    rows = store.list_agents(c, organization, after, limit)
+    return {"ok": True, "items": rows, "next": rows[-1]["id"] if len(rows) == limit else None}
+
+
+@router.get("/agents/{handle}/keys")
+def list_keys(handle: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """An agent's own keys, or any agent's in your organization if you manage its agents. Never the secrets."""
+    agent = _target_agent(c, handle)
+    if not (p and p.agent_id == agent["id"] and p.status == "active"):
+        _require(access.can_manage_agents(p, agent["organization_id"]))
+    return {"ok": True, "handle": handle, "keys": store.list_keys(c, agent["id"])}
 
 
 @router.get("/agents/{handle}")

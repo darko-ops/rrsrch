@@ -106,6 +106,15 @@ def update_repo(owner: str, name: str, body: RepoChange, p: Principal | None = D
     return {"ok": True, "repository": query.get_repo(c, p, f"{owner}/{name}")}
 
 
+@router.get("/repos/{owner}/{name}/atlas")
+def repo_atlas(owner: str, name: str, limit: int = Query(default=300, ge=1, le=1000),
+               p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """The repository's knowledge as one graph: claims, the sources and trials they rest on, who wrote them,
+    and how claims relate (agree, contradict, derive). Per-claim detail is in /v1/claims/{id}/provenance."""
+    repo = _found(query.get_repo(c, p, f"{owner}/{name}"))
+    return {"ok": True, "repository": repo["slug"]} | query.atlas(c, repo["id"], limit)
+
+
 @router.get("/repos/{owner}/{name}/history")
 def repo_history(owner: str, name: str, after: int = After, limit: int = Limit,
                  p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:

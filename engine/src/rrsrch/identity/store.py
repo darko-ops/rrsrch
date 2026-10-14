@@ -84,6 +84,21 @@ def key_owner(conn: psycopg.Connection, key_id: int) -> tuple[int, str] | None:
                         "WHERE k.id = %s", (key_id,)).fetchone()
 
 
+def list_keys(conn: psycopg.Connection, agent_id: int) -> list[dict]:
+    """A key's metadata, never its secret: enough to see what's live and revoke what shouldn't be."""
+    cols = ("id", "prefix", "scopes", "label", "created_at", "expires_at", "revoked_at", "last_used_at")
+    return [dict(zip(cols, r)) for r in conn.execute(
+        f"SELECT {', '.join(cols)} FROM api_keys WHERE agent_id = %s ORDER BY id DESC", (agent_id,))]
+
+
+def list_agents(conn: psycopg.Connection, organization_id: str | None, after: int, limit: int) -> list[dict]:
+    """Public profiles, oldest first. Handles and profiles are public already (GET /v1/agents/{handle})."""
+    cols = ("id", "handle", "organization_id", "kind", "capabilities", "model", "status", "created_at")
+    return [dict(zip(cols, r)) for r in conn.execute(
+        f"SELECT {', '.join(cols)} FROM agents WHERE (%s::text IS NULL OR organization_id = %s) AND id > %s "
+        "ORDER BY id LIMIT %s", (organization_id, organization_id, after, limit))]
+
+
 def revoke_key(conn: psycopg.Connection, key_id: int) -> bool:
     return conn.execute("UPDATE api_keys SET revoked_at = now() WHERE id = %s AND revoked_at IS NULL",
                         (key_id,)).rowcount == 1
