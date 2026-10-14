@@ -105,3 +105,22 @@ def test_a_service_approval_alone_is_not_enough_for_a_policy_wanting_a_human(wor
     assert r["state"] == "under_review" and "policy needs an approval from a human reviewer" in r["reasons"]
     assert review(client, h["ext"], cid, "approve").json()["state"] == "supported"
     assert state_of(url, cid) == "supported"
+
+
+def test_the_queue_groups_claims_by_trial_with_the_abstract_once(world):
+    client, h, url = world
+    first, second = reader_claim(url), reader_claim(url, text=QUOTE + " (second reading)")
+    trials = client.get(f"/v1/repos/{PILOT}/review-queue/trials").json()
+    assert trials["trials"] == 1 and trials["items"] == [
+        {"source_id": "MED:1", "title": trials["items"][0]["title"], "year": None, "waiting": 2}]
+    got = client.get(f"/v1/repos/{PILOT}/review-queue/trials/MED:1").json()
+    assert [d["part"] for d in got["documents"]] == ["abstract"] and got["documents"][0]["text"] == TEXT
+    assert [c["id"] for c in got["claims"]] == [first, second]
+    c = got["claims"][0]
+    assert TEXT[c["start"]:c["end"]] == QUOTE and c["part"] == "abstract" and c["reviews"] == []
+
+    review(client, h["ext"], first, "approve")                      # supported: leaves the queue
+    got = client.get(f"/v1/repos/{PILOT}/review-queue/trials/MED:1").json()
+    assert [c["id"] for c in got["claims"]] == [second]
+    assert client.get(f"/v1/repos/{PILOT}/review-queue/trials/MED:404").status_code == 404
+    assert client.get("/v1/repos/rrsrch/nope/review-queue/trials").status_code == 404

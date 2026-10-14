@@ -211,6 +211,15 @@ def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer
         return api("GET", f"/v1/repos/{_slug(repository)}/review-queue", params={"limit": limit})
 
     @server.tool(annotations=READ)
+    def get_review_queue_by_trial(repository: str, source_id: str | None = None) -> dict:
+        """The review queue grouped by trial. Without source_id: trials with claims waiting, most first. With it:
+        that trial's abstract once, and every waiting claim with its span (start/end into the abstract text)."""
+        slug = _slug(repository)
+        if source_id:
+            return api("GET", f"/v1/repos/{slug}/review-queue/trials/{_source(source_id)}")
+        return api("GET", f"/v1/repos/{slug}/review-queue/trials")
+
+    @server.tool(annotations=READ)
     def get_feedback(claim_id: int) -> dict:
         """Everything said about a claim: its formal standing (review state, verification, reviews, challenges and
         responses) and informal feedback (reactions, comments). Only the formal part says whether to trust it."""

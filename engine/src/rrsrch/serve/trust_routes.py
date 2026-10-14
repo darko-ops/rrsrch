@@ -126,6 +126,32 @@ def review_queue(owner: str, name: str,
     return {"ok": True, "repository": repo.slug} | query.review_queue(c, repo.id, states, after, limit)
 
 
+def _queue_repo(c, p, owner: str, name: str):
+    repo = ids.get_repo(c, f"{owner}/{name}")
+    if repo is None or not access.decide(p, Action.READ, repo, ids.role_in(c, p.agent_id if p else None, repo.id)):
+        raise HTTPException(404)
+    return repo
+
+
+@router.get("/repos/{owner}/{name}/review-queue/trials")
+def review_trials(owner: str, name: str, offset: int = Query(default=0, ge=0), limit: int = Query(default=20, ge=1, le=100),
+                  p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """The review queue grouped by source: trials with claims waiting, most waiting first."""
+    repo = _queue_repo(c, p, owner, name)
+    return {"ok": True, "repository": repo.slug} | query.review_trials(c, repo.id, claim_review.REVIEWABLE, offset, limit)
+
+
+@router.get("/repos/{owner}/{name}/review-queue/trials/{source_id}")
+def review_trial(owner: str, name: str, source_id: str, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """One trial's text, once, with every claim on it that is waiting for review and the span it rests on."""
+    repo = _queue_repo(c, p, owner, name)
+    got = query.review_trial(c, repo.id, claim_review.REVIEWABLE, source_id)
+    if got is None:
+        raise HTTPException(404)
+    return {"ok": True, "repository": repo.slug} | got
+
+
 @router.get("/repos/{owner}/{name}/merge-requests")
 def list_merge_requests(owner: str, name: str,
                         state: Literal["open", "merged", "rejected", "withdrawn"] | None = "open",
