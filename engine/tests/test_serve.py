@@ -1,4 +1,6 @@
 """The HTTP API, with the model and writer replaced by fakes (and, where nothing is stored, the database too)."""
+import json
+
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -90,10 +92,11 @@ def test_writer_failures_are_500s_not_crashes(answering):
     assert (r.status_code, r.json()) == (500, {"ok": False, "error": "model timed out"})
 
 
-def test_health_reports_claims_or_503(calls, monkeypatch):
+def test_health_reports_claims_or_503(calls, monkeypatch, tmp_path):
     monkeypatch.setenv("RRSRCH_READER_MODEL", "m")
+    monkeypatch.setattr(api, "BACKUP_STATUS", tmp_path / "missing.json")
     for path in ("/v1/health", "/health", "/"):
-        assert client(calls).get(path).json() == {"ok": True, "claims": 7, "model": "m"}
+        assert client(calls).get(path).json() == {"ok": True, "claims": 7, "model": "m", "backup": None}
     r = client(calls, fail_db=True).get("/v1/health")
     assert (r.status_code, r.json()) == (503, {"ok": False, "error": "connection refused"})
 
@@ -125,3 +128,15 @@ def test_request_bodies_must_declare_a_sane_length(calls):
         yield b'"q"}'
     r = c.post("/v1/answer", content=chunks(), headers={"Content-Type": "application/json"})
     assert (r.status_code, r.json()["error"]) == (411, "send a Content-Length")
+
+
+def test_health_reports_the_last_backup_without_error_text(calls, monkeypatch, tmp_path):
+    from datetime import datetime, timedelta, timezone
+    status = tmp_path / "status.json"
+    verified = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+    status.write_text(json.dumps({"last_state": "failed", "last_step": "offsite", "last_error": "R2 said /secret/path",
+                                  "last_ok_at": verified, "last_verified_at": verified, "offsite": "r2:b"}))
+    monkeypatch.setattr(api, "BACKUP_STATUS", status)
+    b = client(calls).get("/v1/health").json()["backup"]
+    assert b["last_state"] == "failed" and b["last_step"] == "offsite" and "last_error" not in b
+    assert 2.9 < b["verified_age_hours"] < 3.1
