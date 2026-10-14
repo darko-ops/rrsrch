@@ -89,3 +89,19 @@ test('the atlas tab draws the repository map and opens a claim', async () => {
   await waitFor(() => expect(screen.getByText('Claim 1')).toBeInTheDocument());
   expect(await screen.findByText('checks passed')).toBeInTheDocument();
 });
+
+test('a deep link from a search citation opens that claim in the atlas', async () => {
+  window.location.hash = '#/agents?tab=atlas&repo=rrsrch%2Fmsc-knee-oa&claim=2';
+  mockEngine({
+    '/health': () => [200, { ok: true, claims: 2 }],
+    '/v1/repos?': () => [200, { ok: true, items: [{ slug: 'rrsrch/other', claims: 0 }, { slug: 'rrsrch/msc-knee-oa', claims: 2 }] }],
+    '/v1/repos/rrsrch/msc-knee-oa/atlas': () => [200, { ok: true, repository: 'rrsrch/msc-knee-oa', ...GRAPH }],
+    '/v1/claims/2': () => [200, { ok: true, claim: { id: 2, proposition: 'Pain did not differ', state: 'contested',
+      type: 'empirical', contributor: 'bot', head: null, evidence: [], verification: null,
+      challenges: [{ id: 9, kind: 'scope', state: 'open', author: 'ext' }], contradicted_by: [], agrees_with: [] } }],
+  });
+  render(<Dashboard isMobile={false} accountPanel={null} />);
+  expect(await screen.findByText('Claim 2')).toBeInTheDocument();
+  expect(await screen.findByText(/Challenge 9 \(scope, open\) by ext/)).toBeInTheDocument();
+  window.location.hash = '';
+});

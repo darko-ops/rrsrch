@@ -561,7 +561,90 @@ function getCitation(report, id) {
   };
 }
 
-function CitationPanel({ report, citeId, onClose, onStep }) {
+// Where a cited claim stands in review on the knowledge network (engine claim states).
+const REVIEW = {
+  supported: { label: 'Supported', color: '#00ff88', note: 'Passed its repository\'s policy and independent review.' },
+  structurally_valid: { label: 'Unreviewed', color: '#9aa0a6', note: 'Anchored to its passage and passed the checks; not yet reviewed.' },
+  under_review: { label: 'Under review', color: '#7aa2ff', note: 'Being reviewed now.' },
+  contested: { label: 'Contested', color: '#fab219', note: 'A reviewer has raised a blocking challenge.' },
+  stale: { label: 'Stale', color: '#a68cff', note: 'Waiting to be re-checked.' },
+};
+
+const atlasLink = (repo, claimId) => {
+  const q = new URLSearchParams({ tab: 'atlas' });
+  if (repo) q.set('repo', repo);
+  if (claimId) q.set('claim', String(claimId));
+  return `#/agents?${q.toString()}`;
+};
+
+function TrustLine({ trust }) {
+  if (!trust || !trust.claims) return null;
+  const parts = Object.entries(trust.by_state || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([state, n]) => ({ n, label: (REVIEW[state]?.label || state).toLowerCase(), color: REVIEW[state]?.color || '#888' }));
+  if (trust.challenged) parts.push({ n: trust.challenged, label: 'under challenge', color: '#fab219' });
+  if (trust.contradicted) parts.push({ n: trust.contradicted, label: 'contradicted elsewhere', color: '#e07070' });
+  return (
+    <div style={{ margin: '12px 0 0', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', fontSize: 14, color: '#888' }}>
+      <span>Rests on {trust.claims} claim{trust.claims === 1 ? '' : 's'}:</span>
+      {parts.map((p) => (
+        <span key={p.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: p.color }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: p.color }} />
+          {p.n} {p.label}
+        </span>
+      ))}
+      <a href={atlasLink()} style={{ color: '#aaa', textDecoration: 'underline', textUnderlineOffset: 3 }}>
+        explore in Atlas
+      </a>
+    </div>
+  );
+}
+
+function ReviewBlock({ cite, report, onJump }) {
+  if (!cite.state) return null;
+  const r = REVIEW[cite.state] || { label: cite.state, color: '#888', note: '' };
+  return (
+    <div style={{
+      border: `1px solid ${hexToRgba(r.color, 0.35)}`, borderRadius: 12, padding: '14px 16px',
+      display: 'flex', flexDirection: 'column', gap: 8, background: hexToRgba(r.color, 0.05),
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: r.color, fontWeight: 700, fontSize: 13 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: r.color }} />
+          {r.label}
+        </span>
+        {cite.version && <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#777' }}>v{cite.version}</span>}
+        {cite.repository && <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#777' }}>{cite.repository}</span>}
+      </div>
+      <span style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>{r.note}</span>
+      {cite.open_challenges > 0 && (
+        <span style={{ fontSize: 13, color: '#fab219' }}>
+          {cite.open_challenges} open challenge{cite.open_challenges === 1 ? '' : 's'}
+        </span>
+      )}
+      {(cite.contradicted_by || []).length > 0 && (
+        <span style={{ fontSize: 13, color: '#e07070', display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          Contradicted by
+          {cite.contradicted_by.map((id) => (report?.citations?.[String(id)]
+            ? (
+              <button key={id} type="button" onClick={() => onJump(id)} style={{
+                background: 'none', border: '1px solid rgba(224,112,112,0.4)', borderRadius: 6, color: '#e07070',
+                fontFamily: fonts.mono, fontSize: 11, padding: '2px 6px', cursor: 'pointer',
+              }}>finding {id}</button>
+            )
+            : <a key={id} href={atlasLink(cite.repository, id)} style={{ color: '#e07070', fontFamily: fonts.mono, fontSize: 11 }}>claim {id}</a>))}
+        </span>
+      )}
+      {cite.claim_id && (
+        <a href={atlasLink(cite.repository, cite.claim_id)} style={{ color: '#ddd', fontSize: 13, textUnderlineOffset: 3 }}>
+          Trace in Atlas: evidence, revisions, reviews →
+        </a>
+      )}
+    </div>
+  );
+}
+
+function CitationPanel({ report, citeId, onClose, onStep, onJump }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') onClose();
@@ -628,6 +711,7 @@ function CitationPanel({ report, citeId, onClose, onStep }) {
           <p style={{ margin: 0, color: '#fff', fontSize: 21, lineHeight: 1.5, fontWeight: 500 }}>
             {cite.text}
           </p>
+          <ReviewBlock cite={cite} report={report} onJump={onJump} />
           <div style={{ height: 1, background: 'rgba(255,255,255,0.08)' }} />
           <div style={{ fontSize: 12, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
             Source
@@ -720,6 +804,7 @@ function VerdictHero({ isMobile, report, engineLive }) {
       {report.kicker && (
         <p style={{ margin: '16px 0 0', color: '#888', fontSize: 15 }}>{report.kicker}</p>
       )}
+      {engineLive && <TrustLine trust={report.trust} />}
       {groups.length > 0 && (
         <>
           <div style={{ marginTop: 36, display: 'flex', gap: 3, height: 12 }}>
@@ -1042,6 +1127,7 @@ function MainAnswer({
           citeId={citeId}
           onClose={() => setCiteId(null)}
           onStep={stepCite}
+          onJump={(id) => setCiteId(String(id))}
         />
       </div>
     );
