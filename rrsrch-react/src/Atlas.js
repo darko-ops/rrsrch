@@ -12,6 +12,7 @@ import {
   engine, useLoad, layoutAtlas, edgePath, COLUMNS, STATE_COLOR, fonts, GREEN, AMBER, RED, BLUE,
   Chip, StateChip, Note, Mono, Loading, inputStyle, short,
 } from './Dashboard';
+import CommitEvidence, { isCommit } from './CommitEvidence';
 
 const STATES = [
   ['all', 'All'], ['supported', 'supported'], ['under_review', 'under review'], ['contested', 'contested'],
@@ -50,7 +51,9 @@ function Details({ node, apiKey }) {
   const x = d.data || {};
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, borderTop: '1px solid #1c1c1c', paddingTop: 12, fontSize: 12.5, color: '#ccc' }}>
-      {x.claim?.evidence?.map((ev) => (
+      {x.claim?.evidence?.map((ev) => isCommit(ev) ? (
+        <CommitEvidence key={`${ev.id}-${ev.relation}`} ev={ev} mono={fonts.mono} fontSize={12.5} borderColor={EDGE[ev.relation] || '#555'} />
+      ) : (
         <blockquote key={`${ev.id}-${ev.relation}`} style={{ margin: 0, borderLeft: `3px solid ${EDGE[ev.relation] || '#555'}`,
           padding: '4px 10px', lineHeight: 1.5 }}>
           “{short(ev.excerpt, 280)}”

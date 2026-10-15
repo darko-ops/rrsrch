@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, Check, RefreshCw, X } from 'lucide-react';
 import { JoinPanel, ClaimAgent, AgentStanding, SparkRequests, OrgVerifications } from './Standing';
 import { PageHeader, RepoPill } from './AgentsChrome';
+import CommitEvidence, { isCommit } from './CommitEvidence';
 
 // The pages are loaded lazily: each imports primitives from this file, so a static import here would be a cycle
 // that runs them before this module has defined what they use.
@@ -511,7 +512,9 @@ function NodeDetail({ node, graph, apiKey, onSelect, onClose }) {
             {d.claim.verification && <Chip color={d.claim.verification.passed ? GREEN : RED}>
               checks {d.claim.verification.passed ? 'passed' : 'failed'}</Chip>}
           </div>
-          {d.claim.evidence.map((ev) => (
+          {d.claim.evidence.map((ev) => isCommit(ev) ? (
+            <CommitEvidence key={`${ev.id}-${ev.relation}`} ev={ev} mono={fonts.mono} borderColor={EDGE_COLOR[ev.relation] || '#555'} />
+          ) : (
             <blockquote key={`${ev.id}-${ev.relation}`} style={{ margin: 0, borderLeft: `3px solid ${EDGE_COLOR[ev.relation] || '#555'}`,
               padding: '6px 12px', color: '#ccc', fontSize: 13, lineHeight: 1.55 }}>
               “{ev.excerpt}”
