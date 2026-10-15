@@ -19,6 +19,7 @@ import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 // that runs them before this module has defined what they use.
 const AtlasPage = React.lazy(() => import('./Atlas'));
 const TasksBoard = React.lazy(() => import('./TasksBoard'));
+const BountiesPage = React.lazy(() => import('./Bounties'));
 const InboxPage = React.lazy(() => import('./Inbox'));
 const MembersPanel = React.lazy(() => import('./Members'));
 const AccountSignedIn = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedIn })));
@@ -1025,12 +1026,12 @@ function TaskDetail({ id, apiKey, me, onChanged }) {
 // -- the shell: a sidebar of pages (design handoff: agents pages, §1) ---------------------------------------
 
 const PAGES = {
-  agents: 'Agents', keys: 'Keys', review: 'Review', tasks: 'Tasks', inbox: 'Inbox',
+  agents: 'Agents', keys: 'Keys', review: 'Review', tasks: 'Tasks', bounties: 'Bounties', inbox: 'Inbox',
   atlas: 'Atlas', account: 'Account',
 };
 const GROUPS = [
   ['Your agents', ['agents', 'keys']],
-  ['Review', ['review', 'tasks', 'inbox']],
+  ['Review', ['review', 'tasks', 'bounties', 'inbox']],
   ['Network', ['atlas']],
 ];
 // the review queue and merge requests were two pages for one job; links to either open the one Review page
@@ -1058,7 +1059,8 @@ function SideItem({ id, active, count, tone, onPick, children }) {
   );
 }
 
-function Sidebar({ active, onPick, me, user, health, counts, isMobile }) {
+function Sidebar({ active, onPick, me, user, health, counts, isMobile, hidden = [] }) {
+  const groups = GROUPS.map(([label, ids]) => [label, ids.filter((id) => !hidden.includes(id))]);
   const who = me?.handle || user?.name;
   const c = counts || {};
   const waiting = c.queue == null && c.merge == null ? undefined : (c.queue || 0) + (c.merge || 0);
@@ -1067,7 +1069,7 @@ function Sidebar({ active, onPick, me, user, health, counts, isMobile }) {
   if (isMobile) {
     return (
       <nav style={{ display: 'flex', gap: 4, overflowX: 'auto', borderBottom: '1px solid #222', paddingBottom: 8 }}>
-        {[...GROUPS.flatMap(([, ids]) => ids), 'account'].map((id) => (
+        {[...groups.flatMap(([, ids]) => ids), 'account'].map((id) => (
           <div key={id} style={{ flex: '0 0 auto' }}>
             <SideItem id={id} active={active} onPick={onPick} count={count[id]} tone={tone[id]}>{PAGES[id]}</SideItem>
           </div>
@@ -1091,7 +1093,7 @@ function Sidebar({ active, onPick, me, user, health, counts, isMobile }) {
           {health === null ? 'checking engine' : health.ok ? `engine live · ${health.claims} claims` : 'engine offline'}
         </span>
       </div>
-      {GROUPS.map(([label, ids]) => (
+      {groups.map(([label, ids]) => (
         <div key={label}>
           <div style={{ fontFamily: fonts.mono, fontWeight: 500, fontSize: 10.5, textTransform: 'uppercase',
             letterSpacing: '0.08em', color: '#666', padding: '0 10px 6px' }}>{label}</div>
@@ -1219,6 +1221,14 @@ export default function Dashboard({ isMobile, initialTab }) {
     return () => { live = false; };
   }, [repo, acting, tab]);
 
+  // the Bounties page shows only where the engine has bounties on (RRSRCH_BOUNTIES)
+  const [bountiesMode, setBountiesMode] = useState('off');
+  useEffect(() => {
+    let live = true;
+    engine('/v1/bounties?limit=1', { key: acting }).then((r) => { if (live && r.ok) setBountiesMode(r.data.mode || 'off'); });
+    return () => { live = false; };
+  }, [acting]);
+
   const signedOut = () => { writeStored('rrsrch_token', ''); setSiteToken(''); setUser(null); };
   const repoProps = { repos: repos.data?.items, repo, onRepo: setRepo };
 
@@ -1250,6 +1260,8 @@ export default function Dashboard({ isMobile, initialTab }) {
         <ClaimQueue apiKey={acting} repo={repo} />
       </RepoPage>
     );
+  } else if (tab === 'bounties') {
+    page = <BountiesPage apiKey={acting} me={me} isMobile={isMobile} focus={link.get('bounty')} {...repoProps} />;
   } else if (tab === 'tasks') {
     page = <TasksBoard apiKey={acting} me={me} isMobile={isMobile} {...repoProps} />;
   } else if (tab === 'inbox') {
@@ -1267,7 +1279,8 @@ export default function Dashboard({ isMobile, initialTab }) {
   return (
     <div style={{ fontFamily: fonts.main, display: isMobile ? 'grid' : 'grid', gap: isMobile ? 16 : 32,
       gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '220px minmax(0, 1fr)', alignItems: 'start' }}>
-      <Sidebar active={tab} onPick={setTab} me={me} user={user} health={health} counts={counts} isMobile={isMobile} />
+      <Sidebar active={tab} onPick={setTab} me={me} user={user} health={health} counts={counts} isMobile={isMobile}
+        hidden={bountiesMode === 'off' && tab !== 'bounties' ? ['bounties'] : []} />
       <main style={{ minWidth: 0 }}>
         <React.Suspense fallback={<Loading what="the page" />}>{page}</React.Suspense>
         {repos.error && ['review', 'tasks', 'atlas'].includes(tab) && <Note tone="error">{repos.error}</Note>}
