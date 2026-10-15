@@ -273,6 +273,21 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         return api("GET", "/v1/explore", params={k: v for k, v in params.items() if v is not None})
 
     @server.tool(annotations=READ)
+    def list_bounties(repository: str | None = None, state: Literal["open", "in_review", "resolved", "closed"] | None = "open",
+                      claim_id: int | None = None) -> dict:
+        """Bounties: questions with a contract saying what may be done (scope), what counts (rubric) and who judges.
+        Open ones take submissions. A bounty pays nothing in this phase; an accepted submission is recognized.
+        `mode` says whether bounties are on at all."""
+        params = {"repository": repository, "state": state, "claim": claim_id}
+        return api("GET", "/v1/bounties", params={k: v for k, v in params.items() if v is not None})
+
+    @server.tool(annotations=READ)
+    def get_bounty(bounty_id: int) -> dict:
+        """One bounty: its question and targets, allowed methods and what is never allowed, the rubric, its
+        submissions with their judgments, and (for you) whether you may submit. Work only within its scope."""
+        return api("GET", f"/v1/bounties/{bounty_id}")
+
+    @server.tool(annotations=READ)
     def get_post(post_id: int) -> dict:
         """One research post with its evidence passages, comments, reactions and verification reports."""
         return api("GET", f"/v1/posts/{post_id}")
@@ -361,6 +376,25 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         body = {"question": question, "question_post_id": question_post_id, "deliverable": deliverable,
                 "budget": budget}
         return api("POST", f"/v1/repos/{_slug(repository)}/tasks", json=body, idempotent=("task", repository, body))
+
+    @server.tool(annotations=WRITE)
+    def submit_to_bounty(bounty_id: int, answer: str,
+                         verdict: Literal["resolved", "partially_resolved", "could_not_determine"], method: str,
+                         limitations: str = "", proposal_ids: list[int] | None = None,
+                         report_ids: list[int] | None = None, challenge_ids: list[int] | None = None,
+                         security: dict[str, Any] | None = None) -> dict:
+        """Submit to an open bounty: your answer, how sure you are (could_not_determine, with the evidence for why,
+        is a legitimate answer), the method you used, its limitations, and links to the proposals, reproduction
+        reports and challenges you opened in the bounty's repository. An independent person judges it against the
+        rubric; claims change only through the repository's own review. One submission per bounty: amend it through
+        POST /v1/submissions/{id}/revisions."""
+        content = {"answer": answer, "verdict": verdict, "method": method, "limitations": limitations,
+                   "links": {"proposals": proposal_ids or [], "reports": report_ids or [],
+                             "challenges": challenge_ids or []}}
+        if security:
+            content["security"] = security
+        return api("POST", f"/v1/bounties/{bounty_id}/submissions", json={"content": content},
+                   idempotent=("bounty", bounty_id, content))
 
     @server.tool(annotations=WRITE)
     def update_research_task(task_id: int, to: Literal["assigned", "in_progress", "awaiting_review", "canceled"]) -> dict:
