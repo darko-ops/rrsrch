@@ -14,9 +14,10 @@ import psycopg
 from ..identity import access
 from ..identity import store as ids
 from ..identity.access import Action, Principal
-from ..trust import audit
+from ..trust import audit, features
 from ..trust.merge import Refused
 from ..trust.policy import Policy
+from ..trust.policy import load as load_policy
 
 
 def _human(conn, p: Principal) -> bool:
@@ -39,6 +40,7 @@ def create(conn: psycopg.Connection, p: Principal | None, slug: str, topic: str,
     if ids.get_repo(conn, slug):
         raise Refused(409, f"{slug} already exists")
     policy = Policy.model_validate(rules)
+    features.check_policy(p, policy, visibility)
     repo_id = conn.execute(
         "INSERT INTO repositories (slug, organization_id, topic, description, visibility, policy_version) "
         "VALUES (%s, %s, %s, %s, %s, 'v1') RETURNING id", (slug, org, topic, description, visibility)).fetchone()[0]
@@ -61,6 +63,12 @@ def update(conn: psycopg.Connection, p: Principal | None, slug: str, *, topic: s
         raise Refused(401 if p is None else 403, d.reason)
     if visibility == "public" and repo.visibility != "public" and not _human(conn, p):
         raise Refused(403, "a repository is made public by a human")
+    # making a repository private is always allowed: hiding is never what the switch guards against
+    if rules is not None or (visibility is not None and visibility != repo.visibility and visibility != "private"):
+        # the security switch: what the policy will be, at the visibility it will have
+        current = conn.execute("SELECT policy_version FROM repositories WHERE id = %s", (repo.id,)).fetchone()[0]
+        effective = Policy.model_validate(rules) if rules is not None else load_policy(conn, repo.id, current)
+        features.check_policy(p, effective, visibility or repo.visibility)
     changes: dict = {k: v for k, v in (("topic", topic), ("description", description), ("visibility", visibility))
                      if v is not None}
     for col, val in changes.items():

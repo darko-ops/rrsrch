@@ -14,6 +14,12 @@ COMMIT = "0123456789abcdef0123456789abcdef01234567"
 REF = {"repo_url": "https://github.com/langchain-ai/langchain", "commit": COMMIT, "tag": "langchain-core==0.2.43"}
 
 
+@pytest.fixture
+def security_on(monkeypatch):
+    """The security features are dark by default (trust/features.py); these tests are about the features themselves."""
+    monkeypatch.setenv("RRSRCH_SECURITY_FEATURES", "on")
+
+
 # profiles
 
 def test_the_clinical_profile_is_the_default_and_the_gate_is_unchanged_under_it():
@@ -60,7 +66,7 @@ def test_adding_git_refs_leaves_span_only_content_hashes_alone():
     assert again.content_hash() == both.content_hash()                       # evidence order is not content
 
 
-def test_git_refs_need_a_policy_that_takes_them_and_never_stand_alone():
+def test_git_refs_need_a_policy_that_takes_them_and_never_stand_alone(security_on):
     with_ref = {"evidence": [["supports", span()], ["supports", REF]]}
     assert "evidence_kinds" in failed(proposal(**with_ref))
     takes = STRICT.model_copy(update={"allowed_evidence": ("document_span", "git_ref")})
@@ -110,7 +116,7 @@ def test_a_merge_is_judged_by_the_claims_own_rules():
 # against a real Postgres
 
 @pytest.mark.db
-def test_a_merged_git_ref_is_stored_and_shown_with_its_claim(world):
+def test_a_merged_git_ref_is_stored_and_shown_with_its_claim(world, security_on):
     import psycopg
     from test_knowledge_api import claim_of
     from test_trust_db import PILOT
@@ -146,7 +152,7 @@ def test_a_merged_git_ref_is_stored_and_shown_with_its_claim(world):
 
 
 @pytest.mark.db
-def test_claim_reviews_use_the_claims_own_rules(world):
+def test_claim_reviews_use_the_claims_own_rules(world, security_on):
     import psycopg
     from test_claim_review import reader_claim, review
     from test_trust_db import PILOT, QUOTE
@@ -195,3 +201,43 @@ def test_git_refs_have_one_spelling_and_real_tag_names():
                 {"repo_url": "https://github.com/o/.."}, {"repo_url": "https://github.com/-o/r"}):
         with pytest.raises(ValidationError):
             GitRef(**REF | bad)
+
+
+# the switch (trust/features.py)
+
+def test_commit_evidence_is_refused_while_the_switch_is_off(monkeypatch):
+    monkeypatch.delenv("RRSRCH_SECURITY_FEATURES", raising=False)
+    takes = STRICT.model_copy(update={"allowed_evidence": ("document_span", "git_ref")})
+    p = proposal(policy=takes, evidence=[["supports", span()], ["supports", REF]])
+    checks = {c.name: c for c in pipeline.verify(p)[1]}
+    assert not checks["evidence_kinds"].passed and "disabled on this server" in checks["evidence_kinds"].detail
+    monkeypatch.setenv("RRSRCH_SECURITY_FEATURES", "operator")
+    assert {c.name: c for c in pipeline.verify(p)[1]}["evidence_kinds"].passed
+
+
+@pytest.mark.db
+def test_security_policies_need_the_switch_and_stay_private_in_testing(world, monkeypatch):
+    from test_trust_db import PILOT
+    client, h, url = world
+    secure = {"allowed_evidence": ["document_span", "git_ref"], "required_approvals": 0}
+    new = {"slug": "rrsrch/supply-chain-test", "topic": "t", "visibility": "private", "policy": secure}
+
+    monkeypatch.delenv("RRSRCH_SECURITY_FEATURES", raising=False)          # off: nobody
+    r = client.post("/v1/repos", headers=h["admin"], json=new)
+    assert r.status_code == 403 and "aren't enabled" in r.json()["error"]
+    rules = client.get(f"/v1/repos/{PILOT}").json()["repository"]["policy"]
+    assert client.patch(f"/v1/repos/{PILOT}", headers=h["admin"],
+                        json={"policy": rules | {"kinds": ["x"]}}).status_code == 403
+    assert client.post("/v1/repos", headers=h["admin"], json=new | {"policy": {"required_approvals": 0}}).status_code == 201
+
+    monkeypatch.setenv("RRSRCH_SECURITY_FEATURES", "operator")             # operator: network admins, private only
+    assert client.patch("/v1/repos/rrsrch/supply-chain-test", headers=h["admin"], json={"policy": secure}).status_code == 200
+    r = client.patch("/v1/repos/rrsrch/supply-chain-test", headers=h["admin"], json={"visibility": "public"})
+    assert r.status_code == 403 and "private repositories" in r.json()["error"]
+    assert client.patch(f"/v1/repos/{PILOT}", headers=h["admin"],
+                        json={"policy": rules | {"allowed_evidence": ["document_span", "git_ref"]}}).status_code == 403
+
+    monkeypatch.setenv("RRSRCH_SECURITY_FEATURES", "on")                   # on: the public launch
+    assert client.patch("/v1/repos/rrsrch/supply-chain-test", headers=h["admin"], json={"visibility": "public"}).status_code == 200
+    monkeypatch.delenv("RRSRCH_SECURITY_FEATURES", raising=False)          # off again: hiding it is still allowed
+    assert client.patch("/v1/repos/rrsrch/supply-chain-test", headers=h["admin"], json={"visibility": "private"}).status_code == 200
