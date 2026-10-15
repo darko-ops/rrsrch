@@ -55,6 +55,8 @@ def test_nvd_cpe_ranges_exact_versions_and_unparseable_bounds():
     assert s == {"0.2.0", "0.3.0a1", "0.3.0", "0.3.1"} and fixes == {"1.0.0"} and not exact
     s, _, _, exact = spike.nvd_affected("PyPI", RELS, cve({"criteria": "cpe:2.3:a:acme:widget:0.3.1:*:*:*:*:*:*:*"}), "widget", {"widget"})
     assert s == {"0.3.1"} and exact                       # only the version a reporter tested
+    s, _, _, _ = spike.nvd_affected("PyPI", RELS, cve({"criteria": "cpe:2.3:a:acme:widget:0.3.0:a1:*:*:*:*:*:*"}), "widget", {"widget"})
+    assert s == {"0.3.0a1"}                               # the update field is part of the version
     s, how, _, _ = spike.nvd_affected("PyPI", RELS, cve(
         {"criteria": "cpe:2.3:a:acme:widget:*:*:*:*:*:*:*:*", "versionEndExcluding": "1.52.10-stable"}), "widget", {"widget"})
     assert s is None and "unparseable" in how

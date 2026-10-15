@@ -277,6 +277,8 @@ def nvd_affected(eco, rels, cve: dict, pkg: str, products: set[str]):
                     continue
                 parts = m["criteria"].split(":")
                 product, version = norm(parts[4]), parts[5]
+                if version not in ("*", "-") and parts[6] not in ("*", "-", ""):
+                    version += parts[6]          # CPE keeps a pre-release in the update field: 0.11.1 + rc0
                 seen.add(f"{parts[3]}:{parts[4]}")
                 if product in names:
                     how = how or "package"
@@ -449,7 +451,7 @@ def installable(eco: str, v: str, on_registry: set[str], gone: set[str]) -> bool
 def why_harmless(eco: str, vs: set[str], on_registry: set[str], gone: set[str]) -> list[str]:
     out = Counter("no longer on the registry" if v not in on_registry else "yanked" if v in gone else
                   "pre-release" for v in vs)
-    return [f"{n} {k}" for k, n in out.most_common()]
+    return [f"{n} {k}" for k, n in sorted(out.items(), key=lambda kv: (-kv[1], kv[0]))]   # stable across runs
 
 
 def describe(eco, rels, s: set[str]) -> str:
