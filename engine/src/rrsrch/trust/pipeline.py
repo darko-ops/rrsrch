@@ -126,8 +126,10 @@ def verify(p: Proposal) -> tuple[ClaimContent | None, list[Check]]:
                              f"scope.kind must be one of {', '.join(p.policy.kinds)}"
                              + (f" (got {kind!r})" if kind is not None else " (none given)")))
     if refs:
-        checks.append(_check(S, "evidence_kinds", "git_ref" in policy.allowed_evidence,
-                             "git refs aren't accepted as evidence here"))
+        from . import features
+        ok = "git_ref" in policy.allowed_evidence and features.commit_evidence_enabled()
+        checks.append(_check(S, "evidence_kinds", ok, "git refs aren't accepted as evidence here"
+                             if features.commit_evidence_enabled() else "commit evidence is disabled on this server"))
     # only passages count as sources: a claim rests on something it can quote, and a commit can add to that,
     # never replace it (min_sources is at least 1)
     support = [s for rel, s in spans if rel is Relation.SUPPORTS]
