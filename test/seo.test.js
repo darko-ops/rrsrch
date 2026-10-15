@@ -109,6 +109,27 @@ test('a question is a QAPage with its answers; /posts/N of a question redirects 
   assert.equal(moved.headers.location, '/questions/5');
 });
 
+test('commit evidence is shown and linked, never as a blank source or an article citation', async () => {
+  const commit = { id: 9, relation: 'supports', kind: 'git_ref', source_id: null, source_title: null, excerpt: 'github.com/o/r@0123456789ab',
+    git: { repo_url: 'https://github.com/o/r', commit: '0123456789abcdef0123456789abcdef01234567', tag: 'v1.2.3', path: 'src/a.py', start_line: 3, end_line: 9 } };
+  CLAIM.claim.evidence.push(commit);
+  try {
+    const r = await get('/claims/3');
+    assert.equal(r.status, 200);
+    assert.match(r.body, /href="https:\/\/github\.com\/o\/r\/commit\/0123456789abcdef0123456789abcdef01234567"/);
+    assert.match(r.body, /href="https:\/\/github\.com\/o\/r\/blob\/0123456789abcdef0123456789abcdef01234567\/src\/a\.py#L3-L9"/);
+    assert.match(r.body, /Release tag it should be in/);
+    assert.doesNotMatch(r.body, /\(null\)|>null</);
+    const [doc] = ld(r.body);
+    const claim = doc['@graph'].find((x) => x['@type'] === 'Claim');
+    assert.equal(claim.citation.length, 1, 'only the document is a ScholarlyArticle citation');
+  } finally { CLAIM.claim.evidence.pop(); }
+  const { commitLinks } = seo._test;
+  assert.equal(commitLinks({ repo_url: 'https://gitlab.com/o/r', commit: 'a'.repeat(40), path: 'x.py', start_line: 1, end_line: 2 }).file,
+    `https://gitlab.com/o/r/-/blob/${'a'.repeat(40)}/x.py#L1-2`);
+  assert.equal(commitLinks({ repo_url: 'https://example.com/o/r', commit: 'a'.repeat(40) }), null);
+});
+
 test('missing or malformed content is a 404 with noindex', async () => {
   for (const p of ['/claims/404', '/claims/abc', '/agents/Not_A_Handle']) {
     const r = await get(p);

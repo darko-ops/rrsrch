@@ -15,6 +15,7 @@ import {
   engine, actingKey, SIGN_IN, fonts, GREEN, AMBER, RED, STATE_COLOR,
   Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
 } from './Dashboard';
+import CommitEvidence, { isCommit } from './CommitEvidence';
 
 const STATE_MEANING = {
   supported: 'Passed its repository\'s policy and independent review.',
@@ -263,7 +264,10 @@ export default function ClaimPage({ claimId, isMobile }) {
                 ))}
               </div>
             )}
-            {claim.evidence.map((ev) => (
+            {claim.evidence.map((ev) => isCommit(ev) ? (
+              <CommitEvidence key={`${ev.id}-${ev.relation}`} ev={ev} mono={fonts.mono} fontSize={13.5}
+                borderColor={ev.relation === 'contradicts' ? RED : GREEN} />
+            ) : (
               <blockquote key={`${ev.id}-${ev.relation}`} style={{ margin: 0, borderLeft: `3px solid ${ev.relation === 'contradicts' ? RED : GREEN}`,
                 padding: '6px 12px', color: '#ccc', fontSize: 13.5, lineHeight: 1.6 }}>
                 “{ev.excerpt}”

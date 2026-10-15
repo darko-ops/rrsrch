@@ -174,8 +174,35 @@ async function sources(get, ids) {
   return Object.fromEntries(uniq.map((id, i) => [id, got[i].data || null]));
 }
 
+// Commit evidence (kind git_ref): the same link spelling as rrsrch-react/src/CommitEvidence.js
+const FORGES = {
+  'github.com': { commit: (r, c) => `${r}/commit/${c}`, blob: (r, c, p) => `${r}/blob/${c}/${p}`, lines: (a, b) => `#L${a}-L${b}`, tag: (r, t) => `${r}/tree/${encodeURIComponent(t)}` },
+  'gitlab.com': { commit: (r, c) => `${r}/-/commit/${c}`, blob: (r, c, p) => `${r}/-/blob/${c}/${p}`, lines: (a, b) => `#L${a}-${b}`, tag: (r, t) => `${r}/-/tags/${encodeURIComponent(t)}` },
+  'codeberg.org': { commit: (r, c) => `${r}/commit/${c}`, blob: (r, c, p) => `${r}/src/commit/${c}/${p}`, lines: (a, b) => `#L${a}-L${b}`, tag: (r, t) => `${r}/src/tag/${encodeURIComponent(t)}` },
+};
+function commitLinks(git) {
+  if (!git || !/^https:\/\/[^/]+\/[^/]+\/[^/]+$/.test(git.repo_url || '') || !/^[0-9a-f]{40}$/.test(git.commit || '')) return null;
+  const f = FORGES[new URL(git.repo_url).host];
+  if (!f) return null;
+  const path = git.path ? git.path.split('/').map(encodeURIComponent).join('/') : null;
+  return { repo: git.repo_url.replace(/^https:\/\//, ''), commit: f.commit(git.repo_url, git.commit),
+           file: path ? f.blob(git.repo_url, git.commit, path) + (git.start_line ? f.lines(git.start_line, git.end_line) : '') : null,
+           tag: git.tag ? f.tag(git.repo_url, git.tag) : null };
+}
+const isCommit = (e) => e && e.kind === 'git_ref' && e.git;
+
+function commitHtml(e) {
+  const g = e.git, l = commitLinks(g);
+  const a = (href, text) => (href ? `<a href="${escapeHtml(href)}"><code>${escapeHtml(text)}</code></a>` : `<code>${escapeHtml(text)}</code>`);
+  return `<figure><div class="item">Commit ${a(l && l.commit, String(g.commit || '').slice(0, 12))} in <code>${escapeHtml(l ? l.repo : g.repo_url)}</code>${
+    g.path ? `<br>Code: ${a(l && l.file, g.path + (g.start_line ? ` lines ${g.start_line}–${g.end_line}` : ''))} at this commit` : ''}${
+    g.tag ? `<br>Release tag it should be in: ${a(l && l.tag, g.tag)}` : ''}</div>
+    <figcaption>${e.relation ? `${escapeHtml(e.relation)} · ` : ''}commit evidence</figcaption></figure>`;
+}
+
 function evidenceHtml(items, srcs) {
   return items.map((e) => {
+    if (isCommit(e)) return commitHtml(e);
     const src = srcs[e.source_id];
     const link = sourceLink(e.source_id, src);
     const where = [src?.journal, src?.pub_year].filter(Boolean).map(escapeHtml).join(', ');
@@ -208,7 +235,7 @@ async function claimPage(get, id) {
   if (!c.data) return { status: c.status === 503 ? 503 : 404 };
   const claim = c.data.claim;
   const formal = fb.data?.formal || {};
-  const srcs = await sources(get, (claim.evidence || []).map((e) => e.source_id));
+  const srcs = await sources(get, (claim.evidence || []).filter((e) => !isCommit(e)).map((e) => e.source_id));
   const url = `${SITE}/claims/${claim.id}`;
   const [label, meaning] = STATE[claim.state] || [stateLabel(claim.state), ''];
   const reviews = formal.reviews || [];
@@ -221,7 +248,8 @@ async function claimPage(get, id) {
     ? `<ul>${list.map((x) => `<li><a href="/claims/${Number(x.claim_id ?? x.id)}">Claim ${Number(x.claim_id ?? x.id)}</a>${x.proposition ? `: ${escapeHtml(clip(x.proposition, 220))}` : ''}${x.state ? ` <span class="muted">(${escapeHtml(stateLabel(x.state))})</span>` : ''}</li>`).join('')}</ul>`
     : `<p class="muted">${empty}</p>`);
 
-  const citations = (claim.evidence || []).map((e) => scholarly(e.source_id, e.source_title, srcs[e.source_id]));
+  // documents are ScholarlyArticle citations; commits are linked in the page, not cited as articles
+  const citations = (claim.evidence || []).filter((e) => !isCommit(e)).map((e) => scholarly(e.source_id, e.source_title, srcs[e.source_id]));
   const graph = [{
     '@type': 'Claim', '@id': `${url}#claim`, url, text: claim.proposition, name: clip(claim.proposition, 110),
     dateCreated: iso(claim.created_at), author: personOrAgent(claim.contributor), citation: citations,
@@ -258,7 +286,7 @@ async function claimPage(get, id) {
     status: 200,
     page: {
       title: `${clip(claim.proposition, 90)} · RRSRCH`,
-      description: `${label}. ${clip(claim.proposition, 140)} Cited from: ${clip((claim.evidence || [])[0]?.source_title || '', 80)}`,
+      description: `${label}. ${clip(claim.proposition, 140)}${(() => { const t = (claim.evidence || []).find((e) => !isCommit(e))?.source_title; return t ? ` Cited from: ${clip(t, 80)}` : ''; })()}`,
       canonical: url, jsonLd: { '@context': 'https://schema.org', '@graph': graph },
       alternate: `/api/engine/v1/claims/${claim.id}`, body,
       noindex: ['superseded'].includes(claim.state),
@@ -491,4 +519,4 @@ function register(app, { engineUrl }) {
   });
 }
 
-module.exports = { register, _test: { renderPage, claimPage, postPage, agentPage, topicPage, sitemap, SITEMAP_MAX } };
+module.exports = { register, _test: { commitLinks, renderPage, claimPage, postPage, agentPage, topicPage, sitemap, SITEMAP_MAX } };
