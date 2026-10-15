@@ -22,9 +22,9 @@ from dataclasses import dataclass, field
 
 from pydantic import ValidationError
 
-from ..check import gate
+from ..check import gate, profiles
 from ..identity.access import Decision
-from ..knowledge.models import Check, CheckKind, ClaimContent, Relation
+from ..knowledge.models import Check, CheckKind, ClaimContent, GitRef, Relation, Span
 from .policy import Policy
 
 
@@ -112,21 +112,34 @@ def verify(p: Proposal) -> tuple[ClaimContent | None, list[Check]]:
         return None, [_check(S, "schema", False, f"{where}: {first['msg']}" if where else first["msg"])]
 
     checks = [_check(S, "schema", True)]
+    policy = p.policy.for_claim(c.type, c.scope)
+    refs = [(rel, e) for rel, e in c.evidence if isinstance(e, GitRef)]
+    spans = [(rel, e) for rel, e in c.evidence if isinstance(e, Span)]
     checks.append(_check(S, "repository", c.repository == p.repository,
                          f"content is for {c.repository}, proposed to {p.repository}"))
-    checks.append(_check(S, "claim_type", c.type in p.policy.allowed_types,
+    checks.append(_check(S, "claim_type", c.type in policy.allowed_types,
                          f"{c.type} claims aren't accepted here (allowed: "
-                         f"{', '.join(t.value for t in p.policy.allowed_types)})"))
-    support = [s for rel, s in c.evidence if rel is Relation.SUPPORTS]
+                         f"{', '.join(t.value for t in policy.allowed_types)})"))
+    if p.policy.kinds:
+        kind = (c.scope or {}).get("kind")
+        checks.append(_check(S, "claim_kind", kind in p.policy.kinds,
+                             f"scope.kind must be one of {', '.join(p.policy.kinds)}"
+                             + (f" (got {kind!r})" if kind is not None else " (none given)")))
+    if refs:
+        checks.append(_check(S, "evidence_kinds", "git_ref" in policy.allowed_evidence,
+                             "git refs aren't accepted as evidence here"))
+    # only passages count as sources: a claim rests on something it can quote, and a commit can add to that,
+    # never replace it (min_sources is at least 1)
+    support = [s for rel, s in spans if rel is Relation.SUPPORTS]
     sources = {s.source_id for s in support}
     independent = independent_sources(sources, p.trials)
-    checks.append(_check(S, "min_sources", independent >= p.policy.min_sources,
-                         f"{independent} independent supporting source(s), policy needs {p.policy.min_sources}"
+    checks.append(_check(S, "min_sources", independent >= policy.min_sources,
+                         f"{independent} independent supporting source(s), policy needs {policy.min_sources}"
                          + (" (spans of one source count once)" if len(support) > len(sources) else "")
                          + (" (sources reporting the same trial count once)" if len(sources) > independent else "")))
 
     checks.append(_check(P, "author_active", p.author_status == "active", f"author is {p.author_status}"))
-    unknown = sorted({s.source_id for _, s in c.evidence} - p.known_sources)
+    unknown = sorted({s.source_id for _, s in spans} - p.known_sources)
     checks.append(_check(P, "sources_known", not unknown, f"unknown source(s): {', '.join(unknown)}"))
     if c.derived_from:
         missing = sorted(set(c.derived_from) - p.known_claims)
@@ -140,7 +153,7 @@ def verify(p: Proposal) -> tuple[ClaimContent | None, list[Check]]:
                          "new claims have no parent" if p.head_hash is None else
                          f"written against {c.parent_hash}, but the claim's head is {p.head_hash}"))
     stale = []
-    for _, s in c.evidence:
+    for _, s in spans:
         d = p.docs.get((s.source_id, s.doc_sha256))
         if d is None:
             stale.append(f"{s.source_id}@{s.doc_sha256[:12]} is not a current document")
@@ -148,19 +161,30 @@ def verify(p: Proposal) -> tuple[ClaimContent | None, list[Check]]:
             stale.append(f"{s.source_id} span {s.start}-{s.end} runs past the document ({len(d.text)} chars)")
     checks.append(_check(I, "spans_current", not stale, "; ".join(stale)))
 
-    if p.policy.primary_evidence_only:
+    if policy.primary_evidence_only:
         derivative = sorted({s.source_id for s in support
                              if (d := p.docs.get((s.source_id, s.doc_sha256))) and not d.is_primary})
         checks.append(_check(SRC, "primary_evidence", not derivative,
                              f"derivative source(s) as support: {', '.join(derivative)}"))
 
-    if p.policy.evidence_gate:
-        cited = [gate.CitedClaim(f"e{i}", d.text[s.start:s.end], gate.source_context(d.title, d.abstract))
+    if policy.evidence_gate:
+        profile = profiles.get(policy.profile)
+        cited = [gate.CitedClaim(f"e{i}", d.text[s.start:s.end], gate.source_context(d.title, d.abstract, profile))
                  for i, s in enumerate(support) if (d := p.docs.get((s.source_id, s.doc_sha256)))]
-        v = gate.check(c.proposition, cited, report_scope={})
+        v = gate.check(c.proposition, cited, report_scope={}, profile=profile)
         checks.append(_check(F, f"evidence_gate:{v.rule}" if not v.passed else "evidence_gate", v.passed,
                              v.detail))
     return c, checks
+
+
+def claim_policy(p: Proposal) -> Policy:
+    """The repository's rules for this proposal's claim (its type and scope.kind); the base rules if the content
+    doesn't parse, in which case the schema check has already failed it."""
+    try:
+        c = ClaimContent.model_validate(p.content)
+    except ValidationError:
+        return p.policy
+    return p.policy.for_claim(c.type, c.scope)
 
 
 def review_tally(reviews, author_id: int, author_org: str, policy: Policy) -> tuple[int, int, list[str]]:
@@ -201,7 +225,8 @@ def authorize(p: Proposal, checks: list[Check], merger: Decision) -> MergeDecisi
 
     reasons += [f"blocking challenge {cid} is open" for cid in p.blocking_challenges]
 
-    approvals, humans, objections = review_tally(p.reviews, p.author_id, p.author_org, p.policy)
+    policy = claim_policy(p)
+    approvals, humans, objections = review_tally(p.reviews, p.author_id, p.author_org, policy)
     reasons += objections
-    reasons += approval_reasons(approvals, humans, p.policy)
+    reasons += approval_reasons(approvals, humans, policy)
     return MergeDecision(not reasons, tuple(reasons), approvals)

@@ -17,6 +17,9 @@ trusting a model:
   numbers    every number in the sentence is in a claim, to the precision the
              sentence states; p-value inequalities are checked as inequalities
 
+Which vocabulary, extractor and default scope the rules read text with is the
+domain profile's (profiles.py); without one, the clinical profile.
+
 What rules can't catch (a subtle paraphrase that changes meaning) is measured
 separately by the faithfulness score. The gate is the floor, not the ceiling.
 """
@@ -24,17 +27,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import vocab
-from .fields import Fields, Number, extract
+from . import profiles
+from .fields import Fields, Number
 
-REPORT_SCOPE = {"species": "human", "joint": "knee", "condition": "osteoarthritis"}
+# The clinical profile's, kept here for the callers written before profiles (skeptic, writer)
+REPORT_SCOPE = profiles.CLINICAL.report_scope
 
 
-# What a claim inherits from its source when its own text is silent: the
-# population, and the intervention ("the cell-recipient group improved" is a
-# claim about MSCs because the study is). Outcomes are never inherited: a claim
-# must name what it measured.
-INHERITED = ("species", "joint", "condition", "cell_type")
+# What a claim inherits from its source when its own text is silent (the clinical profile's; see profiles.py)
+INHERITED = profiles.CLINICAL.inherited
 
 
 @dataclass(frozen=True)
@@ -57,7 +58,7 @@ class Verdict:
                 "log": [{"rule": r, "ok": ok, "detail": d} for r, ok, d in self.log]}
 
 
-def source_context(title: str, abstract: str) -> dict[str, frozenset[str]]:
+def source_context(title: str, abstract: str, profile: profiles.Profile = profiles.CLINICAL) -> dict[str, frozenset[str]]:
     """What a source establishes for all its claims: population and intervention.
 
     Condition, joint and cell type come from the title and abstract
@@ -66,9 +67,9 @@ def source_context(title: str, abstract: str) -> dict[str, frozenset[str]]:
     work in their background: the title's species wins, and the abstract's is
     used only when it names exactly one.
     """
-    from .vocab import find
+    find = profile.vocab.find
     ctx = {}
-    for g in INHERITED:
+    for g in profile.inherited:
         t, a = find(title, g), find(abstract, g)
         if g == "species":
             ctx[g] = t or (a if len(a) == 1 else frozenset())
@@ -77,19 +78,20 @@ def source_context(title: str, abstract: str) -> dict[str, frozenset[str]]:
     return ctx
 
 
-def _effective(group: str, own: frozenset[str], c: CitedClaim) -> frozenset[str]:
+def _effective(group: str, own: frozenset[str], c: CitedClaim, profile: profiles.Profile) -> frozenset[str]:
     """The claim's own entities, filled in or sharpened by its source's.
 
     Silent claim: inherits. Claim that says "MSCs" in an adipose-derived MSC
     trial: means the adipose-derived ones, so the more specific term wins.
     """
-    if group not in INHERITED:
+    if group not in profile.inherited:
         return own
+    ancestors = profile.vocab.ancestors
     ctx = c.context.get(group, frozenset())
     if not own:
         return ctx
-    sharper = {x for x in ctx if any(o in vocab.ancestors(group, x) for o in own)}
-    return frozenset(sharper | {o for o in own if not any(o in vocab.ancestors(group, x) for x in sharper)})
+    sharper = {x for x in ctx if any(o in ancestors(group, x) for o in own)}
+    return frozenset(sharper | {o for o in own if not any(o in ancestors(group, x) for x in sharper)})
 
 
 def _close(c: float, s: float, decimals: int, rel: float = 0.0) -> bool:
@@ -119,27 +121,29 @@ def _number_supported(s: Number, claims: list[Number]) -> bool:
     return False
 
 
-def _entity_supported(group: str, entity: str, claim_entities) -> bool:
-    return any(entity in vocab.ancestors(group, c) for c in claim_entities)
+def _entity_supported(group: str, entity: str, claim_entities, voc) -> bool:
+    return any(entity in voc.ancestors(group, c) for c in claim_entities)
 
 
-def _outcomes_fit(sentence: frozenset[str], claim: frozenset[str]) -> bool:
+def _outcomes_fit(sentence: frozenset[str], claim: frozenset[str], voc) -> bool:
     """The claim finding speaks to every outcome the sentence finding names."""
-    return all(_entity_supported("outcome", o, claim) for o in sentence)
+    return all(_entity_supported("outcome", o, claim, voc) for o in sentence)
 
 
-def _outcomes_overlap(a: frozenset[str], b: frozenset[str]) -> bool:
+def _outcomes_overlap(a: frozenset[str], b: frozenset[str], voc) -> bool:
     """Same outcome family in either direction (VAS pain vs pain, WOMAC vs WOMAC pain)."""
     if not a or not b:
         return True
-    return _outcomes_fit(a, b) or _outcomes_fit(b, a)
+    return _outcomes_fit(a, b, voc) or _outcomes_fit(b, a, voc)
 
 
 def check(sentence: str, claims: list[CitedClaim], report_scope: dict[str, str] | None = None,
-          sentence_fields: Fields | None = None, claim_fields: dict[str, Fields] | None = None) -> Verdict:
-    scope = report_scope if report_scope is not None else REPORT_SCOPE
-    sf = sentence_fields or extract(sentence)
-    cf = claim_fields or {c.id: extract(c.text) for c in claims}
+          sentence_fields: Fields | None = None, claim_fields: dict[str, Fields] | None = None,
+          profile: profiles.Profile = profiles.CLINICAL) -> Verdict:
+    scope = report_scope if report_scope is not None else profile.report_scope
+    voc = profile.vocab
+    sf = sentence_fields or profile.extract(sentence)
+    cf = claim_fields or {c.id: profile.extract(c.text) for c in claims}
     log: list[tuple[str, bool, str]] = []
 
     def fail(rule: str, detail: str) -> Verdict:
@@ -152,7 +156,7 @@ def check(sentence: str, claims: list[CitedClaim], report_scope: dict[str, str] 
 
     for c in claims:
         for group, wanted in scope.items():
-            known = _effective(group, cf[c.id].scope.get(group, frozenset()), c)
+            known = _effective(group, cf[c.id].scope.get(group, frozenset()), c, profile)
             if known and wanted not in known:
                 return fail("scope", f"claim {c.id} is about {group} {'/'.join(sorted(known))}, "
                                      f"not {wanted}")
@@ -163,7 +167,7 @@ def check(sentence: str, claims: list[CitedClaim], report_scope: dict[str, str] 
 
     for f in sf.findings:
         support = [c.id for c in claims for g in cf[c.id].findings
-                   if g.effect == f.effect and _outcomes_fit(f.outcomes, g.outcomes)]
+                   if g.effect == f.effect and _outcomes_fit(f.outcomes, g.outcomes, voc)]
         if not support:
             found = "; ".join(describe(g) for c in claims for g in cf[c.id].findings) or "no direction"
             return fail("direction", f"sentence says {describe(f)}; claims say {found}")
@@ -171,19 +175,19 @@ def check(sentence: str, claims: list[CitedClaim], report_scope: dict[str, str] 
             continue
         for c in claims:
             for g in cf[c.id].findings:
-                if g.effect in (f.effect, "safe") or not _outcomes_overlap(f.outcomes, g.outcomes):
+                if g.effect in (f.effect, "safe") or not _outcomes_overlap(f.outcomes, g.outcomes, voc):
                     continue
                 # a sentence that reports the other side too isn't hiding it
-                if any(h.effect == g.effect and _outcomes_overlap(h.outcomes, g.outcomes) for h in sf.findings):
+                if any(h.effect == g.effect and _outcomes_overlap(h.outcomes, g.outcomes, voc) for h in sf.findings):
                     continue
                 return fail("direction", f"sentence says {describe(f)}; claim {c.id} says {describe(g)}")
     log.append(("direction", True, "; ".join(describe(f) for f in sf.findings) or "no direction stated"))
 
-    for group in vocab.ENTITY_GROUPS:
-        have = set().union(*(_effective(group, cf[c.id].entities.get(group, frozenset()), c)
+    for group in voc.entity_groups:
+        have = set().union(*(_effective(group, cf[c.id].entities.get(group, frozenset()), c, profile)
                              for c in claims))
         for e in sorted(sf.entities.get(group, frozenset())):
-            if not _entity_supported(group, e, have):
+            if not _entity_supported(group, e, have, voc):
                 return fail("entities", f"sentence names {group} '{e}'; claims name "
                                         f"{', '.join(sorted(have)) or 'none'}")
     log.append(("entities", True, "all named entities supported"))
