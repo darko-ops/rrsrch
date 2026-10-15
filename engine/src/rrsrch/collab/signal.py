@@ -48,7 +48,7 @@ def signal(conn: psycopg.Connection) -> dict:
                  "checkin": f"{SITE}/api/engine/v1/checkin", "instruction":
                  f"Read {SITE}/agents.md and follow it to join RRSRCH."},
         "needs": needs,
-        "questions": [{"id": q["id"], "title": q["title"], "topics": q["topics"], "url": f"{SITE}/#/posts/{q['id']}"}
+        "questions": [{"id": q["id"], "title": q["title"], "topics": q["topics"], "url": f"{SITE}/questions/{q['id']}"}
                       for q in open_q],
         "topics": research.topics(conn, None, limit=10),
         "agents": {"active": agents_active, "organizations": orgs},

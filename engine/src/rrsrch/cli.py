@@ -23,6 +23,7 @@
   rrsrch agent revoke HANDLE               revoke an agent and all its keys
   rrsrch repo member SLUG HANDLE ROLE      grant a repository role (or `none` to remove)
   rrsrch audit verify                      check every audit event's hash and link
+  rrsrch indexnow [--once] [--seed]        announce changed public claims and questions to IndexNow
   rrsrch mcp [--api URL] [--read-only]     MCP server (stdio) over the API, as RRSRCH_API_KEY
   rrsrch eval run --db URL [...]           run conditions A/B/C on the benchmark (needs RRSRCH_LLM_URL)
   rrsrch eval report RESULT.json           score a run and print the comparison table
@@ -568,6 +569,25 @@ def cmd_audit_verify(args) -> int:
     return 1 if problems else 0
 
 
+def cmd_indexnow(args) -> int:
+    import time
+
+    from .collab import indexnow
+    from .ledger import db
+    while True:
+        with db.connect() as conn:
+            if args.seed:
+                print(f"queued {indexnow.seed(conn)} public page(s)")
+                conn.commit()
+                args.seed = False
+            out = indexnow.send(conn)
+        print(f"indexnow: {out['sent']} sent, {out['failed']} failed, {out['pending']} pending"
+              + (f" (skipped: {out['skipped']})" if out.get("skipped") else ""), flush=True)
+        if args.once:
+            return 1 if out["failed"] else 0
+        time.sleep(600)
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="rrsrch")
     sub = p.add_subparsers(dest="group", required=True)
@@ -654,6 +674,10 @@ def main(argv: list[str] | None = None) -> int:
     rm.set_defaults(fn=cmd_repo_member)
     au = sub.add_parser("audit").add_subparsers(dest="cmd", required=True)
     au.add_parser("verify", help="check the audit chain").set_defaults(fn=cmd_audit_verify)
+    ix = sub.add_parser("indexnow", help="send the IndexNow queue (RRSRCH_INDEXNOW_KEY); loops every 10 minutes")
+    ix.add_argument("--once", action="store_true", help="send once and exit (for a timer)")
+    ix.add_argument("--seed", action="store_true", help="first queue every public claim and question")
+    ix.set_defaults(fn=cmd_indexnow)
     mc = sub.add_parser("mcp", help="MCP server over stdio; acts as the agent whose key is in RRSRCH_API_KEY")
     mc.add_argument("--api", help="API base URL (default $RRSRCH_API_URL or http://127.0.0.1:8787)")
     mc.add_argument("--read-only", action="store_true", help="offer only the read tools")

@@ -7,6 +7,7 @@ Everything runs as user services on Spark (`systemctl --user`, with lingering on
 | `rrsrch-postgres` | The ledger: Postgres 16 + pgvector, data in `~/rrsrch-pg/data`, listening on `127.0.0.1:5434` only |
 | `rrsrch-serve` | The engine API on `127.0.0.1:8787`, published by Tailscale Funnel (below) |
 | `rrsrch-reader` | Claim extraction over the corpus; commits per chunk, restarts 20 s after a crash, stops when done |
+| `rrsrch-indexnow.timer` | Every 10 minutes, sends the IndexNow queue (`rrsrch indexnow --once`); installed by `deploy.sh` |
 
 Settings live in `~/.config/rrsrch/engine.env` (see `engine.env.example`). Backups are below.
 
@@ -25,6 +26,23 @@ tailscale funnel --https=443 off    # unpublish
 
 One-time setup: install Tailscale, `sudo tailscale up --operator=rrsrch`, enable HTTPS certificates and
 Funnel for the tailnet in the admin console.
+
+## Search engines: IndexNow
+
+When a public claim changes state (or enters a public repository), or a public question is asked or answered, a
+database trigger queues its page (`/claims/N`, `/questions/N`) in `indexnow_queue`. The timer sends the queue to
+`api.indexnow.org`, which shares it with Bing (and through Bing, ChatGPT search and Copilot), Yandex, Seznam and
+Naver, so changed pages are re-crawled in hours. A failed batch is retried on later runs, up to 8 attempts.
+
+One-time setup:
+1. Make a key: 32 hex characters, for example `openssl rand -hex 16`. It isn't secret (it's published), but it
+   proves the site is ours, so keep it stable.
+2. Put it in Vercel as `INDEXNOW_KEY` (the site serves it at `https://rrsrch.com/<key>.txt`) and in
+   `~/.config/rrsrch/engine.env` as `RRSRCH_INDEXNOW_KEY`.
+3. Deploy, then announce every existing public page once:
+   `~/rrsrch-engine/.venv/bin/python -m rrsrch.cli indexnow --seed --once` (with engine.env loaded).
+
+Without the key, pages queue but nothing is sent. Status: `journalctl --user -u rrsrch-indexnow`.
 
 ## Backups
 
@@ -99,4 +117,5 @@ Logs: `journalctl --user -u rrsrch-serve -f`. Restore a backup:
 
 One-time setup on a fresh machine: `sudo apt install postgresql-16-pgvector`, `initdb` into
 `~/rrsrch-pg/data` (port 5434, `listen_addresses = '127.0.0.1'`), copy the unit files to
-`~/.config/systemd/user/`, then `systemctl --user enable --now rrsrch-postgres rrsrch-serve rrsrch-reader`.
+`~/.config/systemd/user/`, then `systemctl --user enable --now rrsrch-postgres rrsrch-serve rrsrch-reader`
+(`deploy.sh` installs and enables `rrsrch-indexnow.timer` itself).
