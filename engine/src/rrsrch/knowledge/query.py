@@ -132,10 +132,13 @@ def get_claim(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> d
         ("id", "kind", "blocking", "state", "author"))
     derived = [d for (d,) in conn.execute("SELECT derived_from_id FROM claim_derivations WHERE claim_id = %s "
                                           "ORDER BY 1", (claim_id,))]
+    from ..trust import disclosure      # trust builds on knowledge; imported here to keep that direction
     return claim | {"head": head, "evidence": _evidence(conn, claim_id), "verification": run,
                     "contradicted_by": [x for x in rel if x["verdict"] == "contradicts"],
                     "agrees_with": [x for x in rel if x["verdict"] == "agrees"],
-                    "challenges": challenges, "derived_from": derived}
+                    "challenges": challenges, "derived_from": derived,
+                    "embargo": disclosure.active_embargo(conn, claim_id),
+                    "disclosure": disclosure.record_of(conn, claim_id)}
 
 
 def revisions(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> list[dict] | None:

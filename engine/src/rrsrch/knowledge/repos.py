@@ -14,7 +14,7 @@ import psycopg
 from ..identity import access
 from ..identity import store as ids
 from ..identity.access import Action, Principal
-from ..trust import audit, features
+from ..trust import audit, disclosure, features
 from ..trust.merge import Refused
 from ..trust.policy import Policy
 from ..trust.policy import load as load_policy
@@ -63,6 +63,14 @@ def update(conn: psycopg.Connection, p: Principal | None, slug: str, *, topic: s
         raise Refused(401 if p is None else 403, d.reason)
     if visibility == "public" and repo.visibility != "public" and not _human(conn, p):
         raise Refused(403, "a repository is made public by a human")
+    if visibility == "public" and repo.visibility != "public":
+        # publishing waits for disclosure: the lock orders this against an embargo being set at the same moment
+        conn.execute("SELECT 1 FROM repositories WHERE id = %s FOR UPDATE", (repo.id,))
+        held = disclosure.embargoed_in(conn, repo.id)
+        if held:
+            raise Refused(409, f"{len(held)} claim(s) are under embargo, the last until {max(u for _, u in held):%Y-%m-%d}: "
+                               f"claims {', '.join(str(c) for c, _ in held[:20])}. Lift the embargoes (or wait for "
+                               "their dates) before making the repository public")
     # making a repository private is always allowed: hiding is never what the switch guards against
     if rules is not None or (visibility is not None and visibility != repo.visibility and visibility != "private"):
         # the security switch: what the policy will be, at the visibility it will have

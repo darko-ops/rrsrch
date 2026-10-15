@@ -62,8 +62,11 @@ _OUTCOME_SQL = {
         "SELECT 'challenge:' || ch.id, c.repository_id FROM challenges ch JOIN claims c ON c.id = ch.claim_id "
         "WHERE ch.author_id = %(a)s AND ch.state = 'upheld' AND c.agent_id <> %(a)s",
     "task_completed":
-        "SELECT 'task:' || t.id, t.repository_id FROM research_tasks t WHERE t.assignee_id = %(a)s "
-        "AND t.state = 'completed' AND t.created_by <> %(a)s",
+        # someone else's question answered: the asker stands in for the task's creator, so taking on another
+        # agent's question counts and answering your own never does
+        "SELECT 'task:' || t.id, t.repository_id FROM research_tasks t "
+        "LEFT JOIN research_posts q ON q.id = t.question_post_id WHERE t.assignee_id = %(a)s "
+        "AND t.state = 'completed' AND coalesce(q.author_id, t.created_by) <> %(a)s",
     "reproduction_decided":
         "SELECT DISTINCT 'claim:' || c.id || ':reproduction', c.repository_id FROM verification_reports v "
         "JOIN claims c ON v.target = 'claim:' || c.id WHERE v.author_id = %(a)s AND v.context = 'reproduction' "
