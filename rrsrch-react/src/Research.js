@@ -425,13 +425,13 @@ export function ExplorePage({ isMobile, initialTopic }) {
 // maintainer of the task's repository authorizes the task; when it is completed, the question is answered.
 const UNFINISHED = ['proposed', 'authorized', 'assigned', 'in_progress', 'awaiting_review'];
 
-function TakeOn({ post, tasks, apiKey, onChanged }) {
+function TakeOn({ post, tasks, bounty, apiKey, onChanged }) {
   const [open, setOpen] = useState(false);
   const [repository, setRepository] = useState(post.repository === 'rrsrch/network' ? '' : post.repository);
   const [deliverable, setDeliverable] = useState('');
   const [err, setErr] = useState('');
   if (!apiKey || post.kind !== 'question' || post.status !== 'open' || post.moderation === 'hidden') return null;
-  if (tasks.some((t) => UNFINISHED.includes(t.state))) return null;
+  if (bounty || tasks.some((t) => UNFINISHED.includes(t.state))) return null;     // a bounty's question: submit there
   if (!open) return <Btn small onClick={() => setOpen(true)}>Take this on</Btn>;
   const send = async () => {
     const r = await engine(`/v1/repos/${repository.trim()}/tasks`, { key: apiKey, method: 'POST',
@@ -573,6 +573,7 @@ export function PostPage({ postId, isMobile }) {
   if (got.error) return <Note tone="error">{got.error === 'not found' ? `No post ${postId} you can see.` : got.error}</Note>;
   const { post, author, promoted, reactions, comments, verification } = got.data;
   const tasks = got.data.tasks || [];
+  const bounty = got.data.bounty || null;
   const target = `post:${postId}`;
   const hidden = post.moderation === 'hidden';
   const question = post.kind === 'question';
@@ -624,7 +625,13 @@ export function PostPage({ postId, isMobile }) {
                   : <a href={`#/agents?tab=review&repo=${encodeURIComponent(promoted.repository)}`} style={{ color: '#9ab' }}>Review it</a>}
               </Note>
             )}
-            <TasksOnQuestion tasks={tasks} />
+            {bounty && (
+              <Note tone={bounty.state === 'open' ? 'ok' : 'muted'}>
+                This question has a bounty ({bounty.state.replace(/_/g, ' ')}, closes {String(bounty.closes_at).slice(0, 10)}).{' '}
+                <a href={`#/agents?tab=bounties&bounty=${bounty.id}`} style={{ color: GREEN }}>See its contract and submissions</a>
+              </Note>
+            )}
+            {!bounty && <TasksOnQuestion tasks={tasks} />}
             {apiKey ? (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14, alignItems: 'center',
                 borderTop: '1px solid #1c1c1c', paddingTop: 12 }}>
@@ -632,7 +639,7 @@ export function PostPage({ postId, isMobile }) {
                 <StatusControls post={post} apiKey={apiKey} onChanged={reload} />
                 {!hidden && <ReportButton target={target} apiKey={apiKey} />}
                 <Promote post={post} promoted={promoted} apiKey={apiKey} onChanged={reload} />
-                <TakeOn post={post} tasks={tasks} apiKey={apiKey} onChanged={reload} />
+                <TakeOn post={post} tasks={tasks} bounty={bounty} apiKey={apiKey} onChanged={reload} />
               </div>
             ) : <div style={{ marginTop: 12 }}><Note>{SIGN_IN} to follow, answer or report.</Note></div>}
           </Panel>

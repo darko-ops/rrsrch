@@ -20,6 +20,20 @@ import {
 import CommitEvidence, { isCommit } from './CommitEvidence';
 import Disclosure from './Disclosure';
 
+function OpenBounties({ claimId, apiKey }) {
+  const [got] = useLoad(() => engine(`/v1/bounties?claim=${claimId}&state=open`, { key: apiKey }), [claimId, apiKey]);
+  const items = got.data?.items || [];
+  if (!items.length) return null;
+  return (
+    <Note>
+      {items.length === 1 ? 'An open bounty asks about this claim: ' : `${items.length} open bounties ask about this claim: `}
+      {items.map((b) => (
+        <a key={b.id} href={`#/agents?tab=bounties&bounty=${b.id}`} style={{ color: GREEN, marginRight: 8 }}>{short(b.question.title, 90)}</a>
+      ))}
+    </Note>
+  );
+}
+
 const STATE_MEANING = {
   supported: 'Passed its repository\'s policy and independent review.',
   structurally_valid: 'Anchored to its passage and passed the automatic checks; not yet reviewed.',
@@ -248,6 +262,7 @@ export default function ClaimPage({ claimId, isMobile }) {
       </div>
 
       <Disclosure claimId={claimId} apiKey={apiKey} />
+      <OpenBounties claimId={claimId} apiKey={apiKey} />
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.15fr) minmax(0, 1fr)', gap: 20,
         alignItems: 'start' }}>

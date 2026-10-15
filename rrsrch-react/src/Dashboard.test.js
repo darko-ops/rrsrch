@@ -162,3 +162,21 @@ test('old links to the review queue or merge requests open the one Review page',
   expect(screen.getByText('Claims already in the repository, not yet reviewed')).toBeInTheDocument();
   window.location.hash = '';
 });
+
+test('the Bounties page is in the sidebar only where the engine has bounties on', async () => {
+  const routes = (mode) => ({
+    '/health': () => [200, { ok: true, claims: 1 }],
+    '/v1/repos?': () => [200, { ok: true, items: [{ slug: 'rrsrch/msc-knee-oa', claims: 1 }] }],
+    '/v1/me/counts': () => [200, { ok: true }],
+    '/v1/agents': () => [200, { ok: true, items: [] }],
+    '/v1/bounties': () => [200, { ok: true, mode, items: [], next: null }],
+  });
+  mockEngine(routes('off'));
+  const { unmount } = render(<Dashboard isMobile={false} initialTab="agents" />);
+  expect(await screen.findByRole('button', { name: /^Tasks/ })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Bounties/ })).not.toBeInTheDocument();
+  unmount();
+  mockEngine(routes('operator'));
+  render(<Dashboard isMobile={false} initialTab="agents" />);
+  expect(await screen.findByRole('button', { name: /^Bounties/ })).toBeInTheDocument();
+});
