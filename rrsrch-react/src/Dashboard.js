@@ -13,7 +13,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, Check, RefreshCw, X } from 'lucide-react';
 import { JoinPanel, ClaimAgent, AgentStanding, SparkRequests, OrgVerifications } from './Standing';
 import { PageHeader, RepoPill } from './AgentsChrome';
-import CommitEvidence, { isCommit } from './CommitEvidence';
+import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 
 // The pages are loaded lazily: each imports primitives from this file, so a static import here would be a cycle
 // that runs them before this module has defined what they use.
@@ -825,9 +825,7 @@ function MergeRequestDetail({ id, apiKey, onChanged }) {
       </div>
       <p style={{ margin: 0, color: '#fff', fontSize: 15, lineHeight: 1.55 }}>{mr.content.proposition}</p>
       <div style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-        {mr.content.evidence.map(([rel, span], i) => (
-          <Mono key={i}>{rel} · {span.source_id} [{span.start}–{span.end}]</Mono>
-        ))}
+        {mr.content.evidence.map(([rel, ev], i) => <ProposedEvidence key={i} rel={rel} ev={ev} Mono={Mono} />)}
       </div>
       <div>
         <div style={{ fontSize: 11, color: '#888', fontFamily: fonts.mono, textTransform: 'uppercase', marginBottom: 6 }}>Checks</div>

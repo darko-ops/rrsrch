@@ -20,3 +20,11 @@ test('each forge gets its own link spelling, and unknown hosts get no links', ()
   expect(commitLinks({ repo_url: 'https://example.com/o/r', commit: SHA })).toBeNull();
   expect(isCommit({ kind: 'document_span' })).toBeFalsy();
 });
+
+test('a proposed commit in a merge request names the commit the reviewer is approving', () => {
+  const { ProposedEvidence } = require('./CommitEvidence');
+  const Mono = ({ children }) => <span>{children}</span>;
+  render(<ProposedEvidence rel="supports" ev={EV.git} Mono={Mono} />);
+  expect(screen.getByText(/github\.com\/o\/r@0123456789ab:src\/a\.py#L3-9 \(in v1\.2\.3\?\)/).getAttribute('href'))
+    .toBe(`https://github.com/o/r/blob/${SHA}/src/a.py#L3-L9`);
+});

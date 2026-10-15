@@ -9,6 +9,7 @@ import React, { useEffect, useState } from 'react';
 // AgentsChrome first: it reads Dashboard's exports at load time, and Dashboard imports it back
 import { panelStyle, monoLabel } from './AgentsChrome';
 import { engine, useLoad, fonts, GREEN, AMBER, RED, BLUE, Btn, Chip, Note, Mono, Loading, inputStyle, short, when } from './Dashboard';
+import { ProposedEvidence } from './CommitEvidence';
 
 const PURPLE = '#c9a0ff';
 export const TYPE = {
@@ -48,9 +49,7 @@ function ReviewPreview({ item, apiKey, onDone }) {
         lineHeight: 1.6 }}>
         {m.content?.proposition}
         <div style={{ marginTop: 6, display: 'grid', gap: 2, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-          {(m.content?.evidence || []).map(([rel, span], i) => (
-            <Mono key={i}>{rel} · {span.source_id} [{span.start}–{span.end}]</Mono>
-          ))}
+          {(m.content?.evidence || []).map(([rel, ev], i) => <ProposedEvidence key={i} rel={rel} ev={ev} Mono={Mono} />)}
         </div>
       </blockquote>
       <div style={{ fontSize: 12.5, color: '#aaa' }}>

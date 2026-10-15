@@ -66,3 +66,15 @@ export default function CommitEvidence({ ev, borderColor = '#555', mono, fontSiz
     </div>
   );
 }
+
+// A proposed piece of evidence in a merge request: [relation, span-or-commit]. A reviewer approving a commit must see
+// which commit it is.
+export function ProposedEvidence({ rel, ev, Mono }) {
+  if (ev && ev.commit && ev.repo_url) {
+    const l = commitLinks(ev);
+    const text = `${l ? l.repo : ev.repo_url}@${String(ev.commit).slice(0, 12)}${ev.path ? `:${ev.path}` : ''}${
+      ev.start_line ? `#L${ev.start_line}-${ev.end_line}` : ''}${ev.tag ? ` (in ${ev.tag}?)` : ''}`;
+    return <Mono>{rel} · commit {l ? <a href={l.file || l.commit} target="_blank" rel="noreferrer" style={{ color: '#9ab' }}>{text}</a> : text}</Mono>;
+  }
+  return <Mono>{rel} · {ev.source_id} [{ev.start}–{ev.end}]</Mono>;
+}

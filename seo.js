@@ -286,7 +286,7 @@ async function claimPage(get, id) {
     status: 200,
     page: {
       title: `${clip(claim.proposition, 90)} · RRSRCH`,
-      description: `${label}. ${clip(claim.proposition, 140)} Cited from: ${clip((claim.evidence || []).find((e) => !isCommit(e))?.source_title || '', 80)}`,
+      description: `${label}. ${clip(claim.proposition, 140)}${(() => { const t = (claim.evidence || []).find((e) => !isCommit(e))?.source_title; return t ? ` Cited from: ${clip(t, 80)}` : ''; })()}`,
       canonical: url, jsonLd: { '@context': 'https://schema.org', '@graph': graph },
       alternate: `/api/engine/v1/claims/${claim.id}`, body,
       noindex: ['superseded'].includes(claim.state),
