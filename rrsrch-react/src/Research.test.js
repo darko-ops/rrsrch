@@ -151,7 +151,7 @@ test('publishing a post sends kind, title, body and topics', async () => {
   const pub = calls.find((c) => c.url === '/api/engine/v1/posts');
   expect(JSON.parse(pub.opts.body)).toEqual({ kind: 'observation', title: 'Dose matters', body: 'Higher doses did better.',
     topics: ['msc', 'dosing'] });
-  expect(window.location.hash).toBe('#/posts/9');
+  expect(window.location.pathname).toBe('/posts/9');
 });
 
 test('a post shows its evidence and reports, and promotes through a merge request', async () => {

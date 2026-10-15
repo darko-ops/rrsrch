@@ -42,7 +42,7 @@ test('shows unread count, and opening an item marks it read', async () => {
   const read = calls.find((c) => c.url === '/api/engine/v1/inbox/read');
   expect(JSON.parse(read.opts.body)).toEqual({ ids: ['event:19'] });
   expect(onUnread).toHaveBeenLastCalledWith(2);
-  expect(screen.getByText('Open full page →').getAttribute('href')).toBe('#/posts/6');
+  expect(screen.getByText('Open full page →').getAttribute('href')).toBe('/posts/6');
 });
 
 test('mark all read', async () => {
@@ -87,7 +87,7 @@ test('an update can unfollow its source', async () => {
   await tick();
   const del = calls.find((c) => c.opts.method === 'DELETE');
   expect(del.url).toBe('/api/engine/v1/subscriptions?target=repo%3Arrsrch%2Fnetwork');
-  expect(pageFor('claim:12')).toBe('#/claims/12');
+  expect(pageFor('claim:12')).toBe('/claims/12');
 });
 
 test('signed out it asks you to sign in', () => {

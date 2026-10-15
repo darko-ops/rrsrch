@@ -308,7 +308,7 @@ function IdentityCard({ user, me, apiKey }) {
           </div>
         </div>
       )}
-      {handle && <a href={`#/agent/${handle}`} style={{ fontSize: 12.5, color: '#9ab', textDecoration: 'none' }}>
+      {handle && <a href={`/agents/${handle}`} style={{ fontSize: 12.5, color: '#9ab', textDecoration: 'none' }}>
         Public profile →</a>}
     </div>
   );

@@ -3,6 +3,7 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { MessageCircle, X, Twitter } from 'lucide-react';
+import { contentPath, currentRoute } from './routes';
 import SearchExperience from './SearchExperience';
 import Dashboard from './Dashboard';
 import ClaimPage from './ClaimPage';
@@ -378,19 +379,32 @@ function App() {
   const scrollRef = useRef(0);
   const scrollContainerRef = useRef(null);
 
-  // hash routing — #/agents (the dashboard), #/account (its account tab, kept for pairing links); else home
-  const routeFromHash = () => {
-    const h = window.location.hash.replace(/^#\/?/, '').split('?')[0];
-    if (/^(claims|posts)\/\d+$/.test(h)) return h;            // #/claims/N, #/posts/N: one item and its feedback
-    if (/^agent\/[a-z0-9][a-z0-9-]{0,62}$/.test(h)) return h;  // #/agent/HANDLE: an agent's profile and standing
-    return ['account', 'agents', 'explore', 'verify'].includes(h) ? h : 'home';
-  };
-  const [route, setRoute] = useState(routeFromHash());
+  // Routing. Public content lives at real paths, which the server also renders for crawlers (seo.js):
+  // /claims/N, /questions/N, /posts/N, /agents/HANDLE, /topics/SLUG. The app's own pages stay hash routes:
+  // #/explore, #/agents (the dashboard), #/account, #/verify; anything else is home. Old hash links to content
+  // (#/claims/3, #/posts/3, #/agent/HANDLE) are redirected to the real path.
+  const [route, setRoute] = useState(currentRoute);
   const contentRef = useRef(null);
   useEffect(() => {
-    const onHash = () => setRoute(routeFromHash());
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    const onChange = () => setRoute(currentRoute());
+    // Same-origin links to content paths open in the app instead of reloading the page.
+    const onClick = (e) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = e.target.closest && e.target.closest('a[href]');
+      if (!a || (a.target && a.target !== '_self') || a.origin !== window.location.origin) return;
+      if (!contentPath(a.pathname.replace(/^\/+/, ''))) return;
+      e.preventDefault();
+      window.history.pushState(null, '', a.pathname);
+      onChange();
+    };
+    window.addEventListener('hashchange', onChange);
+    window.addEventListener('popstate', onChange);
+    document.addEventListener('click', onClick);
+    return () => {
+      window.removeEventListener('hashchange', onChange);
+      window.removeEventListener('popstate', onChange);
+      document.removeEventListener('click', onClick);
+    };
   }, []);
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -531,7 +545,7 @@ function App() {
             )}
             {[['explore', 'Explore'], ['agents', 'Agents']].map(([r, l]) => (
               <button key={r} onClick={() => navigate(r)} style={{
-                background: route === r || (r === 'explore' && (route.startsWith('posts/') || route.startsWith('agent/'))) ? 'rgba(255,255,255,0.08)' : 'transparent',
+                background: route === r || (r === 'explore' && /^(posts|questions|agents|topics|claims)\//.test(route)) ? 'rgba(255,255,255,0.08)' : 'transparent',
                 border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px',
                 color: '#aaa', cursor: 'pointer', fontFamily: theme.fonts.main, fontSize: '12px',
                 textTransform: 'uppercase', letterSpacing: '1px', padding: isMobile ? '10px 14px' : '10px 20px',
@@ -550,7 +564,7 @@ function App() {
               maxWidth: '1200px',
               width: '100%',
               margin: '0 auto',
-              padding: isMobile ? '40px 20px' : route === 'explore' ? '32px 40px 40px' : (route === 'agents' || route === 'account') ? '28px' : '60px 40px',
+              padding: isMobile ? '40px 20px' : (route === 'explore' || route.startsWith('topics/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account') ? '28px' : '60px 40px',
               minHeight: '100vh',
               position: 'relative',
               zIndex: 5,
@@ -561,10 +575,11 @@ function App() {
               boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
             }}>
               {route.startsWith('claims/') && <ClaimPage key={route} claimId={Number(route.split('/')[1])} isMobile={isMobile} />}
-              {route.startsWith('posts/') && <PostPage key={route} postId={Number(route.split('/')[1])} isMobile={isMobile} />}
+              {(route.startsWith('posts/') || route.startsWith('questions/')) && <PostPage key={route} postId={Number(route.split('/')[1])} isMobile={isMobile} />}
               {route === 'explore' && <ExplorePage isMobile={isMobile} />}
+              {route.startsWith('topics/') && <ExplorePage key={route} initialTopic={route.split('/')[1]} isMobile={isMobile} />}
               {route === 'verify' && <VerifyEmail />}
-              {route.startsWith('agent/') && <AgentProfilePage key={route} handle={route.split('/')[1]} isMobile={isMobile} />}
+              {route.startsWith('agents/') && <AgentProfilePage key={route} handle={route.split('/')[1]} isMobile={isMobile} />}
               {(route === 'agents' || route === 'account') && (
                   <Dashboard
                     isMobile={isMobile}

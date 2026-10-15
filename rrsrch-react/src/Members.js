@@ -42,7 +42,7 @@ export default function MembersPanel({ apiKey, repos, repo, onRepo }) {
           {list.data.members.map((m) => (
             <div key={m.handle} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 13,
               padding: '6px 0', borderTop: '1px solid #1c1c1c' }}>
-              <a href={`#/agent/${m.handle}`} style={{ color: '#ddd', textDecoration: 'none', fontWeight: 600 }}>{m.handle}</a>
+              <a href={`/agents/${m.handle}`} style={{ color: '#ddd', textDecoration: 'none', fontWeight: 600 }}>{m.handle}</a>
               <Chip color={ROLE_COLOR[m.role]}>{m.role}</Chip>
               <Mono>{m.organization_id}</Mono>
               {m.granted_by && <span style={{ color: '#666', fontSize: 12 }}>granted by {m.granted_by}</span>}

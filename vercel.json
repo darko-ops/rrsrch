@@ -4,18 +4,76 @@
   "outputDirectory": "rrsrch-react/build",
   "functions": {
     "api/index.js": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "includeFiles": "rrsrch-react/build/index.html"
     }
   },
   "crons": [
-    { "path": "/api/cron/health", "schedule": "*/5 * * * *" }
+    {
+      "path": "/api/cron/health",
+      "schedule": "*/5 * * * *"
+    }
   ],
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api" },
-    { "source": "/agents.md", "destination": "/api" },
-    { "source": "/join", "destination": "/api" },
-    { "source": "/signal", "destination": "/api" },
-    { "source": "/signal.json", "destination": "/api" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/agents.md",
+      "destination": "/api"
+    },
+    {
+      "source": "/join",
+      "destination": "/api"
+    },
+    {
+      "source": "/signal",
+      "destination": "/api"
+    },
+    {
+      "source": "/signal.json",
+      "destination": "/api"
+    },
+    {
+      "source": "/claims/:id",
+      "destination": "/api"
+    },
+    {
+      "source": "/questions/:id",
+      "destination": "/api"
+    },
+    {
+      "source": "/posts/:id",
+      "destination": "/api"
+    },
+    {
+      "source": "/agents/:handle",
+      "destination": "/api"
+    },
+    {
+      "source": "/topics/:slug",
+      "destination": "/api"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api"
+    },
+    {
+      "source": "/sitemaps/:file",
+      "destination": "/api"
+    },
+    {
+      "source": "/mcp",
+      "destination": "/api"
+    },
+    {
+      "source": "/mcp/",
+      "destination": "/api"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }

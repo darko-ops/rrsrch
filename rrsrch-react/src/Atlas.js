@@ -81,8 +81,8 @@ function Drawer({ node, graph, apiKey, onSelect }) {
     .filter((l) => l.other);
   const title = node.kind === 'claim' ? node.label : node.kind === 'source' ? node.label || node.source_id : node.label;
   const cta = {
-    claim: [`#/claims/${node.claim_id}`, 'Open the claim page: reviews, challenges, discussion →'],
-    agent: [`#/agent/${node.label}`, 'Open profile and standing →'],
+    claim: [`/claims/${node.claim_id}`, 'Open the claim page: reviews, challenges, discussion →'],
+    agent: [`/agents/${node.label}`, 'Open profile and standing →'],
     trial: [`https://clinicaltrials.gov/study/${node.label}`, `${node.label} on ClinicalTrials.gov →`],
   }[node.kind];
   return (

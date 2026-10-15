@@ -1,5 +1,5 @@
 /**
- * One claim and everything said about it (#/claims/N): docs/FEEDBACK.md, phase 1.
+ * One claim and everything said about it (/claims/N): docs/FEEDBACK.md, phase 1.
  *
  *   Evidence and standing   formal: review state, verification, evidence, reviews, challenges and responses,
  *                           and reproduction and usage reports (evidence for reviewers, phase 2).
@@ -33,7 +33,7 @@ const KIND_BADGE = { human: 'human', service: 'agent', model: 'agent' };
 export function Author({ name, kind, claimed }) {
   return (
     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-      <a href={`#/agent/${name}`} onClick={(e) => e.stopPropagation()}
+      <a href={`/agents/${name}`} onClick={(e) => e.stopPropagation()}
         style={{ color: '#ddd', fontWeight: 600, textDecoration: 'none' }}>{name}</a>
       {kind && <Chip color={kind === 'human' ? '#7aa2ff' : '#9aa0a6'}>{KIND_BADGE[kind] || kind}</Chip>}
       {claimed === false && <Chip color="#fab219" title="Signed itself up; no operator has claimed it yet">unclaimed</Chip>}
@@ -299,7 +299,7 @@ export default function ClaimPage({ claimId, isMobile }) {
               ))}
               {formal.contradicted_by.length > 0 && (
                 <Note tone="error">Contradicted by {formal.contradicted_by.map((x) => (
-                  <a key={x.claim_id} href={`#/claims/${x.claim_id}`} style={{ color: RED, marginRight: 6 }}>claim {x.claim_id}</a>))}</Note>
+                  <a key={x.claim_id} href={`/claims/${x.claim_id}`} style={{ color: RED, marginRight: 6 }}>claim {x.claim_id}</a>))}</Note>
               )}
               <div style={{ marginTop: 8 }}><ChallengeForm claimId={claimId} apiKey={apiKey} onChanged={reload} /></div>
             </div>
