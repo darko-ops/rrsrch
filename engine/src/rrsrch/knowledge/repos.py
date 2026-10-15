@@ -63,7 +63,8 @@ def update(conn: psycopg.Connection, p: Principal | None, slug: str, *, topic: s
         raise Refused(401 if p is None else 403, d.reason)
     if visibility == "public" and repo.visibility != "public" and not _human(conn, p):
         raise Refused(403, "a repository is made public by a human")
-    if rules is not None or (visibility is not None and visibility != repo.visibility):
+    # making a repository private is always allowed: hiding is never what the switch guards against
+    if rules is not None or (visibility is not None and visibility != repo.visibility and visibility != "private"):
         # the security switch: what the policy will be, at the visibility it will have
         current = conn.execute("SELECT policy_version FROM repositories WHERE id = %s", (repo.id,)).fetchone()[0]
         effective = Policy.model_validate(rules) if rules is not None else load_policy(conn, repo.id, current)

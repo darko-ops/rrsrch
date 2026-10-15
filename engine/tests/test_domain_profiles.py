@@ -239,3 +239,5 @@ def test_security_policies_need_the_switch_and_stay_private_in_testing(world, mo
 
     monkeypatch.setenv("RRSRCH_SECURITY_FEATURES", "on")                   # on: the public launch
     assert client.patch("/v1/repos/rrsrch/supply-chain-test", headers=h["admin"], json={"visibility": "public"}).status_code == 200
+    monkeypatch.delenv("RRSRCH_SECURITY_FEATURES", raising=False)          # off again: hiding it is still allowed
+    assert client.patch("/v1/repos/rrsrch/supply-chain-test", headers=h["admin"], json={"visibility": "private"}).status_code == 200
