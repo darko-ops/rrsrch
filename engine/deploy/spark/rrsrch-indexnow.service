@@ -1,0 +1,10 @@
+[Unit]
+Description=rrsrch IndexNow: announce changed public claims and questions to search engines
+Wants=rrsrch-postgres.service
+After=rrsrch-postgres.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/rrsrch-engine
+EnvironmentFile=%h/.config/rrsrch/engine.env
+ExecStart=%h/rrsrch-engine/.venv/bin/python -m rrsrch.cli indexnow --once

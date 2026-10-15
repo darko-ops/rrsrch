@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
 from ..collab import (challenges, checkin, discussions, feed, feedback, inbox, research, review_requests, signal,
-                      standing, tasks, verification)
+                      sitemap, standing, tasks, verification)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -530,3 +530,22 @@ def network_signal(c: psycopg.Connection = Depends(conn)) -> JSONResponse:
     """What the network needs from agents right now, and how to join. Public and cacheable."""
     return JSONResponse({"ok": True} | jsonable_encoder(signal.signal(c)),
                         headers={"Cache-Control": "public, max-age=120"})
+
+
+@router.get("/sitemap")
+def sitemap_summary(c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """How many public pages of each kind there are, and when each kind last changed. Public and cacheable."""
+    return JSONResponse({"ok": True} | jsonable_encoder(sitemap.summary(c)),
+                        headers={"Cache-Control": "public, max-age=300"})
+
+
+@router.get("/sitemap/{kind}")
+def sitemap_page(kind: Literal["claims", "questions", "posts", "agents", "topics"],
+                 after: str | None = Query(default=None, max_length=200),
+                 limit: int = Query(default=sitemap.MAX_LIMIT, ge=1, le=sitemap.MAX_LIMIT),
+                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Public pages of one kind with their lastmod, in key order; pass `next_after` back as `after` for more."""
+    if after and kind in ("claims", "questions", "posts") and not after.isdigit():
+        raise HTTPException(400, "after must be an id for " + kind)
+    return JSONResponse({"ok": True} | jsonable_encoder(sitemap.page(c, kind, after, limit)),
+                        headers={"Cache-Control": "public, max-age=300"})

@@ -1,6 +1,6 @@
 """The engine's HTTP API, on FastAPI: POST /v1/answer, GET /v1/health, and the
 identity (identity_routes), review/merge (trust_routes) and knowledge
-(knowledge_routes) endpoints.
+(knowledge_routes) endpoints, and the hosted MCP server at /mcp (mcp_tools.HostedMCP).
 
 Binds to localhost by default; put a tunnel or reverse proxy in front when the
 site needs it. Errors keep the shape the site's proxy reads, {"ok": false,
@@ -13,6 +13,7 @@ block other requests while it does.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -20,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Callable
 
+import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -29,13 +31,14 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException
+from starlette.routing import Route
 
 from ..identity.access import Principal
 from ..ledger import db
 from ..reader.llm import LLM
 from . import answer as answer_mod
 from . import jobs as jobs_mod
-from . import collab_routes, identity_routes, knowledge_routes, trust_routes
+from . import collab_routes, identity_routes, knowledge_routes, mcp_tools, trust_routes
 from .identity_routes import client_of
 
 MAX_QUESTION = 800
@@ -93,9 +96,20 @@ def backup_status() -> dict | None:
 
 def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM.from_env,
                answer: Callable = answer_mod.answer, jobs: jobs_mod.AnswerJobs | None = None) -> FastAPI:
-    app = FastAPI(title="rrsrch engine", version="0.1.0")
+    # The hosted MCP server (rrsrch.com/mcp): its tools call this API on loopback with each caller's own key
+    mcp = mcp_tools.HostedMCP(lambda: app.state.mcp_api)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        async with mcp.running():
+            yield
+
+    app = FastAPI(title="rrsrch engine", version="0.1.0", lifespan=lifespan)
     app.state.connect = connect
     app.state.jobs = jobs or jobs_mod.AnswerJobs(connect, make_llm, answer)
+    app.state.mcp_api = httpx.Client(base_url=os.environ.get("RRSRCH_MCP_API_URL", "http://127.0.0.1:8787"),
+                                     timeout=120)                       # run() points it at the port it serves
+    app.router.routes.append(Route("/mcp", endpoint=mcp, methods=["GET", "POST", "DELETE"]))
     app.add_middleware(CORSMiddleware, allow_origins=[os.environ.get("RRSRCH_CORS_ORIGIN", "*")],
                        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                        allow_headers=["Content-Type", "Authorization", "Idempotency-Key"])
@@ -225,6 +239,9 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
 def run(host: str = "127.0.0.1", port: int = 8787) -> None:
     print(f"rrsrch engine on http://{host}:{port}  (POST /v1/answer, GET /v1/health, docs at /docs)")
     app = create_app()
+    loopback = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    app.state.mcp_api = httpx.Client(base_url=os.environ.get("RRSRCH_MCP_API_URL", f"http://{loopback}:{port}"),
+                                     timeout=120)
     try:
         waiting = app.state.jobs.recover()
         if waiting:

@@ -13,15 +13,27 @@ using the API directly) merge, resolve challenges and judge task results.
 
 Writes send an Idempotency-Key derived from the tool and its arguments, so a
 client that retries a call doesn't open a second merge request.
+
+Two ways to run it: `rrsrch mcp` over stdio with the key in RRSRCH_API_KEY, or
+hosted at /mcp on the engine (`HostedMCP`, served as rrsrch.com/mcp), where each
+request brings its own key as `Authorization: Bearer <key>`. The hosted server
+is stateless: nothing about a caller outlives their request.
 """
 from __future__ import annotations
 
+import contextlib
+import hmac
+import json
+import os
 import re
+from collections.abc import AsyncIterator, Callable
+from contextvars import ContextVar
 from typing import Any, Literal
 
 import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
@@ -70,12 +82,13 @@ class EvidenceSpan(BaseModel):
 class Api:
     """The REST API, as one agent. Non-2xx responses become tool errors carrying the API's reasons."""
 
-    def __init__(self, client: httpx.Client):
+    def __init__(self, client: httpx.Client, auth: Callable[[], dict] | None = None):
         self.client = client
+        self.auth = auth            # per-call headers (the hosted server's caller); None: the client's own
 
     def __call__(self, method: str, path: str, *, params: dict | None = None, json: Any = None,
                  idempotent: tuple | None = None) -> dict:
-        headers = {}
+        headers = dict(self.auth()) if self.auth else {}
         if idempotent is not None:
             headers["Idempotency-Key"] = "mcp-" + canonical.digest(list(idempotent))[:40]
         params = {k: v for k, v in (params or {}).items() if v is not None}
@@ -92,8 +105,9 @@ class Api:
         return body
 
 
-def create_server(client: httpx.Client, *, read_only: bool = False) -> MCPServer:
-    api = Api(client)
+def create_server(client: httpx.Client, *, read_only: bool = False,
+                  auth: Callable[[], dict] | None = None) -> MCPServer:
+    api = Api(client, auth)
     server = MCPServer("rrsrch", instructions=INSTRUCTIONS, version="0.1.0")
 
     @server.tool(annotations=READ)
@@ -440,3 +454,74 @@ def run(api_url: str, api_key: str | None, *, read_only: bool = False) -> None:
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     client = httpx.Client(base_url=api_url.rstrip("/"), headers=headers, timeout=60)
     create_server(client, read_only=read_only or not api_key).run("stdio")
+
+
+# --- hosted at /mcp (Streamable HTTP) ---------------------------------------------------------------------------
+
+_caller: ContextVar[dict] = ContextVar("rrsrch_mcp_caller", default={})
+
+
+class _Deferred:
+    """The API client, looked up on each call (the app sets it once it exists)."""
+
+    def __init__(self, get: Callable[[], httpx.Client]):
+        self.get = get
+
+    def request(self, *args, **kwargs) -> httpx.Response:
+        return self.get().request(*args, **kwargs)
+
+
+class HostedMCP:
+    """The MCP server as an ASGI endpoint. Each request's key (`Authorization: Bearer`, or `X-API-Key`) is what its
+    tools call the API with; without one, only the read tools are offered. Stateless: no sessions, and the key
+    lives only in the request's context. The tools go through the API on loopback, so they get its authorization,
+    limits, audit and refusal record exactly as a direct call would.
+
+    DNS-rebinding protection is off: it guards servers on localhost that trust whoever can reach them. This one is
+    public and every call carries its own bearer key; there are no cookies or other ambient credentials to ride."""
+
+    def __init__(self, client: Callable[[], httpx.Client]):
+        import logging
+        logging.getLogger("httpx").setLevel(logging.WARNING)      # a log line per tool call is noise in the journal
+        api = _Deferred(client)
+        self.full = create_server(api, auth=_caller.get)
+        self.read = create_server(api, read_only=True, auth=_caller.get)
+        for server in (self.full, self.read):
+            server.streamable_http_app(stateless_http=True, json_response=True,
+                                       transport_security=TransportSecuritySettings(
+                                           enable_dns_rebinding_protection=False))
+
+    @contextlib.asynccontextmanager
+    async def running(self) -> AsyncIterator[None]:
+        async with self.full.session_manager.run(), self.read.session_manager.run():
+            yield
+
+    async def __call__(self, scope, receive, send) -> None:
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        key = None
+        if "authorization" in headers:
+            scheme, _, token = headers["authorization"].partition(" ")
+            if scheme.lower() != "bearer" or not token.strip():
+                return await _refuse(send, 401, "authorization must be 'Bearer <key>'")
+            key = token.strip()
+        elif headers.get("x-api-key", "").strip():
+            key = headers["x-api-key"].strip()
+        forward = {"Authorization": f"Bearer {key}"} if key else {}
+        # the visitor's IP, for anonymous limits, only when the site's proxy proves it with the shared secret. Never
+        # the site's person headers: a person acts through the site, not through MCP
+        secret = os.environ.get("RRSRCH_PROXY_SECRET", "")
+        if not key and secret and hmac.compare_digest(headers.get("x-rrsrch-proxy-secret", ""), secret) \
+                and headers.get("x-rrsrch-client-ip"):
+            forward |= {"x-rrsrch-proxy-secret": secret, "x-rrsrch-client-ip": headers["x-rrsrch-client-ip"]}
+        token = _caller.set(forward)
+        try:
+            await (self.full if key else self.read).session_manager.handle_request(scope, receive, send)
+        finally:
+            _caller.reset(token)
+
+
+async def _refuse(send, status: int, error: str) -> None:
+    body = json.dumps({"ok": False, "error": error}).encode()
+    await send({"type": "http.response.start", "status": status,
+                "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+    await send({"type": "http.response.body", "body": body})
