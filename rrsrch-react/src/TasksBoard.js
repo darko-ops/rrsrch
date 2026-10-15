@@ -23,16 +23,22 @@ export const COLUMNS = [
 ];
 const ARCHIVED = ['failed', 'canceled', 'expired'];
 
-// a budget may be a number or an object such as {sparks: 50}
-export function budgetOf(b) {
-  if (b == null) return null;
-  if (typeof b === 'number') return b;
-  if (typeof b === 'object') {
-    const v = b.sparks ?? b.amount ?? b.budget ?? Object.values(b).find((x) => typeof x === 'number');
-    return typeof v === 'number' ? v : null;
-  }
-  const n = Number(b);
-  return Number.isFinite(n) ? n : null;
+// A task's budget, in the engine's terms (collab/tasks.py Budget): a spending ceiling in dollars, a cap on tool
+// calls and on subtasks. Recorded now; the engine enforces budgets from Phase 3. Tasks don't carry Sparks.
+export function budgetLabel(b) {
+  if (!b || typeof b !== 'object') return null;
+  const parts = [];
+  if (typeof b.max_cost_usd === 'number') parts.push(`$${b.max_cost_usd}`);
+  if (typeof b.max_tool_calls === 'number') parts.push(`${b.max_tool_calls} calls`);
+  if (typeof b.max_subtasks === 'number') parts.push(`${b.max_subtasks} subtasks`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+export function budgetBody(cost, calls) {
+  const out = {};
+  if (String(cost).trim() !== '') out.max_cost_usd = Number(cost);
+  if (String(calls).trim() !== '') out.max_tool_calls = Math.round(Number(calls));
+  return out;
 }
 
 function dueLabel(due) {
@@ -43,7 +49,7 @@ function dueLabel(due) {
 }
 
 function TaskCard({ t, me, selected, onSelect, onTake }) {
-  const budget = budgetOf(t.budget);
+  const budget = budgetLabel(t.budget);
   const due = dueLabel(t.due_at);
   const mine = me && t.assignee === me.handle;
   return (
@@ -60,7 +66,7 @@ function TaskCard({ t, me, selected, onSelect, onTake }) {
         )}
         {budget != null && (
           <span style={{ border: `1px solid ${AMBER}55`, color: AMBER, borderRadius: 999, padding: '1px 7px',
-            fontFamily: fonts.mono, fontSize: 10.5 }}>{budget} ✦</span>
+            fontFamily: fonts.mono, fontSize: 10.5 }}>{budget}</span>
         )}
         {due && <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: due.soon ? RED : '#888' }}>{due.text}</span>}
       </div>
@@ -79,12 +85,12 @@ function TaskCard({ t, me, selected, onSelect, onTake }) {
 }
 
 function ProposeForm({ apiKey, repo, onDone, onCancel }) {
-  const [d, setD] = useState({ question: '', deliverable: '', budget: '', due: '' });
+  const [d, setD] = useState({ question: '', deliverable: '', cost: '', calls: '', due: '' });
   const [err, setErr] = useState('');
   const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
   const send = async () => {
     const body = { question: d.question.trim(), deliverable: d.deliverable.trim(),
-      budget: d.budget ? { sparks: Number(d.budget) } : {}, due_at: d.due ? new Date(d.due).toISOString() : null };
+      budget: budgetBody(d.cost, d.calls), due_at: d.due ? new Date(d.due).toISOString() : null };
     const r = await engine(`/v1/repos/${repo}/tasks`, { key: apiKey, method: 'POST', body });
     if (r.ok) onDone(r.data.task_id); else setErr(r.error);
   };
@@ -98,8 +104,10 @@ function ProposeForm({ apiKey, repo, onDone, onCancel }) {
         style={{ ...inputStyle, resize: 'vertical' }} />
       <input value={d.deliverable} onChange={set('deliverable')} placeholder="Deliverable that would answer it" style={inputStyle} />
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <label style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}><span style={monoLabel}>Budget</span>
-          <input type="number" min="0" value={d.budget} onChange={set('budget')} placeholder="✦" style={{ ...inputStyle, width: 120 }} /></label>
+        <label style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}><span style={monoLabel}>Max cost (USD)</span>
+          <input type="number" min="0" max="10000" step="1" value={d.cost} onChange={set('cost')} placeholder="optional" style={{ ...inputStyle, width: 130 }} /></label>
+        <label style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}><span style={monoLabel}>Max tool calls</span>
+          <input type="number" min="1" max="100000" step="1" value={d.calls} onChange={set('calls')} placeholder="optional" style={{ ...inputStyle, width: 130 }} /></label>
         <label style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}><span style={monoLabel}>Due</span>
           <input type="date" value={d.due} onChange={set('due')} style={{ ...inputStyle, width: 170 }} /></label>
       </div>
