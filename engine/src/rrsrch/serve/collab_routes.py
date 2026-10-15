@@ -42,11 +42,6 @@ class NewComment(NewMessage):
     target: str                                  # claim:N, mr:N or challenge:N
 
 
-class Reaction(BaseModel):
-    target: str                                  # claim:N, mr:N, challenge:N or message:N
-    kind: Literal["useful", "interesting", "needs_clarification", "needs_work"]
-
-
 class NewReport(BaseModel):
     target: str
     reason: Literal["spam", "abuse", "prompt_injection", "off_topic", "other"]
@@ -95,7 +90,7 @@ class Target(BaseModel):
 
 
 class NewPost(BaseModel):
-    kind: Literal["finding", "question", "observation", "proposal"]
+    kind: Literal["question", "finding"]
     title: str = Field(min_length=1, max_length=200)
     body: str = Field(min_length=1, max_length=20000)
     topics: list[str] = Field(default_factory=list, max_length=8)
@@ -276,27 +271,7 @@ def contributions(handle: str, p: Principal | None = Depends(principal), c: psyc
 
 
 
-# feedback: reactions, comments, reports, and the combined view (docs/FEEDBACK.md)
-
-@router.post("/reactions")
-def add_reaction(body: Reaction, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
-    """React to a claim, merge request, challenge or message. Informal: never changes review state."""
-    return {"ok": True, "target": body.target} | _call(feedback.react, c, p, body.target, body.kind, True)
-
-
-@router.delete("/reactions")
-def remove_reaction(target: str, kind: Literal["useful", "interesting", "needs_clarification", "needs_work"],
-                    p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True, "target": target} | _call(feedback.react, c, p, target, kind, False)
-
-
-@router.get("/reactions")
-def get_reactions(target: list[str] = Query(max_length=100), p: Principal | None = Depends(principal),
-                  c: psycopg.Connection = Depends(conn)) -> dict:
-    for t in target:
-        _call(feedback._readable, c, p, t)
-    return {"ok": True, "reactions": feedback.reaction_counts(c, target, p)}
-
+# feedback: comments, reports, and the combined view (docs/FEEDBACK.md)
 
 @router.get("/comments")
 def get_comments(target: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
@@ -317,7 +292,7 @@ def post_comment(body: NewComment, request: Request, p: Principal | None = Depen
 def claim_feedback(claim_id: int, p: Principal | None = Depends(principal),
                    c: psycopg.Connection = Depends(conn)) -> dict:
     """Everything said about a claim, split into formal standing (state, verification, reviews, challenges) and
-    informal feedback (reactions, comments), which can never change the formal part."""
+    informal feedback (comments), which can never change the formal part."""
     got = feedback.claim_feedback(c, p, claim_id)
     if got is None:
         raise HTTPException(404)
@@ -348,7 +323,7 @@ def resolve_report(report_id: int, body: ReportAction, p: Principal | None = Dep
 @router.post("/posts", status_code=201)
 def publish_post(body: NewPost, request: Request, p: Principal | None = Depends(principal),
                  c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    """Share a finding, question, observation or proposal. Posts are not knowledge: promote one to propose a claim."""
+    """Ask a question or share a finding. Posts are not knowledge: promote one to propose a claim."""
     def go():
         return 201, {"ok": True, "post_id": _call(research.publish, c, p, body.kind, body.title, body.body,
                                                   body.topics, body.evidence, body.repository)}
@@ -379,14 +354,14 @@ def promote_post(post_id: int, body: Promotion, request: Request, p: Principal |
 
 
 @router.get("/explore")
-def explore(kind: Literal["finding", "question", "observation", "proposal"] | None = None, topic: str | None = None,
+def explore(kind: Literal["question", "finding"] | None = None, topic: str | None = None,
             repository: str | None = None, status: Literal["open", "answered", "promoted", "closed"] | None = None,
             sort: Literal["recent", "active"] = "recent", limit: int = Query(default=20, ge=1, le=100),
             offset: int = Query(default=0, ge=0, le=10000), author: str | None = None, following: bool = False,
             unanswered: bool = False, q: str | None = Query(default=None, max_length=100),
             p: Principal | None = Depends(principal),
             c: psycopg.Connection = Depends(conn)) -> dict:
-    """Posts you can read, newest or most recently active first. Never ranked by reactions."""
+    """Posts you can read, newest or most recently active first. Never ranked by popularity."""
     return {"ok": True, "topics": research.topics(c, p)} | _call(
         research.explore, c, p, kind=kind, topic=topic, repository=repository, status=status, sort=sort, limit=limit,
         offset=offset, author=author, following=following, unanswered=unanswered, q=q)

@@ -14,7 +14,7 @@ def person(uid="u-123", name="Ada Lovelace", secret=SECRET):
     return {"x-rrsrch-proxy-secret": secret, "x-rrsrch-site-user": uid, "x-rrsrch-site-name": name}
 
 
-def test_a_signed_in_person_posts_comments_and_reacts_as_themselves(world, monkeypatch):
+def test_a_signed_in_person_posts_and_comments_as_themselves(world, monkeypatch):
     client, h, url = world
     monkeypatch.setenv("RRSRCH_PROXY_SECRET", SECRET)
     assert client.get("/v1/whoami", headers=person()).status_code == 401           # a read before acting: anonymous
@@ -25,10 +25,8 @@ def test_a_signed_in_person_posts_comments_and_reacts_as_themselves(world, monke
     assert (me["handle"], me["organization_id"], me["scopes"]) == ("ada-lovelace", "people", ["propose", "read", "review"])
     assert client.post("/v1/comments", headers=person(), json={"target": f"post:{pid}", "body": "Also: how often?"}
                        ).status_code == 201
-    assert client.post("/v1/reactions", headers=person(), json={"target": f"post:{pid}", "kind": "useful"}
-                       ).status_code == 200
     got = client.get(f"/v1/posts/{pid}", headers=person()).json()
-    assert got["author"]["kind"] == "human" and got["reactions"]["mine"] == ["useful"]
+    assert got["author"]["kind"] == "human" and [m["author"] for m in got["comments"]] == ["ada-lovelace"]
 
     # a second account with the same name gets its own handle; the same account always maps to the same agent
     client.post("/v1/subscriptions", headers=person("u-456"), json={"target": "topic:msc"})

@@ -83,3 +83,27 @@ def test_the_migration_moves_existing_reviews_and_repoints_what_pointed_at_them(
         assert c.execute("SELECT kind, blocking, state FROM challenges").fetchone() == ("scope", True, "open")
         assert c.execute("SELECT outcome FROM verification_reports").fetchone()[0] == "reproduced"
         assert c.execute("SELECT count(*) FROM retired_challenges").fetchone()[0] == 1           # kept until step 3
+
+
+def test_observations_and_proposals_become_findings_and_reactions_retire(db_url, tmp_path, monkeypatch):
+    before = tmp_path / "migrations"
+    before.mkdir()
+    for f in sorted(db.MIGRATIONS.glob("*.sql")):
+        if f.name < "0028":
+            shutil.copy(f, before / f.name)
+    real = db.MIGRATIONS
+    monkeypatch.setattr(db, "MIGRATIONS", before)
+    with psycopg.connect(db_url) as c:
+        db.migrate(c)
+        net = c.execute("SELECT id FROM repositories WHERE slug = 'rrsrch/network'").fetchone()[0]
+        agent = c.execute("SELECT id FROM agents LIMIT 1").fetchone()[0]
+        for kind in ("observation", "proposal", "question"):
+            c.execute("INSERT INTO research_posts (repository_id, author_id, kind, title, body, content_hash) "
+                      "VALUES (%s, %s, %s, %s, 'b', repeat('0', 64))", (net, agent, kind, kind))
+    monkeypatch.setattr(db, "MIGRATIONS", real)
+    with psycopg.connect(db_url) as c:
+        db.migrate(c)
+        assert dict(c.execute("SELECT title, kind FROM research_posts")) == {
+            "observation": "finding", "proposal": "finding", "question": "question"}
+        assert c.execute("SELECT to_regclass('reactions'), to_regclass('retired_reactions') IS NOT NULL").fetchone() \
+            == (None, True)

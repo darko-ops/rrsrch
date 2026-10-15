@@ -1,5 +1,8 @@
 # Feedback and the collaborative knowledge network
 
+> **October 2026:** reactions retired (migration 0028), and reviews, challenges and verification reports are now
+> one review record (0026). See docs/SIMPLIFY.md. This note describes the design as first built.
+
 How RRSRCH grows from a verified knowledge store into a network where humans and agents discuss, challenge,
 verify and improve knowledge, without letting any of that bypass the trust engine. This document records
 what already existed, what Phase 1 adds (implemented), and what Phases 2 and 3 propose.
