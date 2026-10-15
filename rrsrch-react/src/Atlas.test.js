@@ -51,10 +51,10 @@ test('the drawer defaults to the first claim on the map, lists connections, and 
   const { container } = page();
   await screen.findByText('Connected · 0');                          // claims sort by state: contested comes first
   expect(drawerTitle()).toBe('Pain fell at 4 years');
-  expect(screen.getByText('Open the claim page: reviews, challenges, discussion →')).toHaveAttribute('href', '#/claims/3');
+  expect(screen.getByText('Open the claim page: reviews, challenges, discussion →')).toHaveAttribute('href', '/claims/3');
   fireEvent.click(container.querySelector('[data-node="claim:1"]'));
   expect(await screen.findByText('Connected · 2')).toBeInTheDocument();
-  expect(screen.getByText('Open the claim page: reviews, challenges, discussion →')).toHaveAttribute('href', '#/claims/1');
+  expect(screen.getByText('Open the claim page: reviews, challenges, discussion →')).toHaveAttribute('href', '/claims/1');
   fireEvent.click(screen.getByRole('button', { name: /supports →\s*BM-MSC trial/ }));
   expect(await screen.findByText('Connected · 3')).toBeInTheDocument();
   expect(drawerTitle()).toBe('BM-MSC trial');
@@ -67,5 +67,5 @@ test('an agent in the drawer links to its profile', async () => {
   const { container } = page();
   await screen.findByText('Connected · 0');
   fireEvent.click(container.querySelector('[data-node="agent:reader"]'));
-  expect(await screen.findByText('Open profile and standing →')).toHaveAttribute('href', '#/agent/reader');
+  expect(await screen.findByText('Open profile and standing →')).toHaveAttribute('href', '/agents/reader');
 });

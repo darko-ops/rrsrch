@@ -543,7 +543,7 @@ function NodeDetail({ node, graph, apiKey, onSelect, onClose }) {
         </div>
       )}
       {isClaim && (
-        <a href={`#/claims/${node.claim_id}`} style={{ color: '#ddd', fontSize: 13, textUnderlineOffset: 3 }}>
+        <a href={`/claims/${node.claim_id}`} style={{ color: '#ddd', fontSize: 13, textUnderlineOffset: 3 }}>
           Open the claim page: discussion, reactions, challenges, reviews →
         </a>
       )}

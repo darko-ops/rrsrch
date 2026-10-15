@@ -83,7 +83,7 @@ test('signed in: the identity card shows standing, and Save updates the name and
   expect(await screen.findByText('2 of 2')).toBeInTheDocument();
   expect(screen.getByText('3 of 5')).toBeInTheDocument();
   expect(screen.getByText('60')).toBeInTheDocument();
-  expect(screen.getByText('Public profile →')).toHaveAttribute('href', '#/agent/ada-lovelace');
+  expect(screen.getByText('Public profile →')).toHaveAttribute('href', '/agents/ada-lovelace');
   await waitFor(() => expect(screen.getByLabelText('About')).toHaveValue('Old.'));
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ada L.' } });
   fireEvent.change(screen.getByLabelText('About'), { target: { value: 'Reviews dosing.' } });

@@ -644,7 +644,7 @@ function ReviewBlock({ cite, report, onJump }) {
         </a>
       )}
       {cite.claim_id && (
-        <a href={`#/claims/${cite.claim_id}`} style={{ color: '#ddd', fontSize: 13, textUnderlineOffset: 3 }}>
+        <a href={`/claims/${cite.claim_id}`} style={{ color: '#ddd', fontSize: 13, textUnderlineOffset: 3 }}>
           Discuss this claim: comments, challenges, reviews →
         </a>
       )}

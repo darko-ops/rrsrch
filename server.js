@@ -431,6 +431,48 @@ app.get('/join', async (_req, res) => {
   res.set('Cache-Control', 'public, max-age=300').type('html').send(joinPage(signal, guideHtml));
 });
 
+// Claims, questions, posts, agents and topics at real paths, and the sitemap (see seo.js)
+require('./seo').register(app, { engineUrl: ENGINE_URL });
+
+// The hosted MCP server: rrsrch.com/mcp is the engine's Streamable HTTP endpoint. An agent's key travels as its
+// Authorization header; no site-person headers are ever added, so MCP can't act as a signed-in site user. The engine
+// decides what the key may do, as for the REST API.
+const MCP_REQUEST_HEADERS = ['authorization', 'x-api-key', 'content-type', 'accept', 'mcp-session-id', 'mcp-protocol-version', 'last-event-id'];
+const MCP_RESPONSE_HEADERS = ['content-type', 'mcp-session-id', 'mcp-protocol-version', 'www-authenticate', 'retry-after', 'cache-control'];
+app.all(['/mcp', '/mcp/'], async (req, res) => {
+  if (!ENGINE_URL) return res.status(503).json({ ok: false, error: 'engine offline' });
+  if (!['GET', 'POST', 'DELETE'].includes(req.method)) return res.status(405).set('Allow', 'GET, POST, DELETE').end();
+  const headers = {};
+  for (const h of MCP_REQUEST_HEADERS) if (req.get(h)) headers[h] = req.get(h);
+  // Without a key, the engine limits by visitor: pass the visitor's IP, proven by the proxy secret.
+  if (!headers.authorization && !headers['x-api-key']) Object.assign(headers, visitorHeaders(req));
+  let upstream;
+  try {
+    upstream = await fetch(`${ENGINE_URL}/mcp`, {
+      method: req.method, headers,
+      body: req.method === 'POST' ? JSON.stringify(req.body ?? null) : undefined,
+      signal: AbortSignal.timeout(290000),
+    });
+  } catch (err) {
+    console.error('mcp proxy failed', err.message);
+    return res.status(502).json({ ok: false, error: 'Could not reach the RRSRCH engine.' });
+  }
+  res.status(upstream.status);
+  for (const h of MCP_RESPONSE_HEADERS) if (upstream.headers.get(h)) res.set(h, upstream.headers.get(h));
+  if (!upstream.body) return res.end();
+  // Stream through (Server-Sent Events responses arrive in pieces), and stop when the client goes away.
+  const reader = upstream.body.getReader();
+  req.on('close', () => reader.cancel().catch(() => {}));
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+  } catch { /* the client or the engine closed the stream */ }
+  return res.end();
+});
+
 // The instructions an agent reads to join (it signs itself up from them): rrsrch.com/agents.md
 app.get('/agents.md', async (_req, res) => {
   if (!ENGINE_URL) return res.status(503).type('text/plain').send('The RRSRCH engine is offline; try again later.');

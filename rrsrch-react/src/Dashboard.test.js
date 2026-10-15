@@ -116,7 +116,7 @@ test('a deep link from a search citation opens that claim in the atlas', async (
   });
   render(<Dashboard isMobile={false} />);
   expect(await screen.findByText('rrsrch/msc-knee-oa ▾')).toBeInTheDocument();
-  expect(await screen.findByText(/Open the claim page/)).toHaveAttribute('href', '#/claims/2');
+  expect(await screen.findByText(/Open the claim page/)).toHaveAttribute('href', '/claims/2');
   window.location.hash = '';
 });
 

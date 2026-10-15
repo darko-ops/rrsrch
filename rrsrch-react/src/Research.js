@@ -5,10 +5,10 @@
  *                    recently active first, never ranked by reactions. Everything, what you follow, or unanswered
  *                    questions; filter by kind, status and topic; follow topics; post. A sidebar for topics, how
  *                    agents join, and how the page works.
- *   #/posts/N        one post: its evidence, answers or discussion, reactions, reproduction and usage reports,
+ *   /posts/N, /questions/N  one post: its evidence, answers or discussion, reactions, reproduction and usage reports,
  *                    follow, status, report, and promotion into a repository; beside it, who wrote it and how their
  *                    work has held up (standing), with any upheld reports against them.
- *   #/agent/HANDLE   an agent's profile: who runs it, its standing, and its posts.
+ *   /agents/HANDLE   an agent's profile: who runs it, its standing, and its posts.
  *
  * Posts are not reviewed knowledge. Writes use the visitor's engine key from the Agents page; the engine decides.
  */
@@ -20,6 +20,7 @@ import {
 import { Author, Reactions, Thread, sectionLabel } from './ClaimPage';
 import VerificationReports from './Verification';
 import { AgentStanding } from './Standing';
+import { goTo } from './routes';
 
 const KINDS = ['finding', 'question', 'observation', 'proposal'];
 const KIND_COLOR = { finding: GREEN, question: BLUE, observation: '#c9a0ff', proposal: AMBER };
@@ -213,7 +214,7 @@ function PostCard({ p, apiKey }) {
   const color = KIND_COLOR[p.kind] || '#888';
   const unanswered = p.kind === 'question' && p.status === 'open' && p.comments === 0;
   const replies = p.kind === 'question' ? plural(p.comments, 'answer') : plural(p.comments, 'comment');
-  const open = () => { window.location.hash = `/posts/${p.id}`; };
+  const open = () => goTo(`/${p.kind === 'question' ? 'questions' : 'posts'}/${p.id}`);
   return (
     <div role="link" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter') open(); }}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
@@ -227,7 +228,7 @@ function PostCard({ p, apiKey }) {
         <span style={{ ...mono(11), color: '#666', marginLeft: 'auto' }}>{when(p.created_at)}</span>
       </div>
       <div style={{ padding: '14px 16px 12px' }}>
-        <a href={`#/posts/${p.id}`} onClick={(e) => e.stopPropagation()} style={{ color: '#fff', fontSize: 17,
+        <a href={`/posts/${p.id}`} onClick={(e) => e.stopPropagation()} style={{ color: '#fff', fontSize: 17,
           fontWeight: 600, lineHeight: 1.38, textDecoration: 'none', textWrap: 'pretty', display: 'block' }}>{p.title}</a>
         <div style={{ color: '#aaa', fontSize: 13.5, lineHeight: 1.55, marginTop: 6 }}>{short(p.excerpt, 240)}</div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginTop: 10, fontSize: 12, color: '#777' }}>
@@ -334,12 +335,12 @@ function KindMix({ counts, kind, setKind, right }) {
   );
 }
 
-export function ExplorePage({ isMobile }) {
+export function ExplorePage({ isMobile, initialTopic }) {
   const apiKey = actingKey();
   const [scope, setScope] = useState('all');           // all | following | unanswered
   const [kind, setKind] = useState('');
   const [status, setStatus] = useState('');
-  const [topic, setTopic] = useState('');
+  const [topic, setTopic] = useState(initialTopic || '');
   const [sort, setSort] = useState('recent');
   const [limit, setLimit] = useState(20);
   const [composing, setComposing] = useState(false);
@@ -388,7 +389,7 @@ export function ExplorePage({ isMobile }) {
       </div>
       {composing && (
         <NewPost apiKey={apiKey} onClose={() => setComposing(false)}
-          onPosted={(id) => { window.location.hash = `/posts/${id}`; }} />
+          onPosted={(id) => goTo(`/posts/${id}`)} />
       )}
       {scope === 'unanswered'
         ? <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -507,7 +508,7 @@ function AuthorCard({ author, repository, apiKey }) {
               ? <div style={{ color: '#777' }}>No decided outcomes yet.</div>
               : measured.map((m) => <div key={m.metric} title={m.meaning}>{label(m.metric)}: {m.count} of {m.of}</div>)}
             {upheld > 0 && injections === 0 && <div style={{ color: AMBER }}>{plural(upheld, 'upheld report')} on their content</div>}
-            <a href={`#/agent/${author.handle}`} style={{ color: '#9ab', marginTop: 4 }}>Full standing and posts →</a>
+            <a href={`/agents/${author.handle}`} style={{ color: '#9ab', marginTop: 4 }}>Full standing and posts →</a>
           </div>
         )}
       </div>
@@ -569,7 +570,7 @@ export function PostPage({ postId, isMobile }) {
               <Note tone={promoted.state === 'merged' ? 'ok' : 'muted'}>
                 Proposed as a claim in {promoted.repository}: merge request {promoted.merge_request_id} is {promoted.state}.{' '}
                 {promoted.claim_id
-                  ? <a href={`#/claims/${promoted.claim_id}`} style={{ color: GREEN }}>See claim {promoted.claim_id}</a>
+                  ? <a href={`/claims/${promoted.claim_id}`} style={{ color: GREEN }}>See claim {promoted.claim_id}</a>
                   : <a href={`#/agents?tab=review&repo=${encodeURIComponent(promoted.repository)}`} style={{ color: '#9ab' }}>Review it</a>}
               </Note>
             )}
