@@ -1,4 +1,4 @@
-"""Collaboration endpoints (SPEC-v2 §18.1): discussions, challenges, review requests, research tasks,
+"""Collaboration endpoints (SPEC-v2 §18.1): discussions, challenges, review requests,
 subscriptions, notifications and contribution histories. Decisions live in rrsrch.collab."""
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
 from ..collab import (challenges, checkin, discussions, feed, feedback, inbox, research, review_requests, signal,
-                      sitemap, standing, tasks, verification)
+                      sitemap, standing, verification)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -88,24 +88,6 @@ class SparkRequest(BaseModel):
 class SparkDecision(BaseModel):
     decision: Literal["approved", "rejected", "withdrawn"]
     note: str = Field(default="", max_length=2000)
-
-
-class NewTask(BaseModel):
-    question: str | None = Field(default=None, min_length=1, max_length=2000)   # ask a new question, or
-    question_post_id: int | None = None                                           # take on one already asked
-    deliverable: str = Field(min_length=1, max_length=2000)
-    budget: dict[str, Any] = Field(default_factory=dict)
-    due_at: datetime | None = None
-
-
-class TaskMove(BaseModel):
-    to: Literal["authorized", "assigned", "in_progress", "awaiting_review", "completed", "failed", "canceled"]
-    assignee: str | None = None
-
-
-class TaskResponse(BaseModel):
-    body: str = Field(min_length=1, max_length=8000)
-    merge_request_id: int | None = None
 
 
 class Target(BaseModel):
@@ -255,44 +237,6 @@ def my_review_requests(p: Principal | None = Depends(principal), c: psycopg.Conn
     if p is None:
         raise HTTPException(401, "authentication required")
     return {"ok": True, "items": review_requests.mine(c, p)}
-
-
-# research tasks
-
-@router.post("/repos/{owner}/{name}/tasks", status_code=201)
-def open_task(owner: str, name: str, body: NewTask, request: Request, p: Principal | None = Depends(principal),
-              c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    def go():
-        tid = _call(tasks.open_task, c, p, f"{owner}/{name}", body.question, body.deliverable, body.budget,
-                    body.due_at, body.question_post_id)
-        qid = c.execute("SELECT question_post_id FROM research_tasks WHERE id = %s", (tid,)).fetchone()[0]
-        return 201, {"ok": True, "task_id": tid, "state": "proposed", "question_post_id": qid}
-    return idempotency.run(request, c, p, body, go)
-
-
-@router.get("/repos/{owner}/{name}/tasks")
-def list_tasks(owner: str, name: str, state: str | None = None, after: int = After, limit: int = Limit,
-               p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True} | tasks.list_for_repo(c, _readable_repo(c, p, owner, name), state, after, limit)
-
-
-@router.get("/tasks/{task_id}")
-def get_task(task_id: int, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True, "task": _call(tasks.get, c, p, task_id)}
-
-
-@router.post("/tasks/{task_id}/transition")
-def move_task(task_id: int, body: TaskMove, p: Principal | None = Depends(principal),
-              c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True, "task_id": task_id, "state": _call(tasks.transition, c, p, task_id, body.to, body.assignee)}
-
-
-@router.post("/tasks/{task_id}/responses", status_code=201)
-def respond(task_id: int, body: TaskResponse, request: Request, p: Principal | None = Depends(principal),
-            c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    def go():
-        return 201, {"ok": True, "response_id": _call(tasks.respond, c, p, task_id, body.body, body.merge_request_id)}
-    return idempotency.run(request, c, p, body, go)
 
 
 # subscriptions, notifications, contributions
@@ -522,7 +466,7 @@ def mark_inbox_read(body: InboxRead, p: Principal | None = Depends(principal),
 @router.get("/me/counts")
 def my_counts(repository: str | None = None, p: Principal | None = Depends(principal),
               c: psycopg.Connection = Depends(conn)) -> dict:
-    """Counts for the Agents sidebar: the repository's queue, open merge requests and open tasks, and, signed in,
+    """Counts for the Agents sidebar: the repository's queue and open merge requests, and, signed in,
     your organization's agents, your live keys and unread inbox items."""
     return {"ok": True} | _call(inbox.counts, c, p, repository)
 

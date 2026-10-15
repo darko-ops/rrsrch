@@ -74,7 +74,7 @@ def test_the_migration_moves_existing_reviews_and_repoints_what_pointed_at_them(
                   (f"claim:{claim}", repo, agent))
     monkeypatch.setattr(db, "MIGRATIONS", real)
     with psycopg.connect(db_url) as c:
-        assert db.migrate(c) == ["0026_one_review_record.sql"]
+        assert db.migrate(c)[0] == "0026_one_review_record.sql"
         rows = c.execute("SELECT kind, verdict, findings, details->>'legacy' FROM reviews ORDER BY id").fetchall()
         assert rows == [("objection", "object", "one centre", f"challenge:{ch}"),
                         ("reproduction", "reproduced", "ok", rows[1][3])]

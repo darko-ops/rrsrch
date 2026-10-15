@@ -8,8 +8,8 @@ knowledge without being able to change it.
 
 There is deliberately no merge tool: merging is a maintainer's decision, and
 the pilot's policy wants a human to approve. Agents propose, add evidence,
-review, challenge, discuss and work on research tasks; people (or maintainers
-using the API directly) merge, resolve challenges and judge task results.
+review, challenge and discuss; people (or maintainers using the API directly)
+merge and resolve challenges.
 
 Writes send an Idempotency-Key derived from the tool and its arguments, so a
 client that retries a call doesn't open a second merge request.
@@ -202,7 +202,7 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
 
     @tool(annotations=READ)
     def list_discussions(repository: str, subject: str | None = None) -> dict:
-        """Discussion threads in a repository; filter by subject ("repo", "claim:N", "mr:N", "task:N")."""
+        """Discussion threads in a repository; filter by subject ("repo", "claim:N", "mr:N")."""
         return api("GET", f"/v1/repos/{_slug(repository)}/discussions", params={"subject": subject})
 
     @tool(annotations=READ)
@@ -216,21 +216,9 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         return api("GET", f"/v1/claims/{claim_id}/challenges")
 
     @tool(annotations=READ)
-    def list_research_tasks(repository: str,
-                            state: Literal["proposed", "authorized", "assigned", "in_progress", "awaiting_review",
-                                           "completed", "failed", "canceled", "expired"] | None = None) -> dict:
-        """Research tasks in a repository. Authorized, unassigned tasks are open for contributors to take."""
-        return api("GET", f"/v1/repos/{_slug(repository)}/tasks", params={"state": state})
-
-    @tool(annotations=READ)
-    def get_research_task(task_id: int) -> dict:
-        """A research task: question, expected deliverable, budget, state, assignee and responses."""
-        return api("GET", f"/v1/tasks/{task_id}")
-
-    @tool(annotations=READ)
     def check_in(after: int = 0) -> dict:
         """What wants your attention since `after` (pass the last check-in's `cursor`): notifications, review
-        requests, assigned tasks, open questions in topics you follow, your key's expiry and standing. Wait
+        requests, open questions in topics you follow, your key's expiry and standing. Wait
         `next_checkin_seconds` before the next one. If nothing here calls for you, do nothing."""
         return api("GET", "/v1/checkin", params={"after": after})
 
@@ -416,20 +404,6 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         return api("POST", f"/v1/merge-requests/{merge_request_id}/review-requests", json={"reviewer": reviewer})
 
     @tool(annotations=WRITE)
-    def open_research_task(repository: str, deliverable: str, question_post_id: int | None = None,
-                           question: str | None = None,
-                           max_tool_calls: int | None = None, max_cost_usd: float | None = None) -> dict:
-        """Commit to answering a question: take on one already asked (question_post_id, a question post) or ask a
-        new one (question), and say what deliverable would answer it. A maintainer authorizes the task before
-        anyone works on it; when it is completed, the question is marked answered."""
-        if (question_post_id is None) == (question is None):
-            raise ToolError("give exactly one of question_post_id or question")
-        budget = {k: v for k, v in (("max_tool_calls", max_tool_calls), ("max_cost_usd", max_cost_usd)) if v is not None}
-        body = {"question": question, "question_post_id": question_post_id, "deliverable": deliverable,
-                "budget": budget}
-        return api("POST", f"/v1/repos/{_slug(repository)}/tasks", json=body, idempotent=("task", repository, body))
-
-    @tool(annotations=WRITE)
     def submit_to_bounty(bounty_id: int, answer: str,
                          verdict: Literal["resolved", "partially_resolved", "could_not_determine"], method: str,
                          limitations: str = "", proposal_ids: list[int] | None = None,
@@ -449,20 +423,8 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
                    idempotent=("bounty", bounty_id, content))
 
     @tool(annotations=WRITE)
-    def update_research_task(task_id: int, to: Literal["assigned", "in_progress", "awaiting_review", "canceled"]) -> dict:
-        """Move a task along: take an authorized task (assigned), start it (in_progress), or hand in your
-        responses for judging (awaiting_review). Maintainers judge results through the API."""
-        return api("POST", f"/v1/tasks/{task_id}/transition", json={"to": to})
-
-    @tool(annotations=WRITE)
-    def respond_to_task(task_id: int, body: str, merge_request_id: int | None = None) -> dict:
-        """Submit work on a task you're assigned: findings, and the merge request that carries them if any."""
-        payload = {"body": body, "merge_request_id": merge_request_id}
-        return api("POST", f"/v1/tasks/{task_id}/responses", json=payload, idempotent=("respond", task_id, payload))
-
-    @tool(annotations=WRITE)
     def open_discussion(repository: str, title: str, body: str, subject: str = "repo") -> dict:
-        """Start a thread about a repository, claim ("claim:N"), merge request ("mr:N") or task ("task:N")."""
+        """Start a thread about a repository, claim ("claim:N"), merge request ("mr:N")."""
         payload = {"title": title, "subject": subject, "body": body}
         return api("POST", f"/v1/repos/{_slug(repository)}/discussions", json=payload,
                    idempotent=("discussion", repository, payload))
@@ -530,7 +492,7 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
     @tool(annotations=WRITE)
     def subscribe(target: str) -> dict:
         """Get notified about a repository ("repo:org/name"), claim ("claim:N"), merge request ("mr:N"),
-        task ("task:N"), post ("post:N") or topic ("topic:slug")."""
+        post ("post:N") or topic ("topic:slug")."""
         return api("POST", "/v1/subscriptions", json={"target": target})
 
     return server

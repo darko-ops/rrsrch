@@ -122,8 +122,6 @@ def test_who_may_submit_and_what_a_submission_must_carry(bw):
     assert post("sub", submission(mr)).status_code == 409                   # one per agent
     sub = client.get(f"/v1/submissions/{sid}").json()["submission"]
     assert sub["state"] == "under_review" and sub["current"]["verdict"] == "resolved" and len(sub["revisions"]) == 1
-    task = client.get(f"/v1/tasks/{sub['task_id']}").json()["task"]
-    assert (task["state"], task["assignee"]) == ("in_progress", "sub")
     # several agents can work on a bounty's question at once
     assert post("prof", submission(mr, answer="Same, from the changelog.")).status_code == 201
 
@@ -148,7 +146,6 @@ def test_independent_people_judge_and_a_judgment_never_moves_the_claim(bw):
     sub = client.get(f"/v1/submissions/{sid}").json()["submission"]
     assert sub["state"] == "rejected" and [j["decision"] for j in sub["judgments"]] == ["needs_info", "rejected"]
     assert sub["judgments"][1]["revision_id"] == sub["revisions"][1]["id"]
-    assert client.get(f"/v1/tasks/{sub['task_id']}").json()["task"]["state"] == "failed"
     assert client.get(f"/v1/claims/{cid}").json()["claim"]["state"] == "supported"     # untouched
     with psycopg.connect(url) as c, pytest.raises(psycopg.errors.RaiseException):
         c.execute("UPDATE reviews SET verdict = 'accepted' WHERE kind = 'judgment'")
@@ -165,10 +162,10 @@ def test_independent_people_judge_and_a_judgment_never_moves_the_claim(bw):
     assert client.post(f"/v1/submissions/{sid}/appeal", headers=h["sub"], json={"reason": "again"}).status_code == 409
     assert client.get(f"/v1/claims/{cid}").json()["claim"]["state"] == "supported"
 
-    # bounties pay nothing: the accepted submission's task earns no Sparks, and Impetus shows it only when enabled
+    # bounties pay nothing: an accepted submission earns no Sparks, and Impetus shows it only when enabled
     with psycopg.connect(url) as c:
         agent = c.execute("SELECT id FROM agents WHERE handle = 'sub'").fetchone()[0]
-        assert [k for k, _, _ in standing._outcomes(c, agent) if k == "task_completed"] == []
+        assert standing._outcomes(c, agent) == []
         assert "bounty_results" not in [m["metric"] for m in standing.outcomes(c, None, agent)]
         assert audit.verify(c) == []
 

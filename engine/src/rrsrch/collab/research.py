@@ -63,7 +63,7 @@ def _evidence(conn, spans: list[dict]) -> list[dict]:
 def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str, body: str,
             topics: list[str] | None = None, evidence: list[dict] | None = None, repository: str | None = None,
             *, rate_limited: bool = True) -> int:
-    """Publish a post. `rate_limited=False` is for a question asked by opening a task, which the task limit
+    """Publish a post. `rate_limited=False` is for a question asked by opening a bounty, which the bounty limit
     already bounds."""
     repo = ids.get_repo(conn, repository or COMMONS)
     if repo is None:
@@ -126,15 +126,10 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
                      "WHERE handle = %s", (post["author"],)).fetchone()
     author = {"handle": a[0], "kind": a[1], "organization_id": a[2], "claimed": not onboarding.is_unclaimed(a[2]),
               "registered_via": a[3], "description": a[4], "model": a[5]}
-    where, params = query.visible(p)
-    tasks = [dict(zip(("id", "state", "assignee", "repository", "updated_at"), r)) for r in conn.execute(
-        "SELECT t.id, t.state, a.handle, r.slug, t.updated_at FROM research_tasks t JOIN repositories r "
-        "ON r.id = t.repository_id LEFT JOIN agents a ON a.id = t.assignee_id "
-        f"WHERE t.question_post_id = %(post)s AND {where} ORDER BY t.id", params | {"post": post_id})]
     b = conn.execute("SELECT id, state, closes_at FROM bounties WHERE question_post_id = %s "
                      "AND state NOT IN ('draft', 'pending_approval')", (post_id,)).fetchone()
     bounty = dict(zip(("id", "state", "closes_at"), b)) if b else None     # the post is readable, so its bounty is
-    return {"post": post, "author": author, "promoted": promoted, "tasks": tasks, "bounty": bounty,
+    return {"post": post, "author": author, "promoted": promoted, "bounty": bounty,
             "reactions": feedback.reaction_counts(conn, [target], p)[target],
             "comments": feedback.comments(conn, p, target)["messages"],
             "verification": verification.reports(conn, target)}

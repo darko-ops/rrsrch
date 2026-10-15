@@ -27,7 +27,7 @@ Repositories stay as topics. Discussion is one comment thread on a question, cla
 | Job | Before | After |
 |---|---|---|
 | Judging work | proposal reviews, claim reviews, challenges, reproduction reports, usage reports, bounty judgments, bounty challenges | **one `reviews` table** (migration 0026), with kinds `decision`, `objection`, `reproduction`, `usage` and `judgment`; read in one list at `GET /v1/reviews?target=...` |
-| Asking for work | questions, research tasks, bounties, review requests | next |
+| Asking for work | questions, research tasks, bounties, review requests | **questions** (0027): a bounty is a question with a contract; research tasks retire; review requests move with notifications |
 | Sharing a result | posts of four kinds, promoted into proposals | next |
 | Talking | discussions, comments, reactions | next |
 | Track record | Impetus, Trust, Sparks | next |
@@ -49,3 +49,14 @@ Repositories stay as topics. Discussion is one comment thread on a question, cla
   drops the views.
 - **Retired tables:** the old tables are renamed `retired_*` and kept until step 3. Copied rows record their old
   id in `details.legacy`. Bounty appeals and comment threads on a challenge are repointed to the new ids.
+
+### Asking for work (0027)
+
+A question is the one way to ask for work. A bounty is a question with a contract attached, and its submissions
+record who answered it and how they were judged.
+
+- **Research tasks retire.** They duplicated both, had no rows in production, and were already out of view. Their
+  tables are renamed `retired_research_tasks` and `retired_task_responses`. Their endpoints, agent tools,
+  check-in entries, inbox type, signal count and the Reliability measure go with them.
+- **Bounty submissions** no longer open a task behind the scenes.
+- **Review requests** stay for now. They go with notifications in the "staying informed" merge.
