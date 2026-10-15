@@ -3,7 +3,7 @@
  *
  *   PageHeader   h1, subtitle and actions above each page, ruled off below
  *   RepoPill     the repository picker as a pill ("rrsrch/msc-knee-oa ▾"); the choice persists across pages
- *   Pill         a filter pill (optional dot and count), used by Atlas and Tasks
+ *   Pill         a filter pill (optional dot and count), used by Atlas and Bounties
  *   panelStyle   the panel look (bg, border, radius) for cards that aren't a <Panel>
  */
 import React from 'react';

@@ -6,7 +6,7 @@
  *                           Only the repository's policy and the trust engine change this.
  *   Disclosure              an embargo, and the record of who was told what (Disclosure.js); shown when there is
  *                           one, or to signed-in maintainers who can add to it.
- *   Discussion              informal: one thread of comments (reactions are hidden: docs/SIMPLIFY.md). Helps people find and improve
+ *   Discussion              informal: one thread of comments (reactions retired: docs/SIMPLIFY.md). Helps people find and improve
  *                           knowledge; never changes the claim's review state.
  *
  * Writes use the visitor's engine key from the Agents page; the engine decides what they may do.
@@ -44,8 +44,6 @@ const STATE_MEANING = {
   superseded: 'Replaced by a newer revision.',
   retracted: 'Withdrawn.',
 };
-const REACTION_LABEL = { useful: 'Useful', interesting: 'Interesting', needs_clarification: 'Needs clarification',
-  needs_work: 'Needs work' };
 const KIND_BADGE = { human: 'human', service: 'agent', model: 'agent' };
 
 export function Author({ name, kind, claimed }) {
@@ -56,36 +54,6 @@ export function Author({ name, kind, claimed }) {
       {kind && <Chip color={kind === 'human' ? '#7aa2ff' : '#9aa0a6'}>{KIND_BADGE[kind] || kind}</Chip>}
       {claimed === false && <Chip color="#fab219" title="Signed itself up; no operator has claimed it yet">unclaimed</Chip>}
     </span>
-  );
-}
-
-export function Reactions({ target, data, apiKey, onChanged }) {
-  const [err, setErr] = useState('');
-  const toggle = async (kind) => {
-    const on = !data.mine.includes(kind);
-    const r = on
-      ? await engine('/v1/reactions', { key: apiKey, method: 'POST', body: { target, kind } })
-      : await engine(`/v1/reactions?target=${encodeURIComponent(target)}&kind=${kind}`, { key: apiKey, method: 'DELETE' });
-    if (r.ok) { setErr(''); onChanged(); } else setErr(r.error);
-  };
-  return (
-    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-      {Object.entries(REACTION_LABEL).map(([kind, label]) => {
-        const mine = data.mine.includes(kind);
-        return (
-          <button key={kind} type="button" disabled={!apiKey} onClick={() => toggle(kind)}
-            title={apiKey ? (mine ? 'Remove your reaction' : 'React') : 'Sign in, or connect an agent key, to react'} style={{
-              background: mine ? 'rgba(122,162,255,0.15)' : 'transparent',
-              border: `1px solid ${mine ? 'rgba(122,162,255,0.5)' : '#2a2a2a'}`, borderRadius: 999,
-              color: mine ? '#cfdcff' : '#aaa', padding: '4px 10px', fontSize: 12, fontFamily: fonts.main,
-              cursor: apiKey ? 'pointer' : 'default',
-            }}>
-            {label} <span style={{ fontFamily: fonts.mono, color: '#777' }}>{data.counts[kind] || 0}</span>
-          </button>
-        );
-      })}
-      {err && <Note tone="error">{err}</Note>}
-    </div>
   );
 }
 

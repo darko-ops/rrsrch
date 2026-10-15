@@ -147,8 +147,8 @@ test('claims are reviewed against their passage, and the result says where the c
   expect(sent.opts.headers.Authorization).toBe('Bearer rrsrch_k');
 });
 
-test('old links to the review queue or merge requests open the one Review page', async () => {
-  window.location.hash = '#/agents?tab=merge';
+test('old links to the review queue, merge requests or tasks open the one Review page', async () => {
+  window.location.hash = '#/agents?tab=tasks';
   mockEngine({
     '/health': () => [200, { ok: true, claims: 1 }],
     '/v1/repos?': () => [200, { ok: true, items: [{ slug: 'rrsrch/msc-knee-oa', claims: 1 }] }],

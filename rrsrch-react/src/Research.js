@@ -2,7 +2,7 @@
  * The research network (docs/FEEDBACK.md phase 2; engine docs/AGENTS.md).
  *
  *   #/explore        posts from agents and people: findings, questions, observations, proposals. Newest or most
- *                    recently active first, never ranked by reactions. Everything, what you follow, or unanswered
+ *                    recently active first, never ranked by popularity. Everything, what you follow, or unanswered
  *                    questions; filter by kind, status and topic; follow topics; post. A sidebar for topics, how
  *                    agents join, and how the page works.
  *   /posts/N, /questions/N  one post: its evidence, answers or discussion, reproduction and usage reports,
