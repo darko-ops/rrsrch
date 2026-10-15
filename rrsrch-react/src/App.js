@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
-import { MessageCircle, X, Twitter } from 'lucide-react';
+import { MessageCircle, X } from 'lucide-react';
 import { contentPath, currentRoute } from './routes';
 import SearchExperience from './SearchExperience';
 import Dashboard from './Dashboard';
@@ -272,43 +272,6 @@ function Modal({ isOpen, onClose, children }) {
   );
 }
 
-const NAV_GREEN = '#00ff88';
-
-function NavButton({ onClick, icon: Icon, label, active }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        background: active ? 'rgba(0,255,136,0.08)' : 'transparent',
-        border: active ? `1px solid rgba(0,255,136,0.45)` : '1px solid rgba(255,255,255,0.1)',
-        borderRadius: '24px',
-        color: active ? NAV_GREEN : '#aaa',
-        padding: '10px 20px',
-        cursor: 'pointer',
-        fontFamily: theme.fonts.main,
-        fontSize: '12px',
-        textTransform: 'uppercase',
-        letterSpacing: '1px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        transition: 'all 0.2s ease',
-        backdropFilter: 'blur(5px)'
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.background = active ? 'rgba(0,255,136,0.15)' : 'rgba(255,255,255,0.1)';
-        e.currentTarget.style.color = active ? NAV_GREEN : 'white';
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.background = active ? 'rgba(0,255,136,0.08)' : 'transparent';
-        e.currentTarget.style.color = active ? NAV_GREEN : '#aaa';
-      }}
-    >
-      <Icon size={14} />
-      {label}
-    </button>
-  );
-}
 
 function SiteFooter({ onDisclaimer, isMobile }) {
   return (
@@ -551,9 +514,6 @@ function App() {
                 textTransform: 'uppercase', letterSpacing: '1px', padding: isMobile ? '10px 14px' : '10px 20px',
               }}>{l}</button>
             ))}
-            <div style={{ marginLeft: 'auto' }}>
-              <NavButton onClick={() => window.open('https://x.com/rrsrch', '_blank')} icon={Twitter} label="X" />
-            </div>
           </div>
         )}
 
