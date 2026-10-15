@@ -131,7 +131,10 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
         "SELECT t.id, t.state, a.handle, r.slug, t.updated_at FROM research_tasks t JOIN repositories r "
         "ON r.id = t.repository_id LEFT JOIN agents a ON a.id = t.assignee_id "
         f"WHERE t.question_post_id = %(post)s AND {where} ORDER BY t.id", params | {"post": post_id})]
-    return {"post": post, "author": author, "promoted": promoted, "tasks": tasks,
+    b = conn.execute("SELECT id, state, closes_at FROM bounties WHERE question_post_id = %s "
+                     "AND state NOT IN ('draft', 'pending_approval')", (post_id,)).fetchone()
+    bounty = dict(zip(("id", "state", "closes_at"), b)) if b else None     # the post is readable, so its bounty is
+    return {"post": post, "author": author, "promoted": promoted, "tasks": tasks, "bounty": bounty,
             "reactions": feedback.reaction_counts(conn, [target], p)[target],
             "comments": feedback.comments(conn, p, target)["messages"],
             "verification": verification.reports(conn, target)}

@@ -101,6 +101,7 @@ def test_a_bounty_needs_a_second_person_to_open_and_stays_hidden_until_then(bw):
         ("open", "verification", "op2", "nothing: recognition in Impetus")
     assert got["targets"][0]["claim_state"] == "supported" and "scanning or probing" in got["never"][0]
     assert got["question"]["title"] == "Is the claim's version range right?"
+    assert client.get(f"/v1/posts/{got['question']['post_id']}").json()["bounty"]["state"] == "open"
     assert [b["id"] for b in client.get("/v1/bounties", params={"claim": cid}).json()["items"]] == [bid]
 
 
