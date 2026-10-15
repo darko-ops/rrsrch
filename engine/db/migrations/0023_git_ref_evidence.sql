@@ -27,7 +27,8 @@ ALTER TABLE evidence
     ADD COLUMN end_line int CHECK (end_line >= start_line);
 ALTER TABLE evidence ADD CONSTRAINT evidence_kind_columns CHECK (
     (kind = 'document_span' AND source_id IS NOT NULL AND document_id IS NOT NULL AND doc_sha256 IS NOT NULL
-        AND span_start IS NOT NULL AND span_end IS NOT NULL AND repo_url IS NULL AND commit_sha IS NULL)
+        AND span_start IS NOT NULL AND span_end IS NOT NULL AND repo_url IS NULL AND commit_sha IS NULL
+        AND git_tag IS NULL AND path IS NULL AND start_line IS NULL AND end_line IS NULL)
     OR (kind = 'git_ref' AND repo_url IS NOT NULL AND commit_sha IS NOT NULL AND source_id IS NULL
         AND document_id IS NULL AND doc_sha256 IS NULL AND span_start IS NULL AND span_end IS NULL
         AND (start_line IS NULL) = (end_line IS NULL) AND (start_line IS NULL OR path IS NOT NULL)));

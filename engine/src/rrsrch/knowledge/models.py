@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import canonical
 from .states import ClaimState
@@ -21,9 +21,9 @@ REPO_SLUG = r"^[a-z0-9][a-z0-9-]{0,38}/[a-z0-9][a-z0-9._-]{0,99}$"
 SHA256 = r"^[0-9a-f]{64}$"
 GIT_SHA = r"^[0-9a-f]{40}$"
 # public forges only: the engine clones these read-only to check a commit (docs/security/PLAN.md §5.5)
-GIT_REPO = r"^https://(?:github\.com|gitlab\.com|codeberg\.org)/[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9._-]{1,100}$"
+GIT_REPO = r"^https://(?:github\.com|gitlab\.com|codeberg\.org)/[a-z0-9][a-z0-9._-]{0,99}/[a-z0-9][a-z0-9._-]{0,99}$"
 GIT_TAG = r"^[A-Za-z0-9][A-Za-z0-9._/@=+-]{0,199}$"
-GIT_PATH = r"^[^/\x00-\x1f][^\x00-\x1f]{0,399}$"
+GIT_PATH = r"^[^/:\-\x00-\x1f][^\x00-\x1f]{0,399}$"     # not '/', ':' (pathspec magic) or '-' (an option) first
 
 
 class _Model(BaseModel):
@@ -125,6 +125,15 @@ class GitRef(_Model):
     lines of one file at that commit. Evidence for what the code says, not what a document says."""
     repo_url: str = Field(pattern=GIT_REPO)
     commit: str = Field(pattern=GIT_SHA)
+
+    @field_validator("repo_url", mode="before")
+    @classmethod
+    def _one_spelling(cls, v):
+        """Forges are case-insensitive and accept a trailing .git: store one spelling, so one repository has one key."""
+        if isinstance(v, str):
+            v = v.strip().rstrip("/").lower()
+            v = v[:-4] if v.endswith(".git") else v
+        return v
     tag: str | None = Field(default=None, pattern=GIT_TAG)
     path: str | None = Field(default=None, pattern=GIT_PATH)
     start_line: int | None = Field(default=None, ge=1)
@@ -132,8 +141,11 @@ class GitRef(_Model):
 
     @model_validator(mode="after")
     def _lines(self) -> GitRef:
-        if self.tag and ".." in self.tag:
-            raise ValueError("a tag can't contain '..'")
+        if self.tag and (".." in self.tag or "@{" in self.tag or self.tag.endswith((".lock", "/"))
+                         or self.tag in ("HEAD", "FETCH_HEAD", "ORIG_HEAD")):
+            raise ValueError("not a release tag name")
+        if self.repo_url.rsplit("/", 1)[-1] in (".", ".."):
+            raise ValueError("not a repository name")
         if self.path and ".." in self.path.split("/"):
             raise ValueError("a path can't climb out of the repository ('..')")
         if (self.start_line is None) != (self.end_line is None):

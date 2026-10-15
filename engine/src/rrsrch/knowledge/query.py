@@ -183,6 +183,11 @@ def provenance(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> 
     for ev in _evidence(conn, claim_id):
         e = node(f"evidence:{ev['id']}", "evidence", excerpt=ev["excerpt"], is_primary=ev["is_primary"])
         edge(c, ev["relation"], e)
+        if ev["kind"] == "git_ref":           # a commit, not a passage of a document: no source or trial behind it
+            g = ev["git"]
+            edge(e, "at_commit", node(f"commit:{g['repo_url'].removeprefix('https://')}@{g['commit'][:12]}", "commit",
+                                      repo_url=g["repo_url"], commit=g["commit"], tag=g.get("tag")))
+            continue
         d = node(f"document:{ev['source_id']}@{ev['doc_sha256'][:12]}", "document", sha256=ev["doc_sha256"])
         edge(e, "span_of", d)
         s = node(f"source:{ev['source_id']}", "source", title=ev["source_title"])

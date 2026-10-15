@@ -120,6 +120,11 @@ def verify(p: Proposal) -> tuple[ClaimContent | None, list[Check]]:
     checks.append(_check(S, "claim_type", c.type in policy.allowed_types,
                          f"{c.type} claims aren't accepted here (allowed: "
                          f"{', '.join(t.value for t in policy.allowed_types)})"))
+    if p.policy.kinds:
+        kind = (c.scope or {}).get("kind")
+        checks.append(_check(S, "claim_kind", kind in p.policy.kinds,
+                             f"scope.kind must be one of {', '.join(p.policy.kinds)}"
+                             + (f" (got {kind!r})" if kind is not None else " (none given)")))
     if refs:
         checks.append(_check(S, "evidence_kinds", "git_ref" in policy.allowed_evidence,
                              "git refs aren't accepted as evidence here"))

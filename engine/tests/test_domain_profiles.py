@@ -75,29 +75,29 @@ NOT_AFFECTED = {"kind": "not_affected", "required_reproductions": 2, "human_appr
 
 
 def test_overrides_apply_to_the_claims_they_name():
-    p = Policy(required_approvals=1, overrides=[NOT_AFFECTED])
+    p = Policy(required_approvals=1, kinds=("fixed_in", "not_affected"), overrides=[NOT_AFFECTED])
     assert p.for_claim("empirical", {"kind": "fixed_in"}).required_reproductions == 0
     strict = p.for_claim("empirical", {"kind": "not_affected"})
     assert (strict.required_reproductions, strict.human_approval, strict.required_approvals) == (2, True, 2)
-    by_type = Policy(overrides=[{"type": "procedural", "human_approval": True}])
+    by_type = Policy(overrides=[{"type": "procedural", "human_approval": True}])          # type-keyed: no kinds needed
     assert by_type.for_claim("procedural", {}).human_approval and not by_type.for_claim("factual", {}).human_approval
 
 
 def test_overrides_can_only_tighten():
     with pytest.raises(ValidationError, match="only tighten"):
-        Policy(required_approvals=2, overrides=[{"kind": "x", "required_approvals": 1}])
+        Policy(required_approvals=2, kinds=("x",), overrides=[{"kind": "x", "required_approvals": 1}])
     with pytest.raises(ValidationError, match="only tighten"):
-        Policy(human_approval=True, overrides=[{"kind": "x", "human_approval": False}])
+        Policy(human_approval=True, kinds=("x",), overrides=[{"kind": "x", "human_approval": False}])
     with pytest.raises(ValidationError, match="names the claim kind or type"):
         Policy(overrides=[{"required_approvals": 3}])
 
 
 def test_a_merge_is_judged_by_the_claims_own_rules():
-    p = STRICT.model_copy(update={"overrides": (
-        Policy.model_validate({"overrides": [{"kind": "not_affected", "required_approvals": 2}]}).overrides)})
+    p = STRICT.model_copy(update={"kinds": ("fixed_in", "not_affected"), "overrides": (
+        Policy.model_validate({"kinds": ["not_affected"], "overrides": [{"kind": "not_affected", "required_approvals": 2}]}).overrides)})
     merger = MAINTAINER
     one = [approve(2)]
-    plain = proposal(policy=p, reviews=one)
+    plain = proposal(policy=p, reviews=one, scope={"kind": "fixed_in"})
     assert pipeline.authorize(plain, pipeline.verify(plain)[1], merger)
     risky = proposal(policy=p, reviews=one, scope={"kind": "not_affected"})
     no = pipeline.authorize(risky, pipeline.verify(risky)[1], merger)
@@ -138,6 +138,11 @@ def test_a_merged_git_ref_is_stored_and_shown_with_its_claim(world):
     assert client.get(f"/v1/evidence/{git[0]['id']}").json()["evidence"]["git"]["tag"] == "langchain-core==0.2.43"
     with psycopg.connect(url) as c:
         assert c.execute("SELECT count(*) FROM evidence WHERE kind = 'git_ref'").fetchone()[0] == 1
+    prov = client.get(f"/v1/claims/{cid}/provenance")
+    assert prov.status_code == 200, prov.text
+    commits = [n for n in prov.json()["nodes"] if n["kind"] == "commit"]
+    assert len(commits) == 1 and commits[0]["commit"] == COMMIT
+    assert not any(n["id"] == "source:None" for n in prov.json()["nodes"])
 
 
 @pytest.mark.db
@@ -148,7 +153,8 @@ def test_claim_reviews_use_the_claims_own_rules(world):
     client, h, url = world
     rules = client.get(f"/v1/repos/{PILOT}").json()["repository"]["policy"]
     r = client.patch(f"/v1/repos/{PILOT}", headers=h["admin"],
-                     json={"policy": rules | {"overrides": [{"kind": "not_affected", "required_reproductions": 1}]}})
+                     json={"policy": rules | {"kinds": ["fixed_in", "not_affected"],
+                                              "overrides": [{"kind": "not_affected", "required_reproductions": 1}]}})
     assert r.status_code == 200, r.json()
     plain, risky = reader_claim(url), reader_claim(url, text=QUOTE + " ")
     with psycopg.connect(url) as c:
@@ -156,3 +162,36 @@ def test_claim_reviews_use_the_claims_own_rules(world):
     assert review(client, h["ext"], plain, "approve").json()["state"] == "supported"
     held = review(client, h["ext"], risky, "approve").json()
     assert held["state"] == "under_review" and held["reasons"] == ["0 independent reproduction(s), policy needs 1"]
+
+
+# from the review of PR #102
+
+def test_kind_overrides_cant_be_dodged():
+    with pytest.raises(ValidationError, match="aren't in kinds"):
+        Policy(overrides=[{"kind": "not_affected", "required_approvals": 3}])          # kind not declared
+    p = STRICT.model_copy(update={"kinds": ("fixed_in", "not_affected")})
+    assert "claim_kind" in failed(proposal(policy=p))                                  # no scope.kind
+    assert "claim_kind" in failed(proposal(policy=p, scope={"kind": "not-affected"}))  # misspelt
+    assert "claim_kind" not in failed(proposal(policy=p, scope={"kind": "not_affected"}))
+    assert "claim_kind" not in failed(proposal())                                      # repositories without kinds
+
+
+def test_matching_overrides_combine_to_the_strictest():
+    p = Policy(kinds=("not_affected",), overrides=[{"type": "empirical", "required_approvals": 3},
+                                                   {"kind": "not_affected", "required_approvals": 2, "human_approval": True}])
+    got = p.for_claim("empirical", {"kind": "not_affected"})
+    assert (got.required_approvals, got.human_approval) == (3, True)
+
+
+def test_allowed_evidence_always_includes_passages():
+    with pytest.raises(ValidationError, match="must include document_span"):
+        Policy(allowed_evidence=("git_ref",))
+
+
+def test_git_refs_have_one_spelling_and_real_tag_names():
+    a = GitRef(**REF | {"repo_url": "https://GitHub.com/LangChain-AI/langchain.git/"})
+    assert a.repo_url == "https://github.com/langchain-ai/langchain"
+    for bad in ({"tag": "HEAD"}, {"tag": "v1@{1}"}, {"tag": "v1.lock"}, {"path": "-rf"}, {"path": ":(glob)**"},
+                {"repo_url": "https://github.com/o/.."}, {"repo_url": "https://github.com/-o/r"}):
+        with pytest.raises(ValidationError):
+            GitRef(**REF | bad)

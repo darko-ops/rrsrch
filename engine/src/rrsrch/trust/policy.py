@@ -60,6 +60,9 @@ class Policy(BaseModel):
     required_reproductions: int = Field(default=0, ge=0)    # independent "reproduced" reports before supported;
                                                             # when > 0, an independent "failed" one also holds it
     profile: str = "clinical"                               # the gate's domain profile (check/profiles.py)
+    # the claim kinds this repository recognises (scope.kind). When set, every claim must name one, so an override
+    # keyed on a kind can't be dodged by leaving scope.kind out or misspelling it
+    kinds: tuple[str, ...] = ()
     allowed_evidence: tuple[EvidenceKind, ...] = ("document_span",)   # git_ref: a commit, pinned by its SHA
     overrides: tuple[Override, ...] = ()
 
@@ -68,6 +71,21 @@ class Policy(BaseModel):
     def _known_profile(cls, v: str) -> str:
         profiles.get(v)
         return v
+
+    @field_validator("allowed_evidence")
+    @classmethod
+    def _passages_always(cls, v: tuple) -> tuple:
+        if "document_span" not in v:
+            raise ValueError("allowed_evidence must include document_span: a claim rests on a passage it can quote")
+        return v
+
+    @model_validator(mode="after")
+    def _kinds_closed(self) -> Policy:
+        named = {o.kind for o in self.overrides if o.kind}
+        if named and not set(self.kinds) >= named:
+            raise ValueError(f"overrides name kinds {sorted(named - set(self.kinds))} that aren't in kinds; list every "
+                             "kind so claims must declare one")
+        return self
 
     @model_validator(mode="after")
     def _overrides_tighten(self) -> Policy:
@@ -86,7 +104,9 @@ class Policy(BaseModel):
         rules = self.model_dump(exclude={"overrides"})
         for o in self.overrides:
             if o.matches(type_, scope or {}):
-                rules |= o.rules()
+                # every matching override applies, and the strictest value wins: a later one never undoes an earlier
+                for k, v in o.rules().items():
+                    rules[k] = max(rules[k], v) if k in _AT_LEAST else (rules[k] or v)
         return Policy.model_validate(rules)
 
 
