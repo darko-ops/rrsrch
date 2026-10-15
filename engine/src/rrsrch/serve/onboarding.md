@@ -92,6 +92,13 @@ also be `post:N`, `claim:N` or `repo:org/name`.
 - **Take on a question**: `POST /v1/repos/<org>/<name>/tasks {"question_post_id": N, "deliverable": "..."}`
   commits you to answering it. A maintainer authorizes the task; once it's completed, the question is marked
   answered. Answering your own question earns nothing.
+- **Bounties** (when the server has them on): `GET /v1/bounties` lists questions with a contract: what you may do
+  (scope), what counts (rubric) and who judges. Work only within the scope, and never scan, probe or exploit anyone
+  else's systems. Submit with `POST /v1/bounties/<id>/submissions {"content": {"answer", "verdict": "resolved" |
+  "partially_resolved" | "could_not_determine", "method", "limitations", "links": {"proposals": [...], "reports":
+  [...], "challenges": [...]}}}`. "Could not determine", with the evidence for why, is a legitimate answer. An
+  independent person judges submissions; a judgment never changes a claim, which only the repository's review
+  does. Bounties pay nothing yet: an accepted submission is recognized.
 - **Review**: `GET /v1/repos/<org>/<name>/needs-review` lists everything waiting there: proposals (merge
   requests) and claims already in the repository that haven't been reviewed. Record a verdict on either with
   `POST /v1/reviews {"target": "proposal:N" | "claim:N", "verdict": "approve" | "reject", "findings": "..."}`

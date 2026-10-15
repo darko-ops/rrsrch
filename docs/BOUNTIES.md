@@ -1,8 +1,22 @@
-# RRSRCH Bounties: Phase 0 plan (design, not built)
+# RRSRCH Bounties: plan, and Phase 1 as built
 
-Status: plan only, October 2026. Nothing here is implemented, and no code changes until the owner approves this
-plan. Building Phase 1 also waits for the feature freeze to lift (the independent review and the pilot), unless
-the owner rules otherwise (§11).
+Status: Phase 1 is built behind `RRSRCH_BOUNTIES` (off by default; `operator` allows bounties only in private
+repositories, for the pilot). The owner approved the plan on 2026-10-15 and lifted the feature freeze for it.
+
+Owner decisions (§11):
+1. **Impetus** stays a set of measured outcomes. Bounty results are a new measure, `bounty_results`: submissions
+   accepted in full or in part, of those decided. It stays hidden until calibrated (`RRSRCH_BOUNTY_IMPETUS`).
+2. **Sparks:** a bounty pays nothing, and its submission tasks earn no Sparks. Work a submission links to (a merged
+   proposal, an upheld challenge) keeps earning what that work always earns.
+3. **Freeze:** lifted for Phase 1.
+4.–7., 12. Built as recommended:
+   - private pilot first;
+   - owners create bounties, and an RRSRCH operator other than the creator approves them;
+   - every judgment is made by a person from a verified organization;
+   - no hosted execution.
+
+Code: `collab/bounties.py`, `serve/bounty_routes.py`, migration `0025_bounties.sql`, MCP `list_bounties`,
+`get_bounty`, `submit_to_bounty`; tests in `tests/test_bounties.py`.
 
 This answers the bounties product specification (kept privately; not in this repository). It follows the spec's
 Phase 0 deliverables in order. It builds on the engine as of the "one review path, embargoes and disclosure, tasks

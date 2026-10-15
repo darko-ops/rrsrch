@@ -20,6 +20,7 @@ claim's review state: standing describes agents, policy and review decide claims
 from __future__ import annotations
 
 import math
+import os
 from collections import defaultdict
 
 import psycopg
@@ -66,7 +67,8 @@ _OUTCOME_SQL = {
         # agent's question counts and answering your own never does
         "SELECT 'task:' || t.id, t.repository_id FROM research_tasks t "
         "LEFT JOIN research_posts q ON q.id = t.question_post_id WHERE t.assignee_id = %(a)s "
-        "AND t.state = 'completed' AND coalesce(q.author_id, t.created_by) <> %(a)s",
+        "AND t.state = 'completed' AND coalesce(q.author_id, t.created_by) <> %(a)s "
+        "AND t.bounty_id IS NULL",               # a bounty pays nothing: no Sparks for its submissions (BOUNTIES.md)
     "reproduction_decided":
         "SELECT DISTINCT 'claim:' || c.id || ':reproduction', c.repository_id FROM verification_reports v "
         "JOIN claims c ON v.target = 'claim:' || c.id WHERE v.author_id = %(a)s AND v.context = 'reproduction' "
@@ -155,7 +157,7 @@ def outcomes(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) 
               "  WHERE rv.reviewer_id = %(a)s AND rv.verdict IN ('approve', 'reject') AND m.state IN ('merged', 'rejected')"
               ") x JOIN repositories r ON r.id = x.rid WHERE {vis}")
     rel = one("SELECT count(*) FILTER (WHERE t.state = 'completed'), count(*) FROM research_tasks t "
-              "JOIN repositories r ON r.id = t.repository_id WHERE t.assignee_id = %(a)s "
+              "JOIN repositories r ON r.id = t.repository_id WHERE t.assignee_id = %(a)s AND t.bounty_id IS NULL "
               "AND t.state IN ('completed', 'failed', 'expired') AND {vis}")
     use = one("SELECT count(*) FILTER (WHERE v.outcome IN ('worked', 'worked_with_conditions')), count(*) "
               "FROM verification_reports v JOIN repositories r ON r.id = v.repository_id WHERE v.context = 'usage' "
@@ -171,7 +173,23 @@ def outcomes(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) 
         _measure("review_judgement", "its reviews the final decision agreed with, of those decided", *rev),
         _measure("reliability", "research tasks it completed, of those assigned to it that ended", *rel),
         _measure("usefulness", "independent usage reports on its work that worked, of those with a result", *use),
-    ]
+    ] + _bounty_measures(one)
+
+
+def _bounty_measures(one) -> list[dict]:
+    """Bounty outcomes, as measures like the rest (docs/BOUNTIES.md §11): its submissions a judge accepted, in full
+    or in part, of those decided. Hidden until calibrated on adjudicated cases (RRSRCH_BOUNTY_IMPETUS=on)."""
+    if os.environ.get("RRSRCH_BOUNTY_IMPETUS", "off").strip().lower() != "on":
+        return []
+    got = one("SELECT count(*) FILTER (WHERE s.state IN ('accepted', 'partially_accepted')), count(*), "
+              "count(*) FILTER (WHERE s.state = 'accepted' AND (SELECT content->>'verdict' FROM "
+              "  bounty_submission_revisions v WHERE v.submission_id = s.id ORDER BY version DESC LIMIT 1) "
+              "  = 'could_not_determine') "
+              "FROM bounty_submissions s JOIN bounties b ON b.id = s.bounty_id JOIN repositories r "
+              "ON r.id = b.repository_id WHERE s.agent_id = %(a)s "
+              "AND s.state IN ('accepted', 'partially_accepted', 'rejected') AND {vis}")
+    return [_measure("bounty_results", "its bounty submissions a judge accepted, fully or in part, of those decided",
+                     got[0], got[1], accepted_inconclusive=got[2])]
 
 
 def conduct(conn: psycopg.Connection, agent_id: int) -> dict:
