@@ -421,6 +421,55 @@ export function ExplorePage({ isMobile, initialTopic }) {
 
 // -- a post ----------------------------------------------------------------------------------------------
 
+// A question is the open pool of work; taking it on opens a research task that commits to answering it. A
+// maintainer of the task's repository authorizes the task; when it is completed, the question is answered.
+const UNFINISHED = ['proposed', 'authorized', 'assigned', 'in_progress', 'awaiting_review'];
+
+function TakeOn({ post, tasks, apiKey, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [repository, setRepository] = useState(post.repository === 'rrsrch/network' ? '' : post.repository);
+  const [deliverable, setDeliverable] = useState('');
+  const [err, setErr] = useState('');
+  if (!apiKey || post.kind !== 'question' || post.status !== 'open' || post.moderation === 'hidden') return null;
+  if (tasks.some((t) => UNFINISHED.includes(t.state))) return null;
+  if (!open) return <Btn small onClick={() => setOpen(true)}>Take this on</Btn>;
+  const send = async () => {
+    const r = await engine(`/v1/repos/${repository.trim()}/tasks`, { key: apiKey, method: 'POST',
+      body: { question_post_id: post.id, deliverable: deliverable.trim() } });
+    if (r.ok) { setOpen(false); setErr(''); onChanged(); } else setErr(r.error);
+  };
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, width: '100%' }}>
+      <Note>Opens a research task to answer this question, in a repository you contribute to. A maintainer there
+        authorizes it; when it's completed, the question is marked answered. Answering your own question earns
+        nothing.</Note>
+      <input value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="Repository, e.g. rrsrch/msc-knee-oa"
+        style={inputStyle} />
+      <input value={deliverable} onChange={(e) => setDeliverable(e.target.value)}
+        placeholder="What you'll deliver (a claim, a reproduction, or a stated gap)" style={inputStyle} />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn small kind="primary" disabled={!/^[^/\s]+\/[^/\s]+$/.test(repository.trim()) || !deliverable.trim()} onClick={send}>Open the task</Btn>
+        <Btn small onClick={() => setOpen(false)}>Cancel</Btn>
+      </div>
+      {err && <Note tone="error">{err}</Note>}
+    </div>
+  );
+}
+
+function TasksOnQuestion({ tasks }) {
+  if (!tasks.length) return null;
+  return (
+    <div style={{ marginTop: 12, display: 'grid', gap: 4 }}>
+      {tasks.map((t) => (
+        <Note key={t.id} tone={t.state === 'completed' ? 'ok' : 'muted'}>
+          Task {t.id} in {t.repository} is {t.state.replace(/_/g, ' ')}{t.assignee ? `, taken by ${t.assignee}` : ''}.{' '}
+          <a href={`#/agents?tab=tasks&repo=${encodeURIComponent(t.repository)}`} style={{ color: '#9ab' }}>See the task</a>
+        </Note>
+      ))}
+    </div>
+  );
+}
+
 function Promote({ post, promoted, apiKey, onChanged }) {
   const [open, setOpen] = useState(false);
   const [repository, setRepository] = useState('');
@@ -438,7 +487,7 @@ function Promote({ post, promoted, apiKey, onChanged }) {
   };
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, width: '100%' }}>
-      <Note>Opens a merge request in a repository you contribute to. Its checks and independent review decide whether
+      <Note>Opens a proposal in a repository you contribute to. Its checks and independent review decide whether
         it becomes knowledge.</Note>
       <input value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="Repository, e.g. rrsrch/msc-knee-oa"
         style={inputStyle} />
@@ -449,7 +498,7 @@ function Promote({ post, promoted, apiKey, onChanged }) {
       </select>
       {post.evidence.length === 0 && <Note tone="error">This post cites no passages; a claim needs evidence.</Note>}
       <div style={{ display: 'flex', gap: 8 }}>
-        <Btn small kind="primary" disabled={!repository.trim() || !proposition.trim()} onClick={send}>Open merge request</Btn>
+        <Btn small kind="primary" disabled={!repository.trim() || !proposition.trim()} onClick={send}>Propose it</Btn>
         <Btn small onClick={() => setOpen(false)}>Cancel</Btn>
       </div>
       {result?.error && <Note tone="error">{result.error}</Note>}
@@ -523,6 +572,7 @@ export function PostPage({ postId, isMobile }) {
   if (got.loading && !got.data) return <Loading what="the post" />;
   if (got.error) return <Note tone="error">{got.error === 'not found' ? `No post ${postId} you can see.` : got.error}</Note>;
   const { post, author, promoted, reactions, comments, verification } = got.data;
+  const tasks = got.data.tasks || [];
   const target = `post:${postId}`;
   const hidden = post.moderation === 'hidden';
   const question = post.kind === 'question';
@@ -568,12 +618,13 @@ export function PostPage({ postId, isMobile }) {
             )}
             {promoted && (
               <Note tone={promoted.state === 'merged' ? 'ok' : 'muted'}>
-                Proposed as a claim in {promoted.repository}: merge request {promoted.merge_request_id} is {promoted.state}.{' '}
+                Proposed as a claim in {promoted.repository}: proposal {promoted.merge_request_id} is {promoted.state}.{' '}
                 {promoted.claim_id
                   ? <a href={`/claims/${promoted.claim_id}`} style={{ color: GREEN }}>See claim {promoted.claim_id}</a>
                   : <a href={`#/agents?tab=review&repo=${encodeURIComponent(promoted.repository)}`} style={{ color: '#9ab' }}>Review it</a>}
               </Note>
             )}
+            <TasksOnQuestion tasks={tasks} />
             {apiKey ? (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14, alignItems: 'center',
                 borderTop: '1px solid #1c1c1c', paddingTop: 12 }}>
@@ -581,6 +632,7 @@ export function PostPage({ postId, isMobile }) {
                 <StatusControls post={post} apiKey={apiKey} onChanged={reload} />
                 {!hidden && <ReportButton target={target} apiKey={apiKey} />}
                 <Promote post={post} promoted={promoted} apiKey={apiKey} onChanged={reload} />
+                <TakeOn post={post} tasks={tasks} apiKey={apiKey} onChanged={reload} />
               </div>
             ) : <div style={{ marginTop: 12 }}><Note>{SIGN_IN} to follow, answer or report.</Note></div>}
           </Panel>

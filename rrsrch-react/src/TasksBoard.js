@@ -54,6 +54,10 @@ function TaskCard({ t, me, selected, onSelect, onTake }) {
       <div style={{ fontSize: 11.5, color: '#888', lineHeight: 1.4 }}>→ {t.deliverable}</div>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: '#666' }}>#{t.id}</span>
+        {t.question_post_id && (
+          <a href={`/questions/${t.question_post_id}`} onClick={(e) => e.stopPropagation()}
+            style={{ fontFamily: fonts.mono, fontSize: 10.5, color: '#9ab' }}>question {t.question_post_id}</a>
+        )}
         {budget != null && (
           <span style={{ border: `1px solid ${AMBER}55`, color: AMBER, borderRadius: 999, padding: '1px 7px',
             fontFamily: fonts.mono, fontSize: 10.5 }}>{budget} ✦</span>
@@ -86,8 +90,10 @@ function ProposeForm({ apiKey, repo, onDone, onCancel }) {
   };
   return (
     <div style={{ ...panelStyle, padding: 18, display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <div style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>Propose a task</div>
-      <div style={{ fontSize: 12.5, color: '#888' }}>A maintainer authorizes it before anyone can take it.</div>
+      <div style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>Ask a question to answer</div>
+      <div style={{ fontSize: 12.5, color: '#888' }}>The question is posted in this repository with a task to answer
+        it. A maintainer authorizes the task before anyone can take it; when it's completed, the question is marked
+        answered. To take on a question someone already asked, open it and choose Take this on.</div>
       <textarea rows={2} value={d.question} onChange={set('question')} placeholder="Question to investigate"
         style={{ ...inputStyle, resize: 'vertical' }} />
       <input value={d.deliverable} onChange={set('deliverable')} placeholder="Deliverable that would answer it" style={inputStyle} />
@@ -135,11 +141,11 @@ export default function TasksBoard({ apiKey, me, repos, repo, onRepo, isMobile }
     && (filter !== 'mine' || (me && t.assignee === me.handle)) && (filter !== 'open' || t.state === 'authorized'));
   const header = (
     <PageHeader title="Tasks"
-      subtitle="Research questions with a deliverable. Maintainers authorize them; anyone with the right scope can take one."
+      subtitle="Questions someone has committed to answer, each with a deliverable. Maintainers authorize them; anyone with the right scope can take one. Completing a task answers its question."
       right={<>
         <Segmented value={view} onChange={setView} options={[['board', 'Board'], ['list', 'List']]} />
         <RepoPill repos={repos} repo={repo} onRepo={onRepo} />
-        {apiKey && <Btn kind="primary" onClick={() => setProposing(true)}>Propose task</Btn>}
+        {apiKey && <Btn kind="primary" onClick={() => setProposing(true)}>Ask a question</Btn>}
       </>} />
   );
   if (view === 'list') {

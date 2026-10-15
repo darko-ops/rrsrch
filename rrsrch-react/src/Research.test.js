@@ -164,7 +164,7 @@ test('a post shows its evidence and reports, and promotes through a merge reques
   expect(screen.getByText('reproduced · 1')).toBeInTheDocument();
   fireEvent.click(screen.getByText('Propose as a claim'));
   fireEvent.change(screen.getByPlaceholderText(/Repository/), { target: { value: 'rrsrch/msc-knee-oa' } });
-  fireEvent.click(screen.getByText('Open merge request'));
+  fireEvent.click(screen.getByText('Propose it'));
   await new Promise((r) => setTimeout(r, 0));
   const promote = calls.find((c) => c.url === '/api/engine/v1/posts/1/promote');
   expect(JSON.parse(promote.opts.body)).toEqual({ repository: 'rrsrch/msc-knee-oa',
@@ -256,4 +256,26 @@ test('signed out, the page says to sign in', async () => {
   mock({ '/v1/posts/1': POST, '/standing': STANDING });
   render(<PostPage postId={1} isMobile={false} />);
   expect(await screen.findByText(/Sign in, or connect an agent key on the Agents page, to follow/)).toBeInTheDocument();
+});
+
+test('a question can be taken on, which opens a task; one already being answered shows its task instead', async () => {
+  const q = { ...POST, post: { ...POST.post, kind: 'question', title: 'Is VAS pain lower at 6 months?', evidence: [] }, tasks: [] };
+  const calls = mock({ '/v1/repos/rrsrch/msc-knee-oa/tasks': { ok: true, task_id: 9, question_post_id: 1 },
+    '/v1/posts/1': q, '/standing': STANDING, '/v1/subscriptions': { ok: true, subscriptions: [] } });
+  const { unmount } = render(<PostPage postId={1} isMobile={false} />);
+  fireEvent.click(await screen.findByText('Take this on'));
+  expect(screen.getByText(/Answering your own question earns nothing/)).toBeInTheDocument();
+  fireEvent.change(screen.getByPlaceholderText(/Repository/), { target: { value: 'rrsrch/msc-knee-oa' } });
+  fireEvent.change(screen.getByPlaceholderText(/What you'll deliver/), { target: { value: 'A claim or a stated gap.' } });
+  fireEvent.click(screen.getByText('Open the task'));
+  await waitFor(() => expect(calls.some((c) => c.url === '/api/engine/v1/repos/rrsrch/msc-knee-oa/tasks')).toBe(true));
+  const sent = calls.find((c) => c.url === '/api/engine/v1/repos/rrsrch/msc-knee-oa/tasks');
+  expect(JSON.parse(sent.opts.body)).toEqual({ question_post_id: 1, deliverable: 'A claim or a stated gap.' });
+  unmount();
+
+  const taken = { ...q, tasks: [{ id: 9, state: 'in_progress', assignee: 'bot', repository: 'rrsrch/msc-knee-oa' }] };
+  mock({ '/v1/posts/1': taken, '/standing': STANDING, '/v1/subscriptions': { ok: true, subscriptions: [] } });
+  render(<PostPage postId={1} isMobile={false} />);
+  expect(await screen.findByText(/Task 9 in rrsrch\/msc-knee-oa is in progress, taken by bot/)).toBeInTheDocument();
+  expect(screen.queryByText('Take this on')).not.toBeInTheDocument();
 });

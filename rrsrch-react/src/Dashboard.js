@@ -3,7 +3,7 @@
  *
  *   Agents & keys            connect with an engine API key; admins register agents and issue/revoke keys
  *   Atlas                    a repository's knowledge as a map: agents → claims → sources → trials
- *   Review & collaboration   merge requests, reviews, discussions, research tasks, inbox
+ *   Review & collaboration   one Review page (proposals and unreviewed claims), research tasks, inbox
  *   Account                  the site account (sign-in, backpack, paired devices)
  *
  * Every call goes to the engine through the site (/api/engine/v1/...), with the visitor's own key. The
@@ -771,7 +771,7 @@ function ClaimQueue({ apiKey, repo }) {
     [repo, apiKey, after]);
   useEffect(() => { setAfter(0); }, [repo]);
   return (
-    <Panel title="Claims to review" right={queue.data && <Chip color={AMBER}>{queue.data.waiting} waiting</Chip>}>
+    <Panel title="Claims already in the repository, not yet reviewed" right={queue.data && <Chip color={AMBER}>{queue.data.waiting} waiting</Chip>}>
       <p style={{ margin: '0 0 6px', color: '#999', fontSize: 14, lineHeight: 1.6 }}>
         Check each claim against its passage: approve only if the passage supports it exactly as worded. The
         repository's policy decides when a claim is supported; the result shows what, if anything, still holds it.
@@ -811,7 +811,7 @@ function MergeRequestDetail({ id, apiKey, onChanged }) {
     setMsg(r.ok ? { text: done, tone: 'ok' } : { text: r.error, tone: 'error' });
     if (r.ok) { reload(); onChanged(); }
   };
-  if (state.loading) return <Loading what="merge request" />;
+  if (state.loading) return <Loading what="proposal" />;
   if (state.error) return <Note tone="error">{state.error}</Note>;
   const { merge_request: mr, reviews, checks, merge_preview: preview } = state.data;
   const open = mr.state === 'open';
@@ -847,7 +847,7 @@ function MergeRequestDetail({ id, apiKey, onChanged }) {
       {open && (
         <div style={{ border: '1px solid #222', borderRadius: 10, padding: 12 }}>
           <div style={{ fontSize: 13, color: preview.allowed ? GREEN : '#aaa', marginBottom: preview.allowed ? 0 : 6 }}>
-            {preview.allowed ? 'Ready to merge.' : `Can't merge yet (${preview.approvals} independent approval${preview.approvals === 1 ? '' : 's'}):`}
+            {preview.allowed ? 'Ready to accept.' : `Can't be accepted yet (${preview.approvals} independent approval${preview.approvals === 1 ? '' : 's'}):`}
           </div>
           {!preview.allowed && preview.reasons.map((r) => <div key={r} style={{ fontSize: 12, color: '#888', padding: '1px 0' }}>· {r}</div>)}
         </div>
@@ -864,7 +864,7 @@ function MergeRequestDetail({ id, apiKey, onChanged }) {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Btn kind={preview.allowed ? 'primary' : 'ghost'} disabled={!preview.allowed}
-              onClick={() => act(`/v1/merge-requests/${id}/merge`, undefined, 'Merged.')}>Merge</Btn>
+              onClick={() => act(`/v1/merge-requests/${id}/merge`, undefined, 'Accepted into the repository.')}>Accept</Btn>
             <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} placeholder="reviewer handle"
               style={{ ...inputStyle, width: 160, fontFamily: fonts.mono }} />
             <Btn disabled={!reviewer.trim()} onClick={() => act(`/v1/merge-requests/${id}/review-requests`, { reviewer: reviewer.trim() }, `Asked ${reviewer.trim()} to review.`)}>Request review</Btn>
@@ -885,13 +885,13 @@ function MergeRequests({ apiKey, repo, isMobile }) {
   useEffect(() => { setSelected(null); }, [repo, state]);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1.2fr)', gap: 16 }}>
-      <Panel title="Merge requests" right={
+      <Panel title="Proposed changes" right={
         <select value={state} onChange={(e) => setState(e.target.value)} style={{ ...inputStyle, padding: '6px 10px' }}>
           {['open', 'merged', 'rejected', 'withdrawn'].map((s) => <option key={s} value={s}>{s}</option>)}
         </select>}>
-        {list.loading && <Loading what="merge requests" />}
+        {list.loading && <Loading what="proposals" />}
         {list.error && <Note tone="error">{list.error}</Note>}
-        {list.data && list.data.items.length === 0 && <Note>No {state} merge requests.</Note>}
+        {list.data && list.data.items.length === 0 && <Note>{state === 'open' ? 'No proposals waiting.' : `No ${state} proposals.`}</Note>}
         {list.data && list.data.items.map((m) => (
           <button key={m.id} type="button" onClick={() => setSelected(m.id)} style={{
             display: 'block', width: '100%', textAlign: 'left', background: selected === m.id ? '#161616' : 'transparent',
@@ -909,7 +909,7 @@ function MergeRequests({ apiKey, repo, isMobile }) {
       </Panel>
       <Panel title={selected ? `#${selected}` : 'Details'}>
         {selected ? <MergeRequestDetail id={selected} apiKey={apiKey} onChanged={reload} />
-          : <Note>Select a merge request to see its checks, reviews and whether it can merge.</Note>}
+          : <Note>Select a proposal to see its checks, reviews and whether it can be accepted.</Note>}
       </Panel>
     </div>
   );
@@ -1025,15 +1025,16 @@ function TaskDetail({ id, apiKey, me, onChanged }) {
 // -- the shell: a sidebar of pages (design handoff: agents pages, §1) ---------------------------------------
 
 const PAGES = {
-  agents: 'Agents', keys: 'Keys', queue: 'Review queue', merge: 'Merge requests', tasks: 'Tasks', inbox: 'Inbox',
+  agents: 'Agents', keys: 'Keys', review: 'Review', tasks: 'Tasks', inbox: 'Inbox',
   atlas: 'Atlas', account: 'Account',
 };
 const GROUPS = [
   ['Your agents', ['agents', 'keys']],
-  ['Review', ['queue', 'merge', 'tasks', 'inbox']],
+  ['Review', ['review', 'tasks', 'inbox']],
   ['Network', ['atlas']],
 ];
-const LEGACY_TABS = { review: 'queue' };
+// the review queue and merge requests were two pages for one job; links to either open the one Review page
+const LEGACY_TABS = { queue: 'review', merge: 'review' };
 
 function hashParams() {
   return new URLSearchParams(window.location.hash.split('?')[1] || '');
@@ -1060,8 +1061,9 @@ function SideItem({ id, active, count, tone, onPick, children }) {
 function Sidebar({ active, onPick, me, user, health, counts, isMobile }) {
   const who = me?.handle || user?.name;
   const c = counts || {};
-  const count = { agents: c.agents, keys: c.keys, queue: c.queue, merge: c.merge, tasks: c.tasks, inbox: c.inbox_unread };
-  const tone = { queue: c.queue ? AMBER : null, inbox: c.inbox_unread ? GREEN : null };
+  const waiting = c.queue == null && c.merge == null ? undefined : (c.queue || 0) + (c.merge || 0);
+  const count = { agents: c.agents, keys: c.keys, review: waiting, tasks: c.tasks, inbox: c.inbox_unread };
+  const tone = { review: waiting ? AMBER : null, inbox: c.inbox_unread ? GREEN : null };
   if (isMobile) {
     return (
       <nav style={{ display: 'flex', gap: 4, overflowX: 'auto', borderBottom: '1px solid #222', paddingBottom: 8 }}>
@@ -1240,17 +1242,12 @@ export default function Dashboard({ isMobile, initialTab }) {
     );
   } else if (tab === 'keys') {
     page = <KeysPage apiKey={apiKey} me={apiKey ? me : null} />;
-  } else if (tab === 'queue') {
+  } else if (tab === 'review') {
     page = (
-      <RepoPage title="Review queue" subtitle="Claims waiting for review. A claim becomes supported only by its repository's policy." {...repoProps}>
+      <RepoPage title="Review" subtitle="Everything in this repository waiting for review: proposed changes, then claims already in it that nobody has reviewed yet. The repository's policy decides what is accepted." {...repoProps}>
         {!acting && <Note>Reading is open to everyone. {SIGN_IN} to review.</Note>}
-        <ClaimQueue apiKey={acting} repo={repo} />
-      </RepoPage>
-    );
-  } else if (tab === 'merge') {
-    page = (
-      <RepoPage title="Merge requests" subtitle="Proposed changes to claims. Checks and independent reviews decide; maintainers merge." {...repoProps}>
         <MergeRequests apiKey={acting} repo={repo} isMobile={isMobile} />
+        <ClaimQueue apiKey={acting} repo={repo} />
       </RepoPage>
     );
   } else if (tab === 'tasks') {
@@ -1273,7 +1270,7 @@ export default function Dashboard({ isMobile, initialTab }) {
       <Sidebar active={tab} onPick={setTab} me={me} user={user} health={health} counts={counts} isMobile={isMobile} />
       <main style={{ minWidth: 0 }}>
         <React.Suspense fallback={<Loading what="the page" />}>{page}</React.Suspense>
-        {repos.error && ['queue', 'merge', 'tasks', 'atlas'].includes(tab) && <Note tone="error">{repos.error}</Note>}
+        {repos.error && ['review', 'tasks', 'atlas'].includes(tab) && <Note tone="error">{repos.error}</Note>}
       </main>
     </div>
   );

@@ -4,6 +4,8 @@
  *   Evidence and standing   formal: review state, verification, evidence, reviews, challenges and responses,
  *                           and reproduction and usage reports (evidence for reviewers, phase 2).
  *                           Only the repository's policy and the trust engine change this.
+ *   Disclosure              an embargo, and the record of who was told what (Disclosure.js); shown when there is
+ *                           one, or to signed-in maintainers who can add to it.
  *   Community feedback      informal: reactions and threaded comments. Helps people find and improve
  *                           knowledge; never changes the claim's review state.
  *
@@ -16,6 +18,7 @@ import {
   Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
 } from './Dashboard';
 import CommitEvidence, { isCommit } from './CommitEvidence';
+import Disclosure from './Disclosure';
 
 const STATE_MEANING = {
   supported: 'Passed its repository\'s policy and independent review.',
@@ -243,6 +246,8 @@ export default function ClaimPage({ claimId, isMobile }) {
         <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 22 : 30, fontWeight: 700, lineHeight: 1.3,
           letterSpacing: '-0.02em' }}>{claim.proposition}</h1>
       </div>
+
+      <Disclosure claimId={claimId} apiKey={apiKey} />
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.15fr) minmax(0, 1fr)', gap: 20,
         alignItems: 'start' }}>
