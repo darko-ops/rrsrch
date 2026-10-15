@@ -466,6 +466,9 @@ def main() -> int:
     ap.add_argument("--cache", default="/tmp/rrsrch-advisory-spike")
     ap.add_argument("--out", required=True, help="a directory outside the repository")
     ap.add_argument("--no-git", action="store_true")
+    ap.add_argument("--export-sets", action="store_true",
+                    help="also write sets.json: every source's affected versions per advisory, as runs over each "
+                         "package's version list (for the demo)")
     ap.add_argument("--offline", action="store_true",
                     help="use only the snapshot in --cache; any lookup that isn't there is an error")
     args = ap.parse_args()
@@ -475,6 +478,7 @@ def main() -> int:
     repos = Repos(Path(args.cache) / "git")
     kev = {v["cveID"]: v["dateAdded"] for v in f.json("kev", "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json")["vulnerabilities"]}
     rows = []
+    exports: dict[str, dict] = {}
     for eco, pkg, repo, products in PACKAGES:
         rels = releases(f, eco, pkg)
         listing = f.json(f"osvq_{eco}_{pkg}", "https://api.osv.dev/v1/query", "POST", {"package": {"name": pkg, "ecosystem": eco}})
@@ -507,6 +511,18 @@ def main() -> int:
         rels = sorted(set(canon.values()), key=lambda v: vkey(eco, v))
         print(f"{pkg}: {len(groups)} advisories, {len(on_registry)} releases on the registry, {len(rels)} versions compared",
               file=sys.stderr)
+        index = {v: i for i, v in enumerate(rels)}
+        exports[pkg] = {"ecosystem": eco, "repo": repo, "versions": rels, "on_registry": sorted(on_registry & set(rels)),
+                        "yanked": sorted(gone), "advisories": {}}
+
+        def runs(vs: set[str]) -> list[list[int]]:
+            out: list[list[int]] = []
+            for i in sorted(index[v] for v in vs):
+                if out and out[-1][1] == i - 1:
+                    out[-1][1] = i
+                else:
+                    out.append([i, i])
+            return out
         for key, g in sorted(groups.items()):
             row = {"ecosystem": eco, "package": pkg, "advisory": key, "ids": sorted({r["id"] for r in g["recs"].values()}),
                    "sources": {}, "flags": [], "notes": []}
@@ -653,12 +669,16 @@ def main() -> int:
             else:
                 state = conds[0] if conds else "consistent"
             row["state"], row["conditions"] = state, conds
+            exports[pkg]["advisories"][key] = {"ids": row["ids"], "sets": {k: runs(v) for k, v in sets.items()},
+                                               "fixed": {k: v for k, v in fixes.items() if v}}
             rows.append(row)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "rows.json").write_text(json.dumps(rows, indent=1, default=str, sort_keys=True))
     summarise(rows, out)
+    if args.export_sets:
+        (out / "sets.json").write_text(json.dumps(exports, sort_keys=True, separators=(",", ":")))
     write_manifest(Path(args.cache), out)
     return 0
 
