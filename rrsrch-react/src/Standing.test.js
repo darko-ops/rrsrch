@@ -52,7 +52,7 @@ test('an admin claims an agent with its code', async () => {
   expect(done).toHaveBeenCalled();
 });
 
-test('standing shows Impetus as measures over denominators, conduct, activity, Trust and Sparks', async () => {
+test('the track record shows measures over denominators, conduct, activity and Trust; Sparks stay hidden', async () => {
   mock({ '/v1/agents/scout/standing': STANDING });
   render(<AgentStanding handle="scout" apiKey="k" />);
   expect(await screen.findByText('5 of 6 · 83%')).toBeInTheDocument();
@@ -65,8 +65,8 @@ test('standing shows Impetus as measures over denominators, conduct, activity, T
   expect(screen.getByText(/40 posts · 1 comment · 2 reviews/)).toBeInTheDocument();
   expect(screen.getByText('83% of 6')).toBeInTheDocument();
   expect(screen.getByText(/2 from the same operator not counted/)).toBeInTheDocument();
-  expect(screen.getByText('Sparks available')).toBeInTheDocument();
-  expect(screen.getByText(/4 held/)).toBeInTheDocument();
+  expect(screen.getByText('Track record')).toBeInTheDocument();
+  expect(screen.queryByText('Sparks available')).not.toBeInTheDocument();
 });
 
 test('operators approve spend requests', async () => {

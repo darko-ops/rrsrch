@@ -11,7 +11,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, Check, RefreshCw, X } from 'lucide-react';
-import { JoinPanel, ClaimAgent, AgentStanding, SparkRequests, OrgVerifications } from './Standing';
+import { JoinPanel, ClaimAgent, AgentStanding, OrgVerifications } from './Standing';
 import { PageHeader, RepoPill } from './AgentsChrome';
 import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 
@@ -309,7 +309,7 @@ function AgentRow({ agent, apiKey, me, isAdmin }) {
         {isMe && <Chip color={GREEN}>you</Chip>}
         {agent.registered_via === 'self' && <Chip title="signed itself up, then was claimed">self-registered</Chip>}
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-          <Btn small onClick={() => setOpen(open === 'standing' ? null : 'standing')}>Standing</Btn>
+          <Btn small onClick={() => setOpen(open === 'standing' ? null : 'standing')}>Track record</Btn>
           {canManage && <Btn small onClick={() => setOpen(open === 'keys' ? null : 'keys')}>Keys</Btn>}
           {canManage && status === 'active' && (
             <Btn small onClick={() => setOpen(open === 'issue' ? null : 'issue')}>Issue key</Btn>
@@ -406,7 +406,6 @@ function AgentsTab({ apiKey, me }) {
       )}
       {isAdmin && <ClaimAgent apiKey={apiKey} org={org} onClaimed={reload} />}
       {isAdmin && org === 'rrsrch' && <OrgVerifications apiKey={apiKey} />}
-      {isAdmin && org === 'rrsrch' && <SparkRequests apiKey={apiKey} />}
       <Panel title={`Agents in ${org}`} right={<Btn small onClick={reload}><RefreshCw size={12} /></Btn>}>
         {agents.loading && <Loading what="agents" />}
         {agents.error && <Note tone="error">{agents.error}</Note>}
@@ -1036,6 +1035,8 @@ const GROUPS = [
 ];
 // the review queue and merge requests were two pages for one job; links to either open the one Review page
 const LEGACY_TABS = { queue: 'review', merge: 'review' };
+// pages kept but out of the sidebar (docs/SIMPLIFY.md): links still open them
+const SIMPLIFIED_AWAY = ['tasks', 'atlas'];
 
 function hashParams() {
   return new URLSearchParams(window.location.hash.split('?')[1] || '');
@@ -1280,7 +1281,8 @@ export default function Dashboard({ isMobile, initialTab }) {
     <div style={{ fontFamily: fonts.main, display: isMobile ? 'grid' : 'grid', gap: isMobile ? 16 : 32,
       gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '220px minmax(0, 1fr)', alignItems: 'start' }}>
       <Sidebar active={tab} onPick={setTab} me={me} user={user} health={health} counts={counts} isMobile={isMobile}
-        hidden={bountiesMode === 'off' && tab !== 'bounties' ? ['bounties'] : []} />
+        hidden={[...SIMPLIFIED_AWAY, ...(bountiesMode === 'on' || (bountiesMode === 'operator' && me?.organization_id === 'rrsrch'
+          && me?.org_role === 'admin') ? [] : ['bounties'])].filter((id) => id !== tab)} />
       <main style={{ minWidth: 0 }}>
         <React.Suspense fallback={<Loading what="the page" />}>{page}</React.Suspense>
         {repos.error && ['review', 'tasks', 'atlas'].includes(tab) && <Note tone="error">{repos.error}</Note>}

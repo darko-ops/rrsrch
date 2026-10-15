@@ -66,9 +66,8 @@ test('explore lists posts in the engine order, with kinds, evidence, unclaimed a
   expect(screen.getByText('· needs an answer')).toBeInTheDocument();
   expect(screen.getByText('cites 2 passages')).toBeInTheDocument();
   expect(screen.getByText('no citations')).toBeInTheDocument();
-  expect(screen.getByText('75% useful · 4 responses')).toBeInTheDocument();
-  expect(screen.getByText('No responses yet')).toBeInTheDocument();
-  expect(screen.getByText('2 posts, newest first. Reactions never change the order.')).toBeInTheDocument();
+  expect(screen.queryByTitle('Useful')).not.toBeInTheDocument();                 // no reactions (docs/SIMPLIFY.md)
+  expect(screen.getByText('2 posts, newest first.')).toBeInTheDocument();
   expect(screen.getByText(/not reviewed knowledge/)).toBeInTheDocument();
   expect(calls.find((c) => c.url.includes('/v1/explore')).url).toBe('/api/engine/v1/explore?sort=recent&limit=20');
 
@@ -99,57 +98,26 @@ test('the filter field sends q after a pause', async () => {
   await waitFor(() => expect(calls.some((c) => c.url.includes('q=womac'))).toBe(true));
 });
 
-test('quick feedback toggles and switches optimistically, and never reorders', async () => {
-  const calls = mock({ '/v1/explore': FEED, '/v1/subscriptions': { ok: true, subscriptions: [] },
-    '/v1/reactions': { ok: true } });
+test('people ask questions or share findings; the other post kinds are no longer offered', async () => {
+  mock({ '/v1/explore': FEED, '/v1/subscriptions': { ok: true, subscriptions: [] } });
   render(<ExplorePage isMobile={false} />);
-  await screen.findByText('75% useful · 4 responses');
-  const [up, down] = [screen.getAllByTitle('Useful')[1], screen.getAllByTitle('Needs work')[1]];
-  fireEvent.click(up);
-  expect(await screen.findByText('80% useful · 5 responses')).toBeInTheDocument();
-  await new Promise((r) => setTimeout(r, 0));
-  fireEvent.click(down);                                            // switch: remove useful, add needs work
-  expect(await screen.findByText('60% useful · 5 responses')).toBeInTheDocument();
-  await new Promise((r) => setTimeout(r, 0));
-  const reacts = calls.filter((c) => c.url.includes('/v1/reactions'));
-  expect(reacts.map((c) => [c.opts.method, c.opts.body ? JSON.parse(c.opts.body).kind : c.url.split('kind=')[1]]))
-    .toEqual([['POST', 'useful'], ['DELETE', 'useful'], ['POST', 'needs_work']]);
-  expect(calls.filter((c) => c.url.includes('/v1/explore')).length).toBe(1);    // no refetch, no reorder
-});
-
-test('quick feedback rolls back when the engine refuses', async () => {
-  global.fetch = jest.fn(async (url) => {
-    if (url.includes('/v1/reactions')) return { ok: false, status: 429, json: async () => ({ ok: false, error: 'too many reactions' }) };
-    if (url.includes('/v1/explore')) return { ok: true, status: 200, json: async () => FEED };
-    return { ok: true, status: 200, json: async () => ({ ok: true, subscriptions: [] }) };
-  });
-  render(<ExplorePage isMobile={false} />);
-  await screen.findByText('75% useful · 4 responses');
-  fireEvent.click(screen.getAllByTitle('Useful')[1]);
-  expect(await screen.findByText('too many reactions')).toBeInTheDocument();
-  expect(screen.getByText('75% useful · 4 responses')).toBeInTheDocument();
-});
-
-test('signed out, feedback buttons are disabled', async () => {
-  localStorage.clear();
-  mock({ '/v1/explore': FEED });
-  render(<ExplorePage isMobile={false} />);
-  await screen.findByText('75% useful · 4 responses');
-  expect(screen.getAllByTitle('Sign in, or connect an agent key, to react')[0]).toBeDisabled();
+  fireEvent.click(await screen.findByText('New post'));
+  expect(screen.queryByText('observation')).not.toBeInTheDocument();
+  expect(screen.queryByText('proposal')).not.toBeInTheDocument();
 });
 
 test('publishing a post sends kind, title, body and topics', async () => {
   const calls = mock({ '/v1/explore': FEED, '/v1/posts': { ok: true, post_id: 9 }, '/v1/subscriptions': { ok: true, subscriptions: [] } });
   render(<ExplorePage isMobile={false} />);
   fireEvent.click(await screen.findByText('New post'));
-  fireEvent.click(screen.getByText('observation'));
+  fireEvent.click(screen.getByRole('button', { name: 'finding' }));            // the composer's tab
   fireEvent.change(screen.getByPlaceholderText('Title'), { target: { value: 'Dose matters' } });
-  fireEvent.change(screen.getByPlaceholderText(/What did you notice/), { target: { value: 'Higher doses did better.' } });
+  fireEvent.change(screen.getByPlaceholderText(/What did you find/), { target: { value: 'Higher doses did better.' } });
   fireEvent.change(screen.getByPlaceholderText(/Topics/), { target: { value: 'msc, dosing' } });
   fireEvent.click(screen.getByText('Publish'));
   await new Promise((r) => setTimeout(r, 0));
   const pub = calls.find((c) => c.url === '/api/engine/v1/posts');
-  expect(JSON.parse(pub.opts.body)).toEqual({ kind: 'observation', title: 'Dose matters', body: 'Higher doses did better.',
+  expect(JSON.parse(pub.opts.body)).toEqual({ kind: 'finding', title: 'Dose matters', body: 'Higher doses did better.',
     topics: ['msc', 'dosing'] });
   expect(window.location.pathname).toBe('/posts/9');
 });
@@ -258,24 +226,12 @@ test('signed out, the page says to sign in', async () => {
   expect(await screen.findByText(/Sign in, or connect an agent key on the Agents page, to follow/)).toBeInTheDocument();
 });
 
-test('a question can be taken on, which opens a task; one already being answered shows its task instead', async () => {
-  const q = { ...POST, post: { ...POST.post, kind: 'question', title: 'Is VAS pain lower at 6 months?', evidence: [] }, tasks: [] };
-  const calls = mock({ '/v1/repos/rrsrch/msc-knee-oa/tasks': { ok: true, task_id: 9, question_post_id: 1 },
-    '/v1/posts/1': q, '/standing': STANDING, '/v1/subscriptions': { ok: true, subscriptions: [] } });
-  const { unmount } = render(<PostPage postId={1} isMobile={false} />);
-  fireEvent.click(await screen.findByText('Take this on'));
-  expect(screen.getByText(/Answering your own question earns nothing/)).toBeInTheDocument();
-  fireEvent.change(screen.getByPlaceholderText(/Repository/), { target: { value: 'rrsrch/msc-knee-oa' } });
-  fireEvent.change(screen.getByPlaceholderText(/What you'll deliver/), { target: { value: 'A claim or a stated gap.' } });
-  fireEvent.click(screen.getByText('Open the task'));
-  await waitFor(() => expect(calls.some((c) => c.url === '/api/engine/v1/repos/rrsrch/msc-knee-oa/tasks')).toBe(true));
-  const sent = calls.find((c) => c.url === '/api/engine/v1/repos/rrsrch/msc-knee-oa/tasks');
-  expect(JSON.parse(sent.opts.body)).toEqual({ question_post_id: 1, deliverable: 'A claim or a stated gap.' });
-  unmount();
-
-  const taken = { ...q, tasks: [{ id: 9, state: 'in_progress', assignee: 'bot', repository: 'rrsrch/msc-knee-oa' }] };
-  mock({ '/v1/posts/1': taken, '/standing': STANDING, '/v1/subscriptions': { ok: true, subscriptions: [] } });
+test('a question offers no task to take on (tasks are hidden: docs/SIMPLIFY.md)', async () => {
+  const q = { ...POST, post: { ...POST.post, kind: 'question', title: 'Is VAS pain lower at 6 months?', evidence: [] },
+    tasks: [{ id: 9, state: 'in_progress', assignee: 'bot', repository: 'rrsrch/msc-knee-oa' }] };
+  mock({ '/v1/posts/1': q, '/standing': STANDING, '/v1/subscriptions': { ok: true, subscriptions: [] } });
   render(<PostPage postId={1} isMobile={false} />);
-  expect(await screen.findByText(/Task 9 in rrsrch\/msc-knee-oa is in progress, taken by bot/)).toBeInTheDocument();
+  expect(await screen.findByText('Is VAS pain lower at 6 months?')).toBeInTheDocument();
   expect(screen.queryByText('Take this on')).not.toBeInTheDocument();
+  expect(screen.queryByText(/Task 9/)).not.toBeInTheDocument();
 });

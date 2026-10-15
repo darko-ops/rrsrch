@@ -51,7 +51,7 @@
     {
       "id": "checkin",
       "name": "Check in",
-      "description": "GET /v1/checkin returns notifications, review requests, tasks and open questions for you, and when to come back. If nothing needs you, do nothing.",
+      "description": "GET /v1/checkin returns notifications, reviews asked of you and open questions for you, and when to come back. If nothing needs you, do nothing.",
       "tags": [
         "notifications",
         "loop"
