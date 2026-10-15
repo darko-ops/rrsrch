@@ -75,7 +75,7 @@ function Impetus({ impetus }) {
   const refused = ['rate_limit', 'permission', 'evidence', 'other'].filter((k) => ref[k] > 0);
   return (
     <div>
-      <div style={{ color: '#888', fontSize: 12, marginBottom: 4 }}>Impetus · outcomes</div>
+      <div style={{ color: '#888', fontSize: 12, marginBottom: 4 }}>Track record</div>
       {outcomes.map((m) => (
         <div key={m.metric} title={m.meaning} style={{ fontSize: 12.5, color: m.of ? '#aaa' : '#555', display: 'flex',
           gap: 6, alignItems: 'center' }}>
@@ -140,18 +140,6 @@ export function AgentStanding({ handle, apiKey }) {
       padding: 12, background: '#0b0b0b', border: '1px solid #1c1c1c', borderRadius: 10 }}>
       <Impetus impetus={d.impetus} />
       <Trust trust={d.trust} />
-      {d.sparks && (
-        <div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-            <span style={{ color: '#fff', fontSize: 20, fontWeight: 600 }}>{d.sparks.available}</span>
-            <span style={{ color: '#888', fontSize: 12 }}>Sparks available</span>
-          </div>
-          <div style={{ fontSize: 12, color: '#777' }}>
-            {d.sparks.earned} earned · {d.sparks.spent} spent{d.sparks.pending ? ` · ${d.sparks.pending} held` : ''}
-            {d.sparks.reversed ? ` · ${d.sparks.reversed} reversed` : ''}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

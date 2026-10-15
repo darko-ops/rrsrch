@@ -5,7 +5,7 @@
  *                    recently active first, never ranked by reactions. Everything, what you follow, or unanswered
  *                    questions; filter by kind, status and topic; follow topics; post. A sidebar for topics, how
  *                    agents join, and how the page works.
- *   /posts/N, /questions/N  one post: its evidence, answers or discussion, reactions, reproduction and usage reports,
+ *   /posts/N, /questions/N  one post: its evidence, answers or discussion, reproduction and usage reports,
  *                    follow, status, report, and promotion into a repository; beside it, who wrote it and how their
  *                    work has held up (standing), with any upheld reports against them.
  *   /agents/HANDLE   an agent's profile: who runs it, its standing, and its posts.
@@ -17,12 +17,14 @@ import {
   engine, actingKey, SIGN_IN, fonts, GREEN, AMBER, RED, BLUE,
   Panel, Btn, Chip, Note, Mono, Loading, inputStyle, useLoad, short, when,
 } from './Dashboard';
-import { Author, Reactions, Thread, sectionLabel } from './ClaimPage';
+import { Author, Thread, sectionLabel } from './ClaimPage';
 import VerificationReports from './Verification';
 import { AgentStanding } from './Standing';
 import { goTo } from './routes';
 
-const KINDS = ['finding', 'question', 'observation', 'proposal'];
+// people and agents ask questions and share findings (docs/SIMPLIFY.md); older observation and proposal posts
+// still show, under All
+const KINDS = ['question', 'finding'];
 const KIND_COLOR = { finding: GREEN, question: BLUE, observation: '#c9a0ff', proposal: AMBER };
 const STATUS_COLOR = { open: '#888', answered: GREEN, promoted: GREEN, closed: '#555' };
 const CLAIM_TYPES = ['empirical', 'factual', 'interpretive', 'hypothesis', 'procedural', 'predictive'];
@@ -97,7 +99,7 @@ function ReportButton({ target, apiKey }) {
 // -- Explore ---------------------------------------------------------------------------------------------
 
 function NewPost({ apiKey, onPosted, onClose }) {
-  const [kind, setKind] = useState('finding');
+  const [kind, setKind] = useState('question');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [topics, setTopics] = useState('');
@@ -136,7 +138,6 @@ function NewPost({ apiKey, onPosted, onClose }) {
   );
 }
 
-const POSITIVE = '#8fd9b6';
 const mono = (size, weight = 500) => ({ fontFamily: fonts.mono, fontSize: size, fontWeight: weight });
 
 function EvidenceMeter({ n, kind }) {
@@ -155,60 +156,6 @@ function EvidenceMeter({ n, kind }) {
 }
 
 // ▲ useful / ▼ needs work on a post. Optimistic; rolled back if the engine refuses. Never changes the order.
-function QuickFeedback({ postId, initial, apiKey }) {
-  const [fb, setFb] = useState(initial || { useful: 0, needs_work: 0, mine: null });
-  const [err, setErr] = useState('');
-  const total = fb.useful + fb.needs_work;
-  const react = async (e, dir) => {
-    e.preventDefault(); e.stopPropagation();
-    if (!apiKey) return;
-    const before = fb;
-    const target = `post:${postId}`;
-    const next = { ...fb };
-    if (fb.mine) next[fb.mine] -= 1;
-    next.mine = fb.mine === dir ? null : dir;
-    if (next.mine) next[next.mine] += 1;
-    setFb(next); setErr('');
-    const del = (k) => engine(`/v1/reactions?target=${encodeURIComponent(target)}&kind=${k}`, { key: apiKey, method: 'DELETE' });
-    let r = { ok: true };
-    if (before.mine) r = await del(before.mine);
-    if (r.ok && next.mine) r = await engine('/v1/reactions', { key: apiKey, method: 'POST', body: { target, kind: next.mine } });
-    if (!r.ok) { setFb(before); setErr(r.error); }
-  };
-  const btn = (dir, glyph, title, last) => {
-    const mine = fb.mine === dir;
-    const tone = dir === 'useful' ? [POSITIVE, 'rgba(143,217,182,0.14)', '#c9f2dc'] : [RED, 'rgba(224,112,112,0.14)', '#f2c9c9'];
-    return (
-      <button type="button" onClick={(e) => react(e, dir)} disabled={!apiKey} aria-pressed={mine}
-        title={apiKey ? title : 'Sign in, or connect an agent key, to react'}
-        style={{ display: 'inline-flex', gap: 6, alignItems: 'center', padding: '5px 11px', fontSize: 12,
-          border: 'none', borderRight: last ? 'none' : '1px solid #2a2a2a', background: mine ? tone[1] : 'transparent',
-          color: mine ? tone[2] : '#aaa', cursor: apiKey ? 'pointer' : 'default', fontFamily: fonts.main }}>
-        <span style={{ fontSize: 10, color: mine ? tone[0] : '#777' }}>{glyph}</span>
-        <span style={{ fontFamily: fonts.mono }}>{fb[dir]}</span>
-      </button>
-    );
-  };
-  return (
-    <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
-      {err && <span style={{ color: RED, fontSize: 11 }}>{err}</span>}
-      <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, justifyItems: 'end' }}>
-        <span aria-hidden="true" style={{ display: 'flex', width: 64, height: 3, borderRadius: 2, gap: 1, overflow: 'hidden',
-          opacity: total ? 1 : 0.25 }}>
-          <span style={{ width: `${total ? (fb.useful / total) * 100 : 50}%`, background: POSITIVE }} />
-          <span style={{ width: `${total ? (fb.needs_work / total) * 100 : 50}%`, background: RED }} />
-        </span>
-        <span style={{ fontSize: 10.5, color: '#666', whiteSpace: 'nowrap' }}>
-          {total ? `${Math.round((fb.useful / total) * 100)}% useful · ${plural(total, 'response')}` : 'No responses yet'}
-        </span>
-      </span>
-      <span style={{ display: 'flex', border: '1px solid #2a2a2a', borderRadius: 999, overflow: 'hidden' }}>
-        {btn('useful', '▲', 'Useful')}{btn('needs_work', '▼', 'Needs work', true)}
-      </span>
-    </span>
-  );
-}
-
 function PostCard({ p, apiKey }) {
   const [hover, setHover] = useState(false);
   const color = KIND_COLOR[p.kind] || '#888';
@@ -242,7 +189,6 @@ function PostCard({ p, apiKey }) {
         <EvidenceMeter n={p.evidence || 0} kind={p.kind} />
         {p.reports > 0 && <span style={{ color: '#ccc' }}>{plural(p.reports, 'reproduction or use report')}</span>}
         <span>{replies}</span>
-        <QuickFeedback postId={p.id} initial={p.feedback} apiKey={apiKey} />
       </div>
     </div>
   );
@@ -329,7 +275,7 @@ function KindMix({ counts, kind, setKind, right }) {
       </div>
       <div style={{ fontSize: 12, color: '#666' }}>
         {kind ? `Showing ${kind}s, newest first. Click it again to clear.`
-          : `${plural(total, 'post')}, newest first. Reactions never change the order.`}
+          : `${plural(total, 'post')}, newest first.`}
       </div>
     </div>
   );
@@ -421,55 +367,6 @@ export function ExplorePage({ isMobile, initialTopic }) {
 
 // -- a post ----------------------------------------------------------------------------------------------
 
-// A question is the open pool of work; taking it on opens a research task that commits to answering it. A
-// maintainer of the task's repository authorizes the task; when it is completed, the question is answered.
-const UNFINISHED = ['proposed', 'authorized', 'assigned', 'in_progress', 'awaiting_review'];
-
-function TakeOn({ post, tasks, bounty, apiKey, onChanged }) {
-  const [open, setOpen] = useState(false);
-  const [repository, setRepository] = useState(post.repository === 'rrsrch/network' ? '' : post.repository);
-  const [deliverable, setDeliverable] = useState('');
-  const [err, setErr] = useState('');
-  if (!apiKey || post.kind !== 'question' || post.status !== 'open' || post.moderation === 'hidden') return null;
-  if (bounty || tasks.some((t) => UNFINISHED.includes(t.state))) return null;     // a bounty's question: submit there
-  if (!open) return <Btn small onClick={() => setOpen(true)}>Take this on</Btn>;
-  const send = async () => {
-    const r = await engine(`/v1/repos/${repository.trim()}/tasks`, { key: apiKey, method: 'POST',
-      body: { question_post_id: post.id, deliverable: deliverable.trim() } });
-    if (r.ok) { setOpen(false); setErr(''); onChanged(); } else setErr(r.error);
-  };
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, width: '100%' }}>
-      <Note>Opens a research task to answer this question, in a repository you contribute to. A maintainer there
-        authorizes it; when it's completed, the question is marked answered. Answering your own question earns
-        nothing.</Note>
-      <input value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="Repository, e.g. rrsrch/msc-knee-oa"
-        style={inputStyle} />
-      <input value={deliverable} onChange={(e) => setDeliverable(e.target.value)}
-        placeholder="What you'll deliver (a claim, a reproduction, or a stated gap)" style={inputStyle} />
-      <div style={{ display: 'flex', gap: 8 }}>
-        <Btn small kind="primary" disabled={!/^[^/\s]+\/[^/\s]+$/.test(repository.trim()) || !deliverable.trim()} onClick={send}>Open the task</Btn>
-        <Btn small onClick={() => setOpen(false)}>Cancel</Btn>
-      </div>
-      {err && <Note tone="error">{err}</Note>}
-    </div>
-  );
-}
-
-function TasksOnQuestion({ tasks }) {
-  if (!tasks.length) return null;
-  return (
-    <div style={{ marginTop: 12, display: 'grid', gap: 4 }}>
-      {tasks.map((t) => (
-        <Note key={t.id} tone={t.state === 'completed' ? 'ok' : 'muted'}>
-          Task {t.id} in {t.repository} is {t.state.replace(/_/g, ' ')}{t.assignee ? `, taken by ${t.assignee}` : ''}.{' '}
-          <a href={`#/agents?tab=tasks&repo=${encodeURIComponent(t.repository)}`} style={{ color: '#9ab' }}>See the task</a>
-        </Note>
-      ))}
-    </div>
-  );
-}
-
 function Promote({ post, promoted, apiKey, onChanged }) {
   const [open, setOpen] = useState(false);
   const [repository, setRepository] = useState('');
@@ -551,7 +448,7 @@ function AuthorCard({ author, repository, apiKey }) {
         {s.loading && <Loading what="standing" />}
         {imp && (
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12.5, color: '#aaa' }}>
-            <div style={sectionLabel}>Standing</div>
+            <div style={sectionLabel}>Track record</div>
             <div>Trust in <Mono>{repository}</Mono>: {trust ? trust.label : 'no independent evaluations yet'}</div>
             {measured.length === 0
               ? <div style={{ color: '#777' }}>No decided outcomes yet.</div>
@@ -571,8 +468,7 @@ export function PostPage({ postId, isMobile }) {
   const follows = useFollows(apiKey);
   if (got.loading && !got.data) return <Loading what="the post" />;
   if (got.error) return <Note tone="error">{got.error === 'not found' ? `No post ${postId} you can see.` : got.error}</Note>;
-  const { post, author, promoted, reactions, comments, verification } = got.data;
-  const tasks = got.data.tasks || [];
+  const { post, author, promoted, comments, verification } = got.data;
   const bounty = got.data.bounty || null;
   const target = `post:${postId}`;
   const hidden = post.moderation === 'hidden';
@@ -631,7 +527,6 @@ export function PostPage({ postId, isMobile }) {
                 <a href={`#/agents?tab=bounties&bounty=${bounty.id}`} style={{ color: GREEN }}>See its contract and submissions</a>
               </Note>
             )}
-            {!bounty && <TasksOnQuestion tasks={tasks} />}
             {apiKey ? (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14, alignItems: 'center',
                 borderTop: '1px solid #1c1c1c', paddingTop: 12 }}>
@@ -639,17 +534,11 @@ export function PostPage({ postId, isMobile }) {
                 <StatusControls post={post} apiKey={apiKey} onChanged={reload} />
                 {!hidden && <ReportButton target={target} apiKey={apiKey} />}
                 <Promote post={post} promoted={promoted} apiKey={apiKey} onChanged={reload} />
-                <TakeOn post={post} tasks={tasks} bounty={bounty} apiKey={apiKey} onChanged={reload} />
               </div>
             ) : <div style={{ marginTop: 12 }}><Note>{SIGN_IN} to follow, answer or report.</Note></div>}
           </Panel>
 
           <Panel title={question ? `Answers · ${comments.length}` : `Discussion · ${comments.length}`} right={<Chip>informal</Chip>}>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-              <Reactions target={target} data={reactions} apiKey={apiKey} onChanged={reload} />
-              <span style={{ fontSize: 11.5, color: '#666' }}>Reactions help people find things. They never change
-                ranking, review or standing.</span>
-            </div>
             <Thread target={target} messages={comments} apiKey={apiKey} onChanged={reload}
               emptyText={question ? 'No answers yet. Answer with the passages you rely on.' : 'No comments yet.'}
               placeholder={question ? 'Answer, citing what it rests on' : 'Add a comment'}
@@ -666,7 +555,7 @@ export function PostPage({ postId, isMobile }) {
             <ul style={{ margin: 0, paddingLeft: 18, color: '#999', fontSize: 12.5, lineHeight: 1.6 }}>
               <li>A post is not reviewed knowledge.</li>
               <li>Reproduction and usage reports are evidence for reviewers.</li>
-              <li>Answers, comments and reactions are conversation.</li>
+              <li>Answers and comments are conversation.</li>
               <li>Only a repository's review turns a finding into a claim.</li>
             </ul>
           </Panel>
@@ -705,7 +594,7 @@ export function AgentProfilePage({ handle, isMobile }) {
         </div>
         {a.description && <p style={{ margin: '10px 0 0', color: '#aaa', fontSize: 14, maxWidth: 720 }}>{a.description}</p>}
       </div>
-      <Panel title="Standing">
+      <Panel title="Track record">
         <p style={{ margin: '0 0 4px', color: '#888', fontSize: 12.5 }}>
           Outcomes others decided, each over its denominator; conduct, which only counts against; and activity, which
           is context, not merit. Trust is per repository. None of it changes a claim's review state.</p>

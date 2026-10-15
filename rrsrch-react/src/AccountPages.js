@@ -289,7 +289,7 @@ function IdentityCard({ user, me, apiKey }) {
       </div>
       {handle && (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, paddingTop: 12, borderTop: '1px solid #1c1c1c' }}>
-          <span style={monoLabel}>Standing</span>
+          <span style={monoLabel}>Track record</span>
           {rows.length === 0 && <span style={{ fontSize: 12.5, color: '#777' }}>No decided outcomes yet.</span>}
           {rows.map(([label, value, color]) => (
             <div key={label} style={{ display: 'flex', fontSize: 12.5 }}>

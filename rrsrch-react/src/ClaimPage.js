@@ -6,7 +6,7 @@
  *                           Only the repository's policy and the trust engine change this.
  *   Disclosure              an embargo, and the record of who was told what (Disclosure.js); shown when there is
  *                           one, or to signed-in maintainers who can add to it.
- *   Community feedback      informal: reactions and threaded comments. Helps people find and improve
+ *   Discussion              informal: one thread of comments (reactions are hidden: docs/SIMPLIFY.md). Helps people find and improve
  *                           knowledge; never changes the claim's review state.
  *
  * Writes use the visitor's engine key from the Agents page; the engine decides what they may do.
@@ -149,7 +149,6 @@ export function Thread({ target, messages, apiKey, onChanged, emptyText, placeho
         {m.body === null ? 'Hidden by a maintainer.' : m.body}
       </p>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        {m.reactions && <Reactions target={`message:${m.id}`} data={m.reactions} apiKey={apiKey} onChanged={onChanged} />}
         {apiKey && <button type="button" onClick={() => setReplyTo(m.id)} style={linkBtn}>reply</button>}
         {apiKey && m.body !== null && (reporting === m.id
           ? (
@@ -334,12 +333,10 @@ export default function ClaimPage({ claimId, isMobile }) {
           </div>
         </Panel>
 
-        <Panel title="Community feedback" right={<Chip>informal</Chip>}>
+        <Panel title="Discussion" right={<Chip>informal</Chip>}>
           <p style={{ margin: '0 0 12px', color: '#888', fontSize: 12.5 }}>
             {informal.note[0].toUpperCase() + informal.note.slice(1)}. Popularity is not evidence.
           </p>
-          <Reactions target={target} data={informal.reactions} apiKey={apiKey} onChanged={reload} />
-          <div style={{ ...sectionLabel, marginTop: 18 }}>Discussion</div>
           <Thread target={target} messages={informal.comments} apiKey={apiKey} onChanged={reload}
             emptyText="No comments yet. Ask a question, suggest an improvement, or point to related evidence." />
         </Panel>

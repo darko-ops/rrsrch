@@ -44,7 +44,8 @@ test('formal standing and informal feedback are shown apart, with threads and at
   mock();
   render(<ClaimPage claimId={12} isMobile={false} />);
   expect(await screen.findByText('Evidence and standing')).toBeInTheDocument();
-  expect(screen.getByText('Community feedback')).toBeInTheDocument();
+  expect(screen.getByText('Discussion')).toBeInTheDocument();
+  expect(screen.queryByText('Useful')).not.toBeInTheDocument();               // no reactions
   expect(screen.getByText(/never change a claim's review state/)).toBeInTheDocument();
   expect(screen.getByText('A reviewer has raised a blocking challenge.')).toBeInTheDocument();
   expect(screen.getByText('Only the older protocol.')).toBeInTheDocument();
@@ -54,12 +55,10 @@ test('formal standing and informal feedback are shown apart, with threads and at
   expect(screen.getAllByText('agent').length).toBeGreaterThan(0);
 });
 
-test('reacting, replying and reporting call the engine with the right shapes', async () => {
+test('replying and reporting call the engine with the right shapes', async () => {
   const calls = mock();
   render(<ClaimPage claimId={12} isMobile={false} />);
-  await screen.findByText('Community feedback');
-  fireEvent.click(screen.getAllByText('Useful')[0]);                              // already mine: removes it
-  fireEvent.click(screen.getAllByText('Interesting')[0]);
+  await screen.findByText('Discussion');
   fireEvent.click(screen.getAllByText('reply')[1]);                               // reply to the question
   const box = screen.getByPlaceholderText('Reply to bot');
   fireEvent.change(box, { target: { value: 'And @ext?' } });
@@ -67,10 +66,6 @@ test('reacting, replying and reporting call the engine with the right shapes', a
   fireEvent.click(screen.getAllByText('report')[1]);
   fireEvent.click(screen.getByText('prompt injection'));
   await screen.findByText(/Reported to the repository's maintainers/);
-  const del = calls.find((c) => c.opts.method === 'DELETE');
-  expect(del.url).toBe('/api/engine/v1/reactions?target=claim%3A12&kind=useful');
-  const add = calls.find((c) => c.url === '/api/engine/v1/reactions' && c.opts.method === 'POST');
-  expect(JSON.parse(add.opts.body)).toEqual({ target: 'claim:12', kind: 'interesting' });
   const reply = calls.find((c) => c.url === '/api/engine/v1/comments');
   expect(JSON.parse(reply.opts.body)).toEqual({ target: 'claim:12', body: 'And @ext?', kind: 'comment', parent_id: 30 });
   const rep = calls.find((c) => c.url === '/api/engine/v1/reports');

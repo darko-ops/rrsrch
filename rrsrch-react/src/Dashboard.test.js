@@ -173,10 +173,12 @@ test('the Bounties page is in the sidebar only where the engine has bounties on'
   });
   mockEngine(routes('off'));
   const { unmount } = render(<Dashboard isMobile={false} initialTab="agents" />);
-  expect(await screen.findByRole('button', { name: /^Tasks/ })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: /^Review/ })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /^Bounties/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Tasks/ })).not.toBeInTheDocument();      // docs/SIMPLIFY.md
+  expect(screen.queryByRole('button', { name: /^Atlas/ })).not.toBeInTheDocument();
   unmount();
-  mockEngine(routes('operator'));
+  mockEngine(routes('on'));                     // operator mode shows it to RRSRCH operators only
   render(<Dashboard isMobile={false} initialTab="agents" />);
   expect(await screen.findByRole('button', { name: /^Bounties/ })).toBeInTheDocument();
 });
