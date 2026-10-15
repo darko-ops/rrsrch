@@ -19,6 +19,11 @@ ORG_ID = r"^[a-z0-9][a-z0-9-]{0,38}$"
 HANDLE = r"^[a-z0-9][a-z0-9-]{0,62}$"
 REPO_SLUG = r"^[a-z0-9][a-z0-9-]{0,38}/[a-z0-9][a-z0-9._-]{0,99}$"
 SHA256 = r"^[0-9a-f]{64}$"
+GIT_SHA = r"^[0-9a-f]{40}$"
+# public forges only: the engine clones these read-only to check a commit (docs/security/PLAN.md §5.5)
+GIT_REPO = r"^https://(?:github\.com|gitlab\.com|codeberg\.org)/[A-Za-z0-9][A-Za-z0-9._-]{0,99}/[A-Za-z0-9._-]{1,100}$"
+GIT_TAG = r"^[A-Za-z0-9][A-Za-z0-9._/@=+-]{0,199}$"
+GIT_PATH = r"^[^/\x00-\x1f][^\x00-\x1f]{0,399}$"
 
 
 class _Model(BaseModel):
@@ -115,11 +120,42 @@ class Span(_Model):
         return self
 
 
+class GitRef(_Model):
+    """A commit in a public repository, pinned by its full SHA; optionally the release tag it should be in, and
+    lines of one file at that commit. Evidence for what the code says, not what a document says."""
+    repo_url: str = Field(pattern=GIT_REPO)
+    commit: str = Field(pattern=GIT_SHA)
+    tag: str | None = Field(default=None, pattern=GIT_TAG)
+    path: str | None = Field(default=None, pattern=GIT_PATH)
+    start_line: int | None = Field(default=None, ge=1)
+    end_line: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _lines(self) -> GitRef:
+        if self.tag and ".." in self.tag:
+            raise ValueError("a tag can't contain '..'")
+        if self.path and ".." in self.path.split("/"):
+            raise ValueError("a path can't climb out of the repository ('..')")
+        if (self.start_line is None) != (self.end_line is None):
+            raise ValueError("start_line and end_line go together")
+        if self.start_line is not None:
+            if self.path is None:
+                raise ValueError("lines need a path")
+            if self.end_line < self.start_line:
+                raise ValueError(f"end_line {self.end_line} is before start_line {self.start_line}")
+        return self
+
+    def label(self) -> str:
+        where = f":{self.path}" + (f"#L{self.start_line}-L{self.end_line}" if self.start_line else "") if self.path else ""
+        return f"{self.repo_url.removeprefix('https://')}@{self.commit[:12]}{where}" + (f" (in {self.tag}?)" if self.tag else "")
+
+
 class Evidence(_Model):
     id: int | None = None
-    kind: str = Field(default="document_span", pattern=r"^document_span$")
-    span: Span
-    document_id: int
+    kind: str = Field(default="document_span", pattern=r"^(document_span|git_ref)$")
+    span: Span | None = None
+    git: GitRef | None = None
+    document_id: int | None = None
     excerpt: str = Field(min_length=1)
     is_primary: bool
     license: str | None = None
@@ -139,7 +175,9 @@ class ClaimContent(_Model):
     proposition: str = Field(min_length=1, max_length=2000)
     scope: dict[str, Any] = Field(default_factory=dict)
     fields: dict[str, Any] = Field(default_factory=dict)
-    evidence: tuple[tuple[Relation, Span], ...] = Field(min_length=1, max_length=50)
+    # document spans, and (where the repository's policy allows) git refs; git refs never stand alone (see
+    # trust/pipeline.py, "anchored")
+    evidence: tuple[tuple[Relation, Span | GitRef], ...] = Field(min_length=1, max_length=50)
     derived_from: tuple[int, ...] = Field(default=(), max_length=20)   # claims (same repository) this builds on
     parent_hash: str | None = Field(default=None, pattern=SHA256)
 

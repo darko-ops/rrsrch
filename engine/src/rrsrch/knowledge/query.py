@@ -83,14 +83,17 @@ def _visible_claim(conn, p: Principal | None, claim_id: int) -> tuple | None:
 
 
 EVIDENCE_COLS = ("id", "relation", "source_id", "source_title", "doc_sha256", "span_start", "span_end", "excerpt",
-                 "is_primary", "license", "retrieved_at")
+                 "is_primary", "license", "retrieved_at", "kind", "git")
+_GIT = ("CASE WHEN e.kind = 'git_ref' THEN json_build_object('repo_url', e.repo_url, 'commit', e.commit_sha, "
+        "'tag', e.git_tag, 'path', e.path, 'start_line', e.start_line, 'end_line', e.end_line) END")
 
 
 def _evidence(conn, claim_id: int) -> list[dict]:
     return _rows(conn.execute(
         "SELECT e.id, l.relation, e.source_id, s.title, e.doc_sha256, e.span_start, e.span_end, e.excerpt, "
-        "e.is_primary, e.license, e.retrieved_at FROM evidence_links l JOIN evidence e ON e.id = l.evidence_id "
-        "JOIN sources s ON s.id = e.source_id WHERE l.claim_id = %s ORDER BY e.id, l.relation", (claim_id,)),
+        f"e.is_primary, e.license, e.retrieved_at, e.kind, {_GIT} FROM evidence_links l "
+        "JOIN evidence e ON e.id = l.evidence_id LEFT JOIN sources s ON s.id = e.source_id "
+        "WHERE l.claim_id = %s ORDER BY e.id, l.relation", (claim_id,)),
         EVIDENCE_COLS)
 
 
@@ -203,7 +206,8 @@ def provenance(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> 
 def get_evidence(conn: psycopg.Connection, p: Principal | None, evidence_id: int) -> dict | None:
     row = conn.execute(
         "SELECT e.id, e.kind, e.source_id, s.title, e.document_id, e.doc_sha256, e.span_start, e.span_end, e.excerpt, "
-        "e.is_primary, e.license, e.retrieved_at FROM evidence e JOIN sources s ON s.id = e.source_id WHERE e.id = %s",
+        f"e.is_primary, e.license, e.retrieved_at, {_GIT} FROM evidence e LEFT JOIN sources s ON s.id = e.source_id "
+        "WHERE e.id = %s",
         (evidence_id,)).fetchone()
     if row is None:
         return None
@@ -215,7 +219,7 @@ def get_evidence(conn: psycopg.Connection, p: Principal | None, evidence_id: int
     if not claims:
         return None          # evidence is only shown through a claim the caller can read
     return dict(zip(("id", "kind", "source_id", "source_title", "document_id", "doc_sha256", "span_start", "span_end",
-                     "excerpt", "is_primary", "license", "retrieved_at"), row)) | {"claims": claims}
+                     "excerpt", "is_primary", "license", "retrieved_at", "git"), row)) | {"claims": claims}
 
 
 def get_verification_run(conn: psycopg.Connection, p: Principal | None, run_id: int) -> dict | None:

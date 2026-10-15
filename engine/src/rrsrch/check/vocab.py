@@ -1,4 +1,4 @@
-"""The clinical vocabulary (vocab.yaml), compiled for matching.
+"""Vocabularies, compiled for matching: the clinical one (vocab.yaml), and any other domain's (profiles.py).
 
 Finding entities is deterministic: compiled patterns, first match wins within
 a group, and matched text is masked so a later, looser pattern ("stem cells")
@@ -39,7 +39,7 @@ def _compile(patterns: list[str]) -> re.Pattern:
     return re.compile(rf"(?<![\w-])(?:{'|'.join(_one(p) for p in patterns)})(?![\w-])")
 
 
-@lru_cache(maxsize=1)
+@lru_cache(maxsize=None)
 def load(path: Path = VOCAB_PATH) -> dict[str, list[Entity]]:
     raw = yaml.safe_load(path.read_text())
     return {group: [Entity(group, e["id"], e.get("parent"),
@@ -48,10 +48,56 @@ def load(path: Path = VOCAB_PATH) -> dict[str, list[Entity]]:
             for group, entries in raw.items()}
 
 
-def _mask_group(text: str, group: str) -> str:
-    for e in load()[group]:
-        text = e.pattern.sub(lambda m: " " * len(m.group(0)), text)
-    return text
+@dataclass(frozen=True)
+class Vocabulary:
+    """One domain's vocabulary file and how its groups are used (see profiles.py). The module-level functions
+    below are the clinical vocabulary's, for the code written before there was more than one."""
+    path: Path
+    entity_groups: tuple[str, ...]          # what a claim is about
+    scope_groups: tuple[str, ...]           # who or what it is about
+    # entity groups never read as scope ("Knee injury and Osteoarthritis Outcome Score" says nothing about who was
+    # studied): masked out before a scope group is matched
+    masks_scope: tuple[str, ...] = ()
+
+    def entities(self, group: str) -> list[Entity]:
+        return load(self.path)[group]
+
+    def _mask_group(self, text: str, group: str) -> str:
+        for e in self.entities(group):
+            text = e.pattern.sub(lambda m: " " * len(m.group(0)), text)
+        return text
+
+    def find(self, text: str, group: str) -> frozenset[str]:
+        """Entity ids of one group mentioned in text."""
+        if group in self.scope_groups:
+            for g in self.masks_scope:
+                text = self._mask_group(text, g)
+        found, masked = set(), text
+        for e in self.entities(group):
+            def take(m: re.Match) -> str:
+                found.add(e.id)
+                return " " * len(m.group(0))
+            masked = e.pattern.sub(take, masked)
+        return frozenset(found)
+
+    def mask_all(self, text: str) -> str:
+        """Text with every vocabulary term blanked out, so names like "T2 mapping" or "SF-36" are never read as
+        numbers."""
+        for group in load(self.path):
+            text = self._mask_group(text, group)
+        return text
+
+    def ancestors(self, group: str, entity_id: str) -> list[str]:
+        """[entity, parent, grandparent, ...] within a group."""
+        by_id = {e.id: e for e in self.entities(group)}
+        chain, cur = [], entity_id
+        while cur and cur not in chain:
+            chain.append(cur)
+            cur = by_id[cur].parent if cur in by_id else None
+        return chain
+
+
+CLINICAL = Vocabulary(VOCAB_PATH, ENTITY_GROUPS, SCOPE_GROUPS, masks_scope=("outcome",))
 
 
 def find(text: str, group: str) -> frozenset[str]:
@@ -60,30 +106,15 @@ def find(text: str, group: str) -> frozenset[str]:
     Population terms are never read out of an instrument's name: "Knee injury
     and Osteoarthritis Outcome Score" says nothing about who was studied.
     """
-    if group in SCOPE_GROUPS:
-        text = _mask_group(text, "outcome")
-    found, masked = set(), text
-    for e in load()[group]:
-        def take(m: re.Match) -> str:
-            found.add(e.id)
-            return " " * len(m.group(0))
-        masked = e.pattern.sub(take, masked)
-    return frozenset(found)
+    return CLINICAL.find(text, group)
 
 
 def mask_all(text: str) -> str:
     """Text with every vocabulary term blanked out, so names like "T2 mapping"
     or "SF-36" are never read as numbers."""
-    for group in load():
-        text = _mask_group(text, group)
-    return text
+    return CLINICAL.mask_all(text)
 
 
 def ancestors(group: str, entity_id: str) -> list[str]:
     """[entity, parent, grandparent, ...] within a group."""
-    by_id = {e.id: e for e in load()[group]}
-    chain, cur = [], entity_id
-    while cur and cur not in chain:
-        chain.append(cur)
-        cur = by_id[cur].parent if cur in by_id else None
-    return chain
+    return CLINICAL.ancestors(group, entity_id)

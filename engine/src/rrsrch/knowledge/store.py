@@ -14,7 +14,7 @@ import psycopg
 
 from ..corpus import snapshot
 from . import states
-from .models import Check, CheckKind, ClaimContent, ClaimType, Relation, Span, VerificationRun
+from .models import Check, CheckKind, ClaimContent, ClaimType, GitRef, Relation, Span, VerificationRun
 
 PILOT_REPO = "rrsrch/msc-knee-oa"
 READER_AGENT = "rrsrch-reader"
@@ -53,6 +53,21 @@ def link_evidence(conn: psycopg.Connection, claim_id: int, relation: Relation, s
     ev_id = ev[0] if ev else conn.execute(
         "SELECT id FROM evidence WHERE document_id = %s AND doc_sha256 = %s AND span_start = %s "
         "AND span_end = %s", (doc_id, span.doc_sha256, span.start, span.end)).fetchone()[0]
+    conn.execute("INSERT INTO evidence_links (claim_id, evidence_id, relation) VALUES (%s, %s, %s) "
+                 "ON CONFLICT DO NOTHING", (claim_id, ev_id, relation.value))
+    return ev_id
+
+
+def link_git_ref(conn: psycopg.Connection, claim_id: int, relation: Relation, ref: GitRef) -> int:
+    """Link a claim to the evidence row for a git ref, creating the row if needed. Commits are primary evidence."""
+    key = (ref.repo_url, ref.commit, ref.tag or "", ref.path or "", ref.start_line or 0, ref.end_line or 0)
+    ev = conn.execute(
+        "INSERT INTO evidence (kind, repo_url, commit_sha, git_tag, path, start_line, end_line, excerpt, is_primary) "
+        "VALUES ('git_ref', %s, %s, %s, %s, %s, %s, %s, true) ON CONFLICT DO NOTHING RETURNING id",
+        (ref.repo_url, ref.commit, ref.tag, ref.path, ref.start_line, ref.end_line, ref.label())).fetchone()
+    ev_id = ev[0] if ev else conn.execute(
+        "SELECT id FROM evidence WHERE kind = 'git_ref' AND repo_url = %s AND commit_sha = %s AND coalesce(git_tag, '') = %s "
+        "AND coalesce(path, '') = %s AND coalesce(start_line, 0) = %s AND coalesce(end_line, 0) = %s", key).fetchone()[0]
     conn.execute("INSERT INTO evidence_links (claim_id, evidence_id, relation) VALUES (%s, %s, %s) "
                  "ON CONFLICT DO NOTHING", (claim_id, ev_id, relation.value))
     return ev_id

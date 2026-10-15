@@ -18,7 +18,7 @@ from ..identity import store as ids
 from ..identity.access import Action, Principal
 from ..knowledge import states
 from ..knowledge import store as kstore
-from ..knowledge.models import Check, ClaimContent, Relation
+from ..knowledge.models import Check, ClaimContent, GitRef, Relation, Span
 from . import audit, pipeline
 from .policy import load as load_policy
 
@@ -200,7 +200,7 @@ def merge(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> Outcome:
         return Outcome(mr_id, "open", tuple(checks), decision)
 
     content = ClaimContent.model_validate(mr["content"])
-    first = next(s for rel, s in content.evidence if rel is Relation.SUPPORTS)
+    first = next(s for rel, s in content.evidence if rel is Relation.SUPPORTS and isinstance(s, Span))
     doc_id = conn.execute("SELECT id FROM documents WHERE source_id = %s AND sha256 = %s",
                           (first.source_id, first.doc_sha256)).fetchone()[0]
     claim_cols = (doc_id, first.doc_sha256, first.start, first.end, content.proposition,
@@ -235,8 +235,11 @@ def merge(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> Outcome:
         state = states.check(state, nxt)
     conn.execute("UPDATE claims SET state = %s WHERE id = %s", (state.value, claim_id))
 
-    for rel, span in content.evidence:
-        kstore.link_evidence(conn, claim_id, rel, span)
+    for rel, ev in content.evidence:
+        if isinstance(ev, GitRef):
+            kstore.link_git_ref(conn, claim_id, rel, ev)
+        else:
+            kstore.link_evidence(conn, claim_id, rel, ev)
     conn.execute("DELETE FROM claim_derivations WHERE claim_id = %s", (claim_id,))
     for parent_claim in sorted(set(content.derived_from)):
         conn.execute("INSERT INTO claim_derivations (claim_id, derived_from_id) VALUES (%s, %s)",

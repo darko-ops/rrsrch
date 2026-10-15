@@ -17,6 +17,7 @@ from ..identity.access import Action, Principal
 from ..knowledge import states
 from . import audit, pipeline
 from .merge import Refused, repo_and_role, require
+from ..knowledge.models import ClaimType
 from .policy import load as load_policy
 
 REVIEWABLE = ("structurally_valid", "under_review", "stale")
@@ -69,7 +70,8 @@ def review(conn: psycopg.Connection, p: Principal | None, claim_id: int, verdict
     reviews = [pipeline.Review(*r) for r in conn.execute(
         "SELECT a.id, a.organization_id, a.kind, a.status, v.verdict FROM claim_reviews v "
         "JOIN agents a ON a.id = v.reviewer_id WHERE v.revision_id = %s ORDER BY v.id", (head[0],))]
-    policy = load_policy(conn, repo_id, policy_version)
+    type_, scope = conn.execute("SELECT type, scope FROM claims WHERE id = %s", (claim_id,)).fetchone()
+    policy = load_policy(conn, repo_id, policy_version).for_claim(ClaimType(type_), scope or {})
     approvals, humans, objections = pipeline.review_tally(reviews, author_id, author_org, policy)
     reasons = objections + pipeline.approval_reasons(approvals, humans, policy)
     reasons += [f"blocking challenge {cid} is open" for (cid,) in conn.execute(
