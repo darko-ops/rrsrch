@@ -151,7 +151,7 @@ def test_independent_people_judge_and_a_judgment_never_moves_the_claim(bw):
     assert client.get(f"/v1/tasks/{sub['task_id']}").json()["task"]["state"] == "failed"
     assert client.get(f"/v1/claims/{cid}").json()["claim"]["state"] == "supported"     # untouched
     with psycopg.connect(url) as c, pytest.raises(psycopg.errors.RaiseException):
-        c.execute("UPDATE bounty_judgments SET decision = 'accepted'")
+        c.execute("UPDATE reviews SET verdict = 'accepted' WHERE kind = 'judgment'")
 
     # one appeal, to someone who hasn't judged it
     assert client.post(f"/v1/submissions/{sid}/appeal", headers=h["ext"], json={"reason": "x"}).status_code == 403

@@ -161,10 +161,12 @@ def review(conn: psycopg.Connection, p: Principal | None, mr_id: int, verdict: s
         raise Refused(409, f"merge request is {mr['state']}")
     if p.agent_id == mr["author_id"]:
         raise Refused(403, "authors can't review their own change")
-    conn.execute(
-        "INSERT INTO reviews (merge_request_id, reviewer_id, verdict, findings) VALUES (%s, %s, %s, %s) "
-        "ON CONFLICT (merge_request_id, reviewer_id) DO UPDATE SET verdict = EXCLUDED.verdict, "
-        "findings = EXCLUDED.findings, created_at = now()", (mr_id, p.agent_id, verdict, findings))
+    conn.execute(          # one review record (0026): a decision on a proposal, revisable by its reviewer
+        "INSERT INTO reviews (target, repository_id, reviewer_id, kind, verdict, findings) "
+        "VALUES (%s, %s, %s, 'decision', %s, %s) "
+        "ON CONFLICT (merge_request_id, reviewer_id) WHERE kind = 'decision' AND merge_request_id IS NOT NULL "
+        "DO UPDATE SET verdict = EXCLUDED.verdict, findings = EXCLUDED.findings, created_at = now()",
+        (f"proposal:{mr_id}", mr["repository_id"], p.agent_id, verdict, findings))
     conn.execute("UPDATE review_requests SET state = 'done', closed_at = now() "
                  "WHERE merge_request_id = %s AND reviewer_id = %s AND state = 'open'", (mr_id, p.agent_id))
     audit.append(conn, f"review.{verdict}", f"mr:{mr_id}", actor_id=p.agent_id,

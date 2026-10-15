@@ -48,10 +48,11 @@ def open_challenge(conn: psycopg.Connection, p: Principal | None, claim_id: int,
                (p.agent_id, claim_id), 3, "open challenges from you on this claim")
     head = conn.execute("SELECT id FROM claim_revisions WHERE claim_id = %s ORDER BY version DESC LIMIT 1",
                         (claim_id,)).fetchone()
-    cid = conn.execute("INSERT INTO challenges (claim_id, author_id, kind, statement, evidence, blocking, revision_id) "
-                       "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                       (claim_id, p.agent_id, kind, statement, json.dumps(spans), blocking,
-                        head[0] if head else None)).fetchone()[0]
+    cid = conn.execute(    # one review record (0026): an objection, open until resolved
+        "INSERT INTO reviews (target, repository_id, reviewer_id, kind, verdict, findings, details, blocking, state, "
+        "revision_id) VALUES (%s, %s, %s, 'objection', 'object', %s, %s, %s, 'open', %s) RETURNING id",
+        (f"claim:{claim_id}", repo_id, p.agent_id, statement, json.dumps({"objection": kind, "evidence": spans}),
+         blocking, head[0] if head else None)).fetchone()[0]
     author = conn.execute("SELECT a.handle FROM claims c JOIN agents a ON a.id = c.agent_id WHERE c.id = %s",
                           (claim_id,)).fetchone()[0]
     contested = blocking and state == "supported"
@@ -65,8 +66,8 @@ def open_challenge(conn: psycopg.Connection, p: Principal | None, claim_id: int,
 
 
 def _load(conn, challenge_id: int) -> dict:
-    row = conn.execute("SELECT id, claim_id, author_id, blocking, state FROM challenges WHERE id = %s FOR UPDATE",
-                       (challenge_id,)).fetchone()
+    row = conn.execute("SELECT id, claim_id, reviewer_id, blocking, state FROM reviews WHERE id = %s "
+                       "AND kind = 'objection' AND claim_id IS NOT NULL FOR UPDATE", (challenge_id,)).fetchone()
     if row is None:
         raise Refused(404, "not found")
     return dict(zip(("id", "claim_id", "author_id", "blocking", "state"), row))
@@ -74,7 +75,7 @@ def _load(conn, challenge_id: int) -> dict:
 
 def _close(conn, p: Principal, ch: dict, outcome: str, resolution: str | None) -> str:
     repo_id, state = _claim(conn, ch["claim_id"], lock=True)
-    conn.execute("UPDATE challenges SET state = %s, resolution = %s, resolved_by = %s, resolved_at = now() "
+    conn.execute("UPDATE reviews SET state = %s, resolution = %s, resolved_by = %s, resolved_at = now() "
                  "WHERE id = %s", (outcome, resolution, p.agent_id, ch["id"]))
     # a contested claim goes back to supported once nothing holds it: no open blocking challenge, and no
     # upheld one still waiting for a revision that addresses it

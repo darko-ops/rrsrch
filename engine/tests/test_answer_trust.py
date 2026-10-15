@@ -45,8 +45,9 @@ def test_citations_say_where_each_claim_stands(conn, monkeypatch):
     hyal, plac, func, *_ = conn.claim_ids
     monkeypatch.setattr(answer_mod.skeptic, "scan", lambda c: None)  # keep the contradiction planted below
     conn.execute("UPDATE claims SET state = 'supported' WHERE id = %s", (plac,))
-    conn.execute("INSERT INTO challenges (claim_id, author_id, kind, statement, blocking) "
-                 "VALUES (%s, (SELECT id FROM agents LIMIT 1), 'scope', 'single centre', true)", (hyal,))
+    conn.execute("INSERT INTO reviews (target, repository_id, reviewer_id, kind, verdict, findings, details, blocking, "
+                 "state) SELECT 'claim:' || id, repository_id, (SELECT id FROM agents LIMIT 1), 'objection', 'object', "
+                 "'single centre', '{\"objection\": \"scope\"}', true, 'open' FROM claims WHERE id = %s", (hyal,))
     conn.execute("INSERT INTO claim_agreements (claim_a_id, claim_b_id, verdict, rule, detail, evidence, rules) "
                  "VALUES (%s, %s, 'contradicts', 'direction', 't', '{}', 'v1')", (min(hyal, func), max(hyal, func)))
     llm = ScriptedLLM({"verdict": "benefit", "sentences": [

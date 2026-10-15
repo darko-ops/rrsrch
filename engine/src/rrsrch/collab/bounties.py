@@ -524,9 +524,11 @@ def judge(conn: psycopg.Connection, p: Principal | None, sid: int, decision: str
         raise Refused(409, "this bounty's rubric doesn't accept an inconclusive answer; reject it or ask for more")
     rev = conn.execute("SELECT id FROM bounty_submission_revisions WHERE submission_id = %s ORDER BY version DESC "
                        "LIMIT 1", (sid,)).fetchone()[0]
-    jid = conn.execute("INSERT INTO bounty_judgments (submission_id, revision_id, judge_id, decision, reasons, on_appeal) "
-                       "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                       (sid, rev, p.agent_id, decision, reasons, on_appeal)).fetchone()[0]
+    jid = conn.execute(    # one review record (0026): a judgment of the submission, never changed afterwards
+        "INSERT INTO reviews (target, repository_id, reviewer_id, kind, verdict, findings, details, "
+        "submission_revision_id) VALUES (%s, %s, %s, 'judgment', %s, %s, %s, %s) RETURNING id",
+        (f"submission:{sid}", b["repository_id"], p.agent_id, decision, reasons,
+         canonical.dumps({"on_appeal": on_appeal}).decode(), rev)).fetchone()[0]
     conn.execute("UPDATE bounty_submissions SET state = %s, appealed = appealed OR %s, updated_at = now() WHERE id = %s",
                  (decision, on_appeal, sid))
     if decision in TASK_AFTER:
@@ -565,9 +567,11 @@ def challenge(conn: psycopg.Connection, p: Principal | None, sid: int, statement
     if conn.execute("SELECT 1 FROM bounty_challenges WHERE submission_id = %s AND author_id = %s AND state = 'open'",
                     (sid, p.agent_id)).fetchone():
         raise Refused(409, "you already have an open challenge on this submission")
-    cid = conn.execute("INSERT INTO bounty_challenges (submission_id, judgment_id, author_id, statement, evidence) "
-                       "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                       (sid, last[0], p.agent_id, statement, canonical.dumps(ev).decode())).fetchone()[0]
+    cid = conn.execute(    # one review record (0026): an objection to the submission's judgment
+        "INSERT INTO reviews (target, repository_id, reviewer_id, kind, verdict, findings, details, state) "
+        "VALUES (%s, %s, %s, 'objection', 'object', %s, %s, 'open') RETURNING id",
+        (f"submission:{sid}", b["repository_id"], p.agent_id, statement,
+         canonical.dumps({"objection": "other", "evidence": ev, "judgment_id": last[0]}).decode())).fetchone()[0]
     audit.append(conn, "bounty.challenge", f"submission:{sid}", actor_id=p.agent_id, repository_id=b["repository_id"],
                  detail={"bounty_id": b["id"], "submission_id": sid, "challenge_id": cid})
     return cid
@@ -575,8 +579,9 @@ def challenge(conn: psycopg.Connection, p: Principal | None, sid: int, statement
 
 def resolve_challenge(conn: psycopg.Connection, p: Principal | None, challenge_id: int, outcome: str,
                       resolution: str) -> str:
-    row = conn.execute("SELECT submission_id, judgment_id, author_id, state FROM bounty_challenges WHERE id = %s "
-                       "FOR UPDATE", (challenge_id,)).fetchone()
+    row = conn.execute("SELECT submission_id, (details->>'judgment_id')::bigint, reviewer_id, state FROM reviews "
+                       "WHERE id = %s AND kind = 'objection' AND submission_id IS NOT NULL FOR UPDATE",
+                       (challenge_id,)).fetchone()
     if row is None:
         raise Refused(404, "not found")
     sid, jid, author, state = row
@@ -591,7 +596,7 @@ def resolve_challenge(conn: psycopg.Connection, p: Principal | None, challenge_i
     judge_id = conn.execute("SELECT judge_id FROM bounty_judgments WHERE id = %s", (jid,)).fetchone()[0]
     if p.agent_id in (author, judge_id):
         raise Refused(403, "neither the challenger nor the judge resolves the challenge")
-    conn.execute("UPDATE bounty_challenges SET state = %s, resolved_by = %s, resolution = %s, resolved_at = now() "
+    conn.execute("UPDATE reviews SET state = %s, resolved_by = %s, resolution = %s, resolved_at = now() "
                  "WHERE id = %s", (outcome, p.agent_id, resolution.strip()[:2000], challenge_id))
     if outcome == "upheld" and s["state"] in DECIDED:
         conn.execute("UPDATE bounty_submissions SET state = 'under_review', updated_at = now() WHERE id = %s", (sid,))
