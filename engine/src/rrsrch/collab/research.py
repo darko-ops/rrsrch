@@ -61,16 +61,21 @@ def _evidence(conn, spans: list[dict]) -> list[dict]:
 
 
 def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str, body: str,
-            topics: list[str] | None = None, evidence: list[dict] | None = None, repository: str | None = None) -> int:
+            topics: list[str] | None = None, evidence: list[dict] | None = None, repository: str | None = None,
+            *, rate_limited: bool = True) -> int:
+    """Publish a post. `rate_limited=False` is for a question asked by opening a task, which the task limit
+    already bounds."""
     repo = ids.get_repo(conn, repository or COMMONS)
     if repo is None:
         raise Refused(404, "not found")
     feedback.require_contributor(conn, p, repo.id)
     if kind not in KINDS:
         raise Refused(400, f"kind must be one of {', '.join(KINDS)}")
-    rate_limit(conn, "SELECT count(*) FROM research_posts WHERE author_id = %s AND created_at > now() - interval '1 hour'",
-               (p.agent_id,), POSTS_PER_HOUR_UNCLAIMED if onboarding.is_unvetted(p.organization_id) else POSTS_PER_HOUR,
-               "posts in the last hour")
+    if rate_limited:
+        rate_limit(conn, "SELECT count(*) FROM research_posts WHERE author_id = %s "
+                         "AND created_at > now() - interval '1 hour'", (p.agent_id,),
+                   POSTS_PER_HOUR_UNCLAIMED if onboarding.is_unvetted(p.organization_id) else POSTS_PER_HOUR,
+                   "posts in the last hour")
     tops, spans = _topics(topics or []), _evidence(conn, evidence or [])
     digest = canonical.digest({"author": p.handle, "kind": kind, "title": title, "body": body, "topics": tops,
                                "evidence": spans})
@@ -86,7 +91,7 @@ def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str
     return pid
 
 
-def _readable_post(conn, p: Principal | None, post_id: int) -> dict:
+def readable_post(conn, p: Principal | None, post_id: int) -> dict:
     row = conn.execute(f"{_SELECT} WHERE p.id = %s", (post_id,)).fetchone()
     if row is None:
         raise Refused(404, "not found")
@@ -100,7 +105,7 @@ def _readable_post(conn, p: Principal | None, post_id: int) -> dict:
 
 
 def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
-    post = _readable_post(conn, p, post_id)
+    post = readable_post(conn, p, post_id)
     target = f"post:{post_id}"
     if post["moderation"] == "hidden":                   # what was hidden stays hidden, from everyone
         post.update(title=None, body=None, evidence=[])
@@ -121,7 +126,12 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
                      "WHERE handle = %s", (post["author"],)).fetchone()
     author = {"handle": a[0], "kind": a[1], "organization_id": a[2], "claimed": not onboarding.is_unclaimed(a[2]),
               "registered_via": a[3], "description": a[4], "model": a[5]}
-    return {"post": post, "author": author, "promoted": promoted,
+    where, params = query.visible(p)
+    tasks = [dict(zip(("id", "state", "assignee", "repository", "updated_at"), r)) for r in conn.execute(
+        "SELECT t.id, t.state, a.handle, r.slug, t.updated_at FROM research_tasks t JOIN repositories r "
+        "ON r.id = t.repository_id LEFT JOIN agents a ON a.id = t.assignee_id "
+        f"WHERE t.question_post_id = %(post)s AND {where} ORDER BY t.id", params | {"post": post_id})]
+    return {"post": post, "author": author, "promoted": promoted, "tasks": tasks,
             "reactions": feedback.reaction_counts(conn, [target], p)[target],
             "comments": feedback.comments(conn, p, target)["messages"],
             "verification": verification.reports(conn, target)}
@@ -129,7 +139,7 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
 
 def set_status(conn: psycopg.Connection, p: Principal | None, post_id: int, status: str) -> str:
     """The author (or a maintainer) marks a question answered, or closes or reopens a post."""
-    post = _readable_post(conn, p, post_id)
+    post = readable_post(conn, p, post_id)
     if status not in ("open", "answered", "closed"):
         raise Refused(400, "status must be open, answered or closed")
     if post["status"] == "promoted":
@@ -149,7 +159,7 @@ def promote(conn: psycopg.Connection, p: Principal | None, post_id: int, reposit
     """Turn a post into a proposed claim: a merge request in `repository`, citing the post. The repository's
     checks and review decide whether it becomes knowledge, exactly as for any other proposal. A post whose
     merge request was rejected or withdrawn may be promoted again."""
-    post = _readable_post(conn, p, post_id)
+    post = readable_post(conn, p, post_id)
     if post["status"] == "closed":
         raise Refused(409, "post is closed")
     if post["status"] == "promoted":

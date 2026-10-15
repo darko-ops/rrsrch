@@ -7,6 +7,7 @@ audit chain.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 import psycopg
@@ -19,7 +20,7 @@ from ..identity import access
 from ..identity import store as ids
 from ..identity.access import Action, Principal
 from ..knowledge import query
-from ..trust import claim_review, merge
+from ..trust import claim_review, disclosure, merge
 from . import idempotency
 from .identity_routes import conn, principal
 
@@ -113,6 +114,44 @@ def review_claim(claim_id: int, body: ClaimReview, p: Principal | None = Depends
     return {"ok": True} | _call(claim_review.review, c, p, claim_id, body.verdict, body.findings)
 
 
+class Review(BaseModel):
+    target: str = Field(pattern=r"^(proposal|mr|claim):[1-9][0-9]{0,17}$")
+    verdict: Literal["approve", "request_changes", "reject"]
+    findings: str = Field(default="", max_length=4000)
+
+
+@router.post("/reviews")
+def review_anything(body: Review, p: Principal | None = Depends(principal),
+                    c: psycopg.Connection = Depends(conn)) -> dict:
+    """One way to review whatever waits for review: `proposal:N` (a proposed change, i.e. a merge request) or
+    `claim:N` (a claim already in the repository: not yet reviewed, or stale and up for review again)."""
+    kind, n = body.target.split(":")
+    if kind == "claim":
+        if body.verdict == "request_changes":
+            raise HTTPException(400, "a claim already in the repository is approved or rejected; to change it, "
+                                     "propose a revision")
+        return {"ok": True, "target": body.target} | _call(claim_review.review, c, p, int(n), body.verdict,
+                                                             body.findings)
+    _call(merge.review, c, p, int(n), body.verdict, body.findings)
+    return {"ok": True, "target": f"proposal:{n}", "merge_request_id": int(n), "verdict": body.verdict}
+
+
+@router.get("/repos/{owner}/{name}/needs-review")
+def needs_review(owner: str, name: str, after_claim: int = Query(default=0, ge=0),
+                 limit: int = Query(default=20, ge=1, le=100), p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """Everything in the repository waiting for review, in one place: proposed changes (merge requests), then
+    claims already in it that haven't been reviewed or are up for review again. Both are reviewed with
+    POST /v1/reviews."""
+    repo = _queue_repo(c, p, owner, name)
+    proposals = _proposals(c, repo.id, "open", 0, 200)
+    open_count = c.execute("SELECT count(*) FROM merge_requests WHERE repository_id = %s AND state = 'open'",
+                           (repo.id,)).fetchone()[0]
+    claims = query.review_queue(c, repo.id, claim_review.REVIEWABLE, after_claim, limit)
+    return {"ok": True, "repository": repo.slug, "waiting": open_count + claims["waiting"],
+            "proposals": {"items": proposals, "waiting": open_count}, "claims": claims}
+
+
 @router.get("/repos/{owner}/{name}/review-queue")
 def review_queue(owner: str, name: str,
                  state: Literal["structurally_valid", "under_review", "stale"] | None = None,
@@ -152,6 +191,19 @@ def review_trial(owner: str, name: str, source_id: str, p: Principal | None = De
     return {"ok": True, "repository": repo.slug} | got
 
 
+def _proposals(c, repository_id: int, state: str | None, after: int, limit: int) -> list[dict]:
+    cols = ("id", "claim_id", "state", "author", "proposition", "policy_version", "created_at", "approvals",
+            "objections", "checks_passed")
+    return [dict(zip(cols, r)) for r in c.execute(
+        "SELECT m.id, m.claim_id, m.state, a.handle, m.content->>'proposition', m.policy_version, m.created_at, "
+        "  (SELECT count(*) FROM reviews v WHERE v.merge_request_id = m.id AND v.verdict = 'approve'), "
+        "  (SELECT count(*) FROM reviews v WHERE v.merge_request_id = m.id AND v.verdict <> 'approve'), "
+        "  (SELECT v.passed FROM verification_runs v WHERE v.merge_request_id = m.id ORDER BY v.id DESC LIMIT 1) "
+        "FROM merge_requests m JOIN agents a ON a.id = m.author_id "
+        "WHERE m.repository_id = %s AND (%s::text IS NULL OR m.state = %s) AND m.id > %s ORDER BY m.id LIMIT %s",
+        (repository_id, state, state, after, limit))]
+
+
 @router.get("/repos/{owner}/{name}/merge-requests")
 def list_merge_requests(owner: str, name: str,
                         state: Literal["open", "merged", "rejected", "withdrawn"] | None = "open",
@@ -160,16 +212,7 @@ def list_merge_requests(owner: str, name: str,
     repo = ids.get_repo(c, f"{owner}/{name}")
     if repo is None or not access.decide(p, Action.READ, repo, ids.role_in(c, p.agent_id if p else None, repo.id)):
         raise HTTPException(404)
-    cols = ("id", "claim_id", "state", "author", "proposition", "policy_version", "created_at", "approvals",
-            "objections", "checks_passed")
-    rows = [dict(zip(cols, r)) for r in c.execute(
-        "SELECT m.id, m.claim_id, m.state, a.handle, m.content->>'proposition', m.policy_version, m.created_at, "
-        "  (SELECT count(*) FROM reviews v WHERE v.merge_request_id = m.id AND v.verdict = 'approve'), "
-        "  (SELECT count(*) FROM reviews v WHERE v.merge_request_id = m.id AND v.verdict <> 'approve'), "
-        "  (SELECT v.passed FROM verification_runs v WHERE v.merge_request_id = m.id ORDER BY v.id DESC LIMIT 1) "
-        "FROM merge_requests m JOIN agents a ON a.id = m.author_id "
-        "WHERE m.repository_id = %s AND (%s::text IS NULL OR m.state = %s) AND m.id > %s ORDER BY m.id LIMIT %s",
-        (repo.id, state, state, after, limit))]
+    rows = _proposals(c, repo.id, state, after, limit)
     return {"ok": True, "repository": repo.slug, "items": rows, "next": rows[-1]["id"] if len(rows) == limit else None}
 
 
@@ -186,3 +229,62 @@ def events(owner: str, name: str, after: int = Query(default=0, ge=0), limit: in
         (repo.id, after, limit))]
     return {"ok": True, "repository": repo.slug, "events": rows,
             "next": rows[-1]["id"] if len(rows) == limit else None}
+
+
+# holding a finding back while it is disclosed, and the record of that disclosure (trust/disclosure.py)
+
+class Embargo(BaseModel):
+    until: datetime
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class Lift(BaseModel):
+    note: str = Field(default="", max_length=500)
+
+
+class DisclosureEntry(BaseModel):
+    kind: Literal[disclosure.KINDS]  # type: ignore[valid-type]
+    party: str = Field(min_length=1, max_length=200)
+    occurred_at: datetime
+    summary: str = Field(min_length=1, max_length=500)
+    channel: str = Field(default="", max_length=100)
+    reference: str = Field(default="", max_length=200)
+    url: str | None = Field(default=None, max_length=2000)
+    body: str = Field(default="", max_length=20000)
+    supersedes: int | None = None
+
+
+@router.put("/claims/{claim_id}/embargo")
+def set_embargo(claim_id: int, body: Embargo, p: Principal | None = Depends(principal),
+                c: psycopg.Connection = Depends(conn)) -> dict:
+    """Hold a claim in a private repository back until a date. While it holds, the repository can't go public."""
+    return {"ok": True, "claim_id": claim_id,
+            "embargo": _call(disclosure.set_embargo, c, p, claim_id, body.until, body.reason)}
+
+
+@router.post("/claims/{claim_id}/embargo/lift")
+def lift_embargo(claim_id: int, body: Lift, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    _call(disclosure.lift_embargo, c, p, claim_id, body.note)
+    return {"ok": True, "claim_id": claim_id, "embargo": None}
+
+
+@router.post("/claims/{claim_id}/disclosure", status_code=201)
+def record_disclosure(claim_id: int, body: DisclosureEntry, request: Request, p: Principal | None = Depends(principal),
+                      c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Record a notice, reply, fix, advisory or upstream correction. Never changes the claim's review state."""
+    def go():
+        eid = _call(disclosure.record, c, p, claim_id, body.kind, body.party, body.occurred_at, body.summary,
+                    channel=body.channel, reference=body.reference, url=body.url, body=body.body,
+                    supersedes=body.supersedes)
+        return 201, {"ok": True, "claim_id": claim_id, "entry_id": eid}
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.get("/claims/{claim_id}/disclosure")
+def get_disclosure(claim_id: int, p: Principal | None = Depends(principal),
+                   c: psycopg.Connection = Depends(conn)) -> dict:
+    if query.get_claim(c, p, claim_id) is None:
+        raise HTTPException(404)
+    return {"ok": True, "claim_id": claim_id, "embargo": disclosure.active_embargo(c, claim_id),
+            "embargoes": disclosure.embargo_history(c, claim_id), "entries": disclosure.record_of(c, claim_id)}

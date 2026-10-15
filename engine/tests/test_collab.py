@@ -187,3 +187,47 @@ def test_contribution_histories_are_counts_with_denominators(world):
     assert client.get("/v1/agents/ext/contributions").json()["by_repository"][PILOT]["reviews"] == \
         {"total": 1, "approve": 1}
     assert client.get("/v1/agents/nobody/contributions").status_code == 404
+
+
+def test_a_task_answers_a_question(world):
+    client, h, url = world
+    # asking by opening a task: the question becomes a post in the task's repository
+    r = client.post(f"/v1/repos/{PILOT}/tasks", headers=h["bot"],
+                    json={"question": "Does the WOMAC benefit persist at 24 months?", "deliverable": "A claim or a gap."})
+    assert r.status_code == 201
+    qid = r.json()["question_post_id"]
+    q = client.get(f"/v1/posts/{qid}").json()
+    assert (q["post"]["kind"], q["post"]["repository"], q["post"]["status"]) == ("question", PILOT, "open")
+    assert [t["id"] for t in q["tasks"]] == [r.json()["task_id"]]
+    assert client.get(f"/v1/tasks/{r.json()['task_id']}").json()["task"]["question_post"]["id"] == qid
+
+    # taking on a question someone else asked in the commons
+    asked = client.post("/v1/posts", headers=h["ext"], json={"kind": "question", "title": "Is VAS pain lower at 6 months?",
+                                                             "body": "Asking."}).json()["post_id"]
+    finding = client.post("/v1/posts", headers=h["ext"], json={"kind": "finding", "title": "x",
+                                                               "body": "x"}).json()["post_id"]
+    take = lambda **b: client.post(f"/v1/repos/{PILOT}/tasks", headers=h["bot"], json={"deliverable": "d", **b})  # noqa: E731
+    assert take().status_code == 400                                            # which question?
+    assert take(question="q", question_post_id=asked).status_code == 400
+    assert take(question_post_id=finding).status_code == 400
+    r = take(question_post_id=asked)
+    assert r.status_code == 201 and r.json()["question_post_id"] == asked
+    t = r.json()["task_id"]
+    assert take(question_post_id=asked).status_code == 409                      # one unfinished task per question
+    assert client.get(f"/v1/tasks/{t}").json()["task"]["question"] == "Is VAS pain lower at 6 months?"
+
+    move = lambda who, to: client.post(f"/v1/tasks/{t}/transition", headers=h[who], json={"to": to})  # noqa: E731
+    for who, to in [("admin", "authorized"), ("bot", "assigned"), ("bot", "in_progress")]:
+        assert move(who, to).status_code == 200
+    client.post(f"/v1/tasks/{t}/responses", headers=h["bot"], json={"body": "Not reported in the trial."})
+    assert move("bot", "awaiting_review").status_code == 200
+    assert move("admin", "completed").status_code == 200
+    assert client.get(f"/v1/posts/{asked}").json()["post"]["status"] == "answered"
+    # answering someone else's question counts; the asker stands in for the task's creator
+    from rrsrch.collab import standing
+    with psycopg.connect(url) as c:
+        bot = c.execute("SELECT id FROM agents WHERE handle = 'bot'").fetchone()[0]
+        earned = {ref for kind, ref, _ in standing._outcomes(c, bot) if kind == "task_completed"}
+        actions = [a for (a,) in c.execute("SELECT action FROM audit_events WHERE target = %s ORDER BY id",
+                                           (f"post:{asked}",))]
+    assert earned == {f"task:{t}"} and actions[-1] == "post.answered"

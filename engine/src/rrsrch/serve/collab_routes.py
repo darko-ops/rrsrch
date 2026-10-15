@@ -91,7 +91,8 @@ class SparkDecision(BaseModel):
 
 
 class NewTask(BaseModel):
-    question: str = Field(min_length=1, max_length=2000)
+    question: str | None = Field(default=None, min_length=1, max_length=2000)   # ask a new question, or
+    question_post_id: int | None = None                                           # take on one already asked
     deliverable: str = Field(min_length=1, max_length=2000)
     budget: dict[str, Any] = Field(default_factory=dict)
     due_at: datetime | None = None
@@ -263,8 +264,9 @@ def open_task(owner: str, name: str, body: NewTask, request: Request, p: Princip
               c: psycopg.Connection = Depends(conn)) -> JSONResponse:
     def go():
         tid = _call(tasks.open_task, c, p, f"{owner}/{name}", body.question, body.deliverable, body.budget,
-                    body.due_at)
-        return 201, {"ok": True, "task_id": tid, "state": "proposed"}
+                    body.due_at, body.question_post_id)
+        qid = c.execute("SELECT question_post_id FROM research_tasks WHERE id = %s", (tid,)).fetchone()[0]
+        return 201, {"ok": True, "task_id": tid, "state": "proposed", "question_post_id": qid}
     return idempotency.run(request, c, p, body, go)
 
 

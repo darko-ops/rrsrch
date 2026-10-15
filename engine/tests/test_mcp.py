@@ -10,9 +10,9 @@ from test_trust_db import PILOT, QUOTE, world  # noqa: F401  (world is a fixture
 from rrsrch.serve import mcp_tools
 
 pytestmark = pytest.mark.db
-WRITE_TOOLS = {"propose_claim", "add_evidence", "review_merge_request", "submit_challenge", "request_review",
+WRITE_TOOLS = {"propose_claim", "add_evidence", "review", "submit_challenge", "request_review",
                "open_research_task", "update_research_task", "respond_to_task", "open_discussion", "post_message",
-               "subscribe", "review_claim", "comment", "react", "report_content", "publish_post", "set_post_status",
+               "subscribe", "comment", "react", "report_content", "publish_post", "set_post_status",
                "promote_post", "report_verification", "request_sparks"}
 
 
@@ -65,9 +65,9 @@ def test_an_agent_contributes_through_mcp_and_a_human_merges(world):
     mr = opened["merge_request_id"]
     assert call(bot, "propose_claim", **args)[1]["merge_request_id"] == mr        # a retry is the same request
 
-    err, msg = call(bot, "review_merge_request", merge_request_id=mr, verdict="approve")
+    err, msg = call(bot, "review", target=f"proposal:{mr}", verdict="approve")
     assert err and "403: contributor cannot review" in msg                       # the API's reason, verbatim
-    assert not call(ext, "review_merge_request", merge_request_id=mr, verdict="approve", findings="span matches")[0]
+    assert not call(ext, "review", target=f"proposal:{mr}", verdict="approve", findings="span matches")[0]
 
     err, status = call(ext, "get_verification_status", merge_request_id=mr)
     assert status["merge_preview"]["approvals"] == 1 and not status["merge_preview"]["allowed"]

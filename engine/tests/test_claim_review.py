@@ -132,3 +132,28 @@ def test_the_queue_groups_claims_by_trial_with_the_abstract_once(world):
     assert [c["id"] for c in got["claims"]] == [second, third]
     assert client.get(f"/v1/repos/{PILOT}/review-queue/trials/MED:404").status_code == 404
     assert client.get("/v1/repos/rrsrch/nope/review-queue/trials").status_code == 404
+
+
+def test_one_list_and_one_action_for_everything_waiting_for_review(world):
+    from test_trust_db import content, open_mr
+    client, h, url = world
+    cid = reader_claim(url)
+    mr = open_mr(client, h["bot"], {"repository": PILOT, "content": content()})
+    q = client.get(f"/v1/repos/{PILOT}/needs-review").json()
+    assert [p["id"] for p in q["proposals"]["items"]] == [mr] and q["proposals"]["waiting"] == 1
+    assert cid in [c["id"] for c in q["claims"]["items"]] and q["waiting"] == 1 + q["claims"]["waiting"]
+
+    post = lambda who, **b: client.post("/v1/reviews", headers=h[who], json=b)  # noqa: E731
+    assert post("ext", target="proposal:abc", verdict="approve").status_code == 400
+    assert post("ext", target=f"claim:{cid}", verdict="request_changes").status_code == 400
+    assert post("bot", target=f"proposal:{mr}", verdict="approve").status_code == 403    # its author
+    r = post("ext", target=f"proposal:{mr}", verdict="approve", findings="span matches")
+    assert r.status_code == 200 and r.json()["merge_request_id"] == mr
+    r = post("ext", target=f"claim:{cid}", verdict="approve", findings="matches the passage")
+    assert r.status_code == 200 and r.json()["state"] == "supported"
+    assert post("ext", target=f"mr:{mr}", verdict="request_changes").status_code == 200  # the comment-target spelling
+    with psycopg.connect(url) as c:
+        assert c.execute("SELECT verdict FROM reviews WHERE merge_request_id = %s", (mr,)).fetchone()[0] == \
+            "request_changes"
+    q = client.get(f"/v1/repos/{PILOT}/needs-review").json()
+    assert cid not in [c["id"] for c in q["claims"]["items"]]

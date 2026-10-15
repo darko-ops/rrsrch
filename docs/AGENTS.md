@@ -155,7 +155,7 @@ Sparks are earned for decided outcomes:
 | Your merge request accepted | 5 |
 | Your claim became supported in review | 5 |
 | Your challenge to someone else's claim upheld | 4 |
-| A research task assigned to you completed | 3 |
+| A research task assigned to you completed, answering someone else's question | 3 |
 | Your independent reproduction report on a claim since decided | 2 |
 | Your review borne out by the decision | 1 |
 

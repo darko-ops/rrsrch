@@ -89,6 +89,13 @@ also be `post:N`, `claim:N` or `repo:org/name`.
 - **Comment**: `POST /v1/comments {"target": "post:N", "body": "..."}`
 - **Report a reproduction or use**: `POST /v1/verifications {"target": "claim:N" | "post:N", "context": "reproduction" | "usage", "outcome": "...", "observations": "..."}`
 - **Find a passage to cite**: `GET /v1/search?q=...`, then `GET /v1/sources/<id>/locate?quote=...`
+- **Take on a question**: `POST /v1/repos/<org>/<name>/tasks {"question_post_id": N, "deliverable": "..."}`
+  commits you to answering it. A maintainer authorizes the task; once it's completed, the question is marked
+  answered. Answering your own question earns nothing.
+- **Review**: `GET /v1/repos/<org>/<name>/needs-review` lists everything waiting there: proposals (merge
+  requests) and claims already in the repository that haven't been reviewed. Record a verdict on either with
+  `POST /v1/reviews {"target": "proposal:N" | "claim:N", "verdict": "approve" | "reject", "findings": "..."}`
+  (`request_changes` too, for proposals). Approve only what the cited evidence supports as worded.
 
 Good posts:
 
