@@ -60,7 +60,7 @@ test('connecting a key on the Account page signs in as that agent, sending the k
   });
   render(<Dashboard isMobile={false} initialTab="account" />);
   expect(await screen.findByText('Connect an agent key')).toBeInTheDocument();      // signed out: no sidebar
-  expect(screen.queryByText('Review queue')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /^Review/ })).not.toBeInTheDocument();
 
   fireEvent.change(screen.getByPlaceholderText('rrsrch_…'), { target: { value: 'rrsrch_bad' } });
   fireEvent.click(screen.getByText('Connect'));
@@ -86,11 +86,12 @@ test('the sidebar lists the pages with their counts and switches between them', 
   });
   render(<Dashboard isMobile={false} initialTab="agents" />);
   expect(await screen.findByText(/engine live · 12 claims/)).toBeInTheDocument();
-  expect(await screen.findByText('313')).toBeInTheDocument();
+  expect(await screen.findByText('315')).toBeInTheDocument();                 // one count: 313 claims + 2 proposals
   expect(screen.getByText('Not signed in')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: /Merge requests/ }));
-  expect((await screen.findAllByRole('heading', { name: 'Merge requests' })).length).toBeGreaterThan(0);
-  expect(window.location.hash).toBe('#/agents?tab=merge');
+  expect(screen.queryByRole('button', { name: /Merge requests/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /^Review/ }));
+  expect((await screen.findAllByRole('heading', { name: 'Proposed changes' })).length).toBeGreaterThan(0);
+  expect(window.location.hash).toBe('#/agents?tab=review');
   window.location.hash = '';
 });
 
@@ -144,4 +145,20 @@ test('claims are reviewed against their passage, and the result says where the c
   const sent = calls.find((c) => c.url.endsWith('/v1/claims/41/reviews'));
   expect(JSON.parse(sent.opts.body)).toEqual({ verdict: 'approve', findings: 'matches' });
   expect(sent.opts.headers.Authorization).toBe('Bearer rrsrch_k');
+});
+
+test('old links to the review queue or merge requests open the one Review page', async () => {
+  window.location.hash = '#/agents?tab=merge';
+  mockEngine({
+    '/health': () => [200, { ok: true, claims: 1 }],
+    '/v1/repos?': () => [200, { ok: true, items: [{ slug: 'rrsrch/msc-knee-oa', claims: 1 }] }],
+    '/v1/me/counts': () => [200, { ok: true }],
+    '/v1/repos/rrsrch/msc-knee-oa/merge-requests': () => [200, { ok: true, items: [], next: null }],
+    '/v1/repos/rrsrch/msc-knee-oa/review-queue': () => [200, { ok: true, items: [], next: null, waiting: 0 }],
+  });
+  render(<Dashboard isMobile={false} />);
+  expect((await screen.findAllByRole('heading', { name: 'Proposed changes' })).length).toBeGreaterThan(0);
+  expect(await screen.findByText('No proposals waiting.')).toBeInTheDocument();
+  expect(screen.getByText('Claims already in the repository, not yet reviewed')).toBeInTheDocument();
+  window.location.hash = '';
 });

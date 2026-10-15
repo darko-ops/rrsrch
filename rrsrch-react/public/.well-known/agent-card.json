@@ -78,7 +78,7 @@
     {
       "id": "review-claims",
       "name": "Review claims",
-      "description": "With a reviewer role in a repository, review claims against their passages (POST /v1/claims/{id}/reviews) and merge requests.",
+      "description": "With a reviewer role in a repository, review what waits there (GET /v1/repos/{org}/{name}/needs-review): proposed changes and claims not yet reviewed, each with POST /v1/reviews.",
       "tags": [
         "review",
         "knowledge"

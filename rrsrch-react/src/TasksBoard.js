@@ -23,16 +23,22 @@ export const COLUMNS = [
 ];
 const ARCHIVED = ['failed', 'canceled', 'expired'];
 
-// a budget may be a number or an object such as {sparks: 50}
-export function budgetOf(b) {
-  if (b == null) return null;
-  if (typeof b === 'number') return b;
-  if (typeof b === 'object') {
-    const v = b.sparks ?? b.amount ?? b.budget ?? Object.values(b).find((x) => typeof x === 'number');
-    return typeof v === 'number' ? v : null;
-  }
-  const n = Number(b);
-  return Number.isFinite(n) ? n : null;
+// A task's budget, in the engine's terms (collab/tasks.py Budget): a spending ceiling in dollars, a cap on tool
+// calls and on subtasks. Recorded now; the engine enforces budgets from Phase 3. Tasks don't carry Sparks.
+export function budgetLabel(b) {
+  if (!b || typeof b !== 'object') return null;
+  const parts = [];
+  if (typeof b.max_cost_usd === 'number') parts.push(`$${b.max_cost_usd}`);
+  if (typeof b.max_tool_calls === 'number') parts.push(`${b.max_tool_calls} calls`);
+  if (typeof b.max_subtasks === 'number') parts.push(`${b.max_subtasks} subtasks`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+export function budgetBody(cost, calls) {
+  const out = {};
+  if (String(cost).trim() !== '') out.max_cost_usd = Number(cost);
+  if (String(calls).trim() !== '') out.max_tool_calls = Math.round(Number(calls));
+  return out;
 }
 
 function dueLabel(due) {
@@ -43,7 +49,7 @@ function dueLabel(due) {
 }
 
 function TaskCard({ t, me, selected, onSelect, onTake }) {
-  const budget = budgetOf(t.budget);
+  const budget = budgetLabel(t.budget);
   const due = dueLabel(t.due_at);
   const mine = me && t.assignee === me.handle;
   return (
@@ -54,9 +60,13 @@ function TaskCard({ t, me, selected, onSelect, onTake }) {
       <div style={{ fontSize: 11.5, color: '#888', lineHeight: 1.4 }}>→ {t.deliverable}</div>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: '#666' }}>#{t.id}</span>
+        {t.question_post_id && (
+          <a href={`/questions/${t.question_post_id}`} onClick={(e) => e.stopPropagation()}
+            style={{ fontFamily: fonts.mono, fontSize: 10.5, color: '#9ab' }}>question {t.question_post_id}</a>
+        )}
         {budget != null && (
           <span style={{ border: `1px solid ${AMBER}55`, color: AMBER, borderRadius: 999, padding: '1px 7px',
-            fontFamily: fonts.mono, fontSize: 10.5 }}>{budget} ✦</span>
+            fontFamily: fonts.mono, fontSize: 10.5 }}>{budget}</span>
         )}
         {due && <span style={{ fontFamily: fonts.mono, fontSize: 10.5, color: due.soon ? RED : '#888' }}>{due.text}</span>}
       </div>
@@ -75,25 +85,29 @@ function TaskCard({ t, me, selected, onSelect, onTake }) {
 }
 
 function ProposeForm({ apiKey, repo, onDone, onCancel }) {
-  const [d, setD] = useState({ question: '', deliverable: '', budget: '', due: '' });
+  const [d, setD] = useState({ question: '', deliverable: '', cost: '', calls: '', due: '' });
   const [err, setErr] = useState('');
   const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
   const send = async () => {
     const body = { question: d.question.trim(), deliverable: d.deliverable.trim(),
-      budget: d.budget ? { sparks: Number(d.budget) } : {}, due_at: d.due ? new Date(d.due).toISOString() : null };
+      budget: budgetBody(d.cost, d.calls), due_at: d.due ? new Date(d.due).toISOString() : null };
     const r = await engine(`/v1/repos/${repo}/tasks`, { key: apiKey, method: 'POST', body });
     if (r.ok) onDone(r.data.task_id); else setErr(r.error);
   };
   return (
     <div style={{ ...panelStyle, padding: 18, display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <div style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>Propose a task</div>
-      <div style={{ fontSize: 12.5, color: '#888' }}>A maintainer authorizes it before anyone can take it.</div>
+      <div style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>Ask a question to answer</div>
+      <div style={{ fontSize: 12.5, color: '#888' }}>The question is posted in this repository with a task to answer
+        it. A maintainer authorizes the task before anyone can take it; when it's completed, the question is marked
+        answered. To take on a question someone already asked, open it and choose Take this on.</div>
       <textarea rows={2} value={d.question} onChange={set('question')} placeholder="Question to investigate"
         style={{ ...inputStyle, resize: 'vertical' }} />
       <input value={d.deliverable} onChange={set('deliverable')} placeholder="Deliverable that would answer it" style={inputStyle} />
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <label style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}><span style={monoLabel}>Budget</span>
-          <input type="number" min="0" value={d.budget} onChange={set('budget')} placeholder="✦" style={{ ...inputStyle, width: 120 }} /></label>
+        <label style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}><span style={monoLabel}>Max cost (USD)</span>
+          <input type="number" min="0" max="10000" step="1" value={d.cost} onChange={set('cost')} placeholder="optional" style={{ ...inputStyle, width: 130 }} /></label>
+        <label style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}><span style={monoLabel}>Max tool calls</span>
+          <input type="number" min="1" max="100000" step="1" value={d.calls} onChange={set('calls')} placeholder="optional" style={{ ...inputStyle, width: 130 }} /></label>
         <label style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}><span style={monoLabel}>Due</span>
           <input type="date" value={d.due} onChange={set('due')} style={{ ...inputStyle, width: 170 }} /></label>
       </div>
@@ -135,11 +149,11 @@ export default function TasksBoard({ apiKey, me, repos, repo, onRepo, isMobile }
     && (filter !== 'mine' || (me && t.assignee === me.handle)) && (filter !== 'open' || t.state === 'authorized'));
   const header = (
     <PageHeader title="Tasks"
-      subtitle="Research questions with a deliverable. Maintainers authorize them; anyone with the right scope can take one."
+      subtitle="Questions someone has committed to answer, each with a deliverable. Maintainers authorize them; anyone with the right scope can take one. Completing a task answers its question."
       right={<>
         <Segmented value={view} onChange={setView} options={[['board', 'Board'], ['list', 'List']]} />
         <RepoPill repos={repos} repo={repo} onRepo={onRepo} />
-        {apiKey && <Btn kind="primary" onClick={() => setProposing(true)}>Propose task</Btn>}
+        {apiKey && <Btn kind="primary" onClick={() => setProposing(true)}>Ask a question</Btn>}
       </>} />
   );
   if (view === 'list') {

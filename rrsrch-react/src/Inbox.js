@@ -20,7 +20,7 @@ const DONE = 'Done. Moved out of your unread list.';
 
 export function pageFor(target) {
   const [kind, id] = String(target || '').split(':');
-  return { post: `/posts/${id}`, claim: `/claims/${id}`, mr: '#/agents?tab=merge', task: '#/agents?tab=tasks' }[kind] || null;
+  return { post: `/posts/${id}`, claim: `/claims/${id}`, mr: '#/agents?tab=review', task: '#/agents?tab=tasks' }[kind] || null;
 }
 
 const typeLabel = (type) => {
@@ -33,7 +33,7 @@ function ReviewPreview({ item, apiKey, onDone }) {
   const [mr] = useLoad(() => engine(`/v1/merge-requests/${id}`, { key: apiKey }), [id, apiKey]);
   const [findings, setFindings] = useState('');
   const [err, setErr] = useState('');
-  if (mr.loading) return <Loading what="merge request" />;
+  if (mr.loading) return <Loading what="proposal" />;
   if (mr.error) return <Note tone="error">{mr.error}</Note>;
   const { merge_request: m, reviews = [], checks = [], merge_preview: preview = {} } = mr.data;
   const failing = checks.filter((c) => !c.passed).length;
@@ -68,7 +68,7 @@ function ReviewPreview({ item, apiKey, onDone }) {
             <Btn kind="danger" onClick={() => review('reject')}>Reject</Btn>
           </div>
         </>
-      ) : <Note>This merge request is {m.state}.</Note>}
+      ) : <Note>This proposal is {m.state}.</Note>}
       {err && <Note tone="error">{err}</Note>}
     </div>
   );
