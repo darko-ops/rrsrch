@@ -31,7 +31,6 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import httpx
-from cvss import CVSS3, CVSS4
 from packaging.version import InvalidVersion, Version
 
 PACKAGES = [  # (ecosystem, package, github repo, NVD/CNA product names that mean this package)
@@ -42,14 +41,20 @@ PACKAGES = [  # (ecosystem, package, github repo, NVD/CNA product names that mea
     ("PyPI", "litellm", "BerriAI/litellm", {"litellm"}),
     ("PyPI", "vllm", "vllm-project/vllm", {"vllm"}),
     ("PyPI", "chromadb", "chroma-core/chroma", {"chromadb", "chroma"}),
-    ("PyPI", "mcp", "modelcontextprotocol/python-sdk", {"mcp", "python-sdk", "mcp_python_sdk"}),
-    ("npm", "@modelcontextprotocol/sdk", "modelcontextprotocol/typescript-sdk", {"@modelcontextprotocol/sdk", "typescript-sdk", "sdk"}),
+    ("PyPI", "mcp", "modelcontextprotocol/python-sdk", {"mcp", "python-sdk", "mcp-python-sdk"}),
+    ("npm", "@modelcontextprotocol/sdk", "modelcontextprotocol/typescript-sdk",
+     {"@modelcontextprotocol/sdk", "typescript-sdk", "sdk", "mcp-typescript-sdk"}),   # the CNA's and NVD's names
     ("npm", "@langchain/community", "langchain-ai/langchainjs", {"@langchain/community", "community"}),
 ]
 # Product names that name the family, not this package (e.g. "langchain" on a langchain-core advisory)
 FAMILY = {"langchain-core": {"langchain"}, "langchain-community": {"langchain"}, "llama-index-core": {"llama_index", "llama-index", "llamaindex"},
           "@langchain/community": {"langchainjs", "langchain"}}
 UA = {"User-Agent": "rrsrch-advisory-spike/0.1 (+https://rrsrch.com)"}
+OFFLINE = False       # --offline: everything must come from the snapshot; any network access is an error
+
+
+class NotInSnapshot(RuntimeError):
+    pass
 norm = lambda s: re.sub(r"[^a-z0-9@/]+", "-", str(s or "").lower()).strip("-")
 
 
@@ -64,6 +69,8 @@ class Fetch:
         f = self.cache / (re.sub(r"[^A-Za-z0-9._-]+", "_", key) + ".json")
         if f.exists():
             return json.loads(f.read_text())
+        if OFFLINE:
+            raise NotInSnapshot(f"{key} is not in the snapshot")
         for i in range(tries):
             if nvd:                                         # 5 requests / 30 s without a key
                 time.sleep(max(0, 6.5 - (time.time() - self.last_nvd)))
@@ -85,6 +92,17 @@ class Fetch:
         f.write_text(json.dumps(data))
         return data
 
+    def cached(self, key: str, compute):
+        """A non-HTTP lookup (e.g. gh api), cached like a response so a snapshot replays it."""
+        f = self.cache / (re.sub(r"[^A-Za-z0-9._-]+", "_", key) + ".json")
+        if f.exists():
+            return json.loads(f.read_text())
+        if OFFLINE:
+            raise NotInSnapshot(f"{key} is not in the snapshot")
+        data = compute()
+        f.write_text(json.dumps(data))
+        return data
+
 
 # --- NVD: the yearly bulk feeds (same records as the API, without its 5-requests-per-30-seconds limit) ----------
 
@@ -96,6 +114,8 @@ def nvd_record(f: Fetch, cve_id: str) -> dict:
     if year not in _NVD_YEARS:
         import gzip
         path = f.cache / f"nvdfeed_{year}.json.gz"
+        if not path.exists() and OFFLINE:
+            raise NotInSnapshot(f"NVD feed {year} is not in the snapshot")
         if not path.exists():
             r = f.http.get(f"https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{year}.json.gz", timeout=600)
             if r.status_code != 200:
@@ -126,6 +146,14 @@ def vkey(eco: str, v: str):
     # semver: a prerelease sorts before its release
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)), 0 if pre else 1,
             tuple((0, int(p)) if p.isdigit() else (1, p) for p in (pre or "").split(".")) if pre else ())
+
+
+def yanked(f: Fetch, eco: str, pkg: str) -> set[str]:
+    """PyPI releases whose every file is yanked (installable only when pinned exactly; pip skips them otherwise)."""
+    if eco != "PyPI":
+        return set()
+    d = f.json(f"pypi_{pkg}", f"https://pypi.org/pypi/{pkg}/json")
+    return {v for v, files in d["releases"].items() if files and all(x.get("yanked") for x in files)}
 
 
 def releases(f: Fetch, eco: str, pkg: str) -> list[str]:
@@ -281,6 +309,7 @@ def nvd_affected(eco, rels, cve: dict, pkg: str, products: set[str]):
 # --- severity -------------------------------------------------------------------------------------------------------
 
 def score(vector: str) -> tuple[str, float] | None:
+    from cvss import CVSS3, CVSS4          # only needed for scoring: `uv run --with cvss`
     try:
         if vector.startswith("CVSS:4"):
             return ("4", float(CVSS4(vector).base_score))
@@ -333,6 +362,8 @@ class Repos:
 
     def path(self, repo: str) -> Path:
         p = self.root / repo.replace("/", "__")
+        if not p.exists() and OFFLINE:
+            raise NotInSnapshot(f"git clone of {repo} is not in the snapshot")
         if not p.exists():   # commits and tags only: enough for ancestry
             subprocess.run(["git", "clone", "-q", "--bare", "--filter=tree:0", f"https://github.com/{repo}.git", str(p)], check=True)
         if repo not in self.tags:
@@ -352,6 +383,8 @@ class Repos:
         p = self.path(repo)
         if subprocess.run(["git", "-C", str(p), "cat-file", "-e", f"{sha}^{{commit}}"], capture_output=True).returncode == 0:
             return True
+        if OFFLINE:
+            return False
         return subprocess.run(["git", "-C", str(p), "fetch", "-q", "--filter=tree:0", "origin", sha],
                               capture_output=True).returncode == 0
 
@@ -380,7 +413,7 @@ class Repos:
         return None
 
 
-def fix_commits(rec: dict, repo: str) -> list[tuple[str, str]]:
+def fix_commits(f: Fetch, rec: dict, repo: str) -> list[tuple[str, str]]:
     """(sha, how) from the advisory's references: commit URLs, or a pull request's merge commit (via gh)."""
     out = []
     for ref in rec.get("references") or []:
@@ -391,10 +424,12 @@ def fix_commits(rec: dict, repo: str) -> list[tuple[str, str]]:
             continue
         m = re.match(rf"https://github\.com/{re.escape(repo)}/pull/(\d+)", url, re.I)
         if m:
-            r = subprocess.run(["gh", "api", f"repos/{repo}/pulls/{m.group(1)}", "--jq", ".merge_commit_sha + \" \" + (.merged|tostring)"],
-                               capture_output=True, text=True)
-            parts = r.stdout.split()
-            if r.returncode == 0 and len(parts) == 2 and parts[1] == "true":
+            def look(n=m.group(1)):
+                r = subprocess.run(["gh", "api", f"repos/{repo}/pulls/{n}", "--jq", ".merge_commit_sha + \" \" + (.merged|tostring)"],
+                                   capture_output=True, text=True)
+                return r.stdout.split() if r.returncode == 0 else []
+            parts = f.cached(f"ghpr_{repo}_{m.group(1)}", look)
+            if len(parts) == 2 and parts[1] == "true":
                 out.append((parts[0], f"PR #{m.group(1)}"))
     return list(dict.fromkeys(out))
 
@@ -404,6 +439,17 @@ def fix_commits(rec: dict, repo: str) -> list[tuple[str, str]]:
 def prerelease(eco: str, v: str) -> bool:
     k = vkey(eco, v)
     return (k.is_prerelease or k.is_devrelease) if eco == "PyPI" else k[3] == 0
+
+
+def installable(eco: str, v: str, on_registry: set[str], gone: set[str]) -> bool:
+    """A final release someone can install today: on the registry, not yanked, not a pre-release."""
+    return v in on_registry and v not in gone and not prerelease(eco, v)
+
+
+def why_harmless(eco: str, vs: set[str], on_registry: set[str], gone: set[str]) -> list[str]:
+    out = Counter("no longer on the registry" if v not in on_registry else "yanked" if v in gone else
+                  "pre-release" for v in vs)
+    return [f"{n} {k}" for k, n in out.most_common()]
 
 
 def describe(eco, rels, s: set[str]) -> str:
@@ -418,7 +464,11 @@ def main() -> int:
     ap.add_argument("--cache", default="/tmp/rrsrch-advisory-spike")
     ap.add_argument("--out", required=True, help="a directory outside the repository")
     ap.add_argument("--no-git", action="store_true")
+    ap.add_argument("--offline", action="store_true",
+                    help="use only the snapshot in --cache; any lookup that isn't there is an error")
     args = ap.parse_args()
+    global OFFLINE
+    OFFLINE = args.offline
     f = Fetch(Path(args.cache) / "http")
     repos = Repos(Path(args.cache) / "git")
     kev = {v["cveID"]: v["dateAdded"] for v in f.json("kev", "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json")["vulnerabilities"]}
@@ -445,6 +495,7 @@ def main() -> int:
                   if a.get("package", {}).get("name", "").lower() == pkg.lower() for r in a.get("ranges", [])
                   for ev in r.get("events", []) for k in ("fixed", "last_affected") if ev.get(k)}
         on_registry = set(rels)
+        gone = yanked(f, eco, pkg)
         # one spelling per version: "v0.1.11" (a git tag some records list) is 0.1.11
         canon = {}
         for v in list(rels) + sorted(x for x in named if x):
@@ -534,15 +585,28 @@ def main() -> int:
                             continue
                         shape = ("narrower" if not only_a or not only_b else
                                  "no overlap" if not (sets[a] & sets[b]) else "partial overlap")
+                        # does it change the answer to "is version X affected?" for a release you can install?
+                        inst_a = sorted((v for v in only_a if installable(eco, v, on_registry, gone)), key=lambda v: vkey(eco, v))
+                        inst_b = sorted((v for v in only_b if installable(eco, v, on_registry, gone)), key=lambda v: vkey(eco, v))
                         pairs.append({"pair": f"{a}/{b}", "shape": shape, f"only_{a}": describe(eco, rels, only_a),
-                                      f"only_{b}": describe(eco, rels, only_b)})
+                                      f"only_{b}": describe(eco, rels, only_b),
+                                      "changes_answer": bool(inst_a or inst_b),
+                                      "installable": {f"{a}_affected_{b}_not": inst_a, f"{b}_affected_{a}_not": inst_b},
+                                      "harmless_because": [] if inst_a or inst_b else
+                                      why_harmless(eco, only_a | only_b, on_registry, gone)})
             row["range_pairs"] = pairs
+            loose = set(row.get("loose", []))
+            row["changes_answer"] = any(p["changes_answer"] for p in pairs)
+            row["changes_answer_strict"] = any(p["changes_answer"] and not set(p["pair"].split("/")) & loose for p in pairs)
             if pairs:
                 conds.append("range_disagreement")
             fx = {k: v for k, v in fixes.items() if v}
             fkeys = {k: vkey(eco, v) for k, v in fx.items()}
             if len({str(v) for v in fkeys.values()}) > 1:
                 conds.append("fix_disagreement")
+                lo, hi = min(fkeys.values()), max(fkeys.values())
+                between = [v for v in rels if lo <= vkey(eco, v) < hi and installable(eco, v, on_registry, gone)]
+                row["fix_gap"] = {"installable_between": len(between), "examples": between[:3] + between[-2:] if len(between) > 5 else between}
             # only scores of the same CVSS version are compared (4.0 and 3.1 scores aren't on one scale)
             for ver in ("3", "4"):
                 vals = [v[ver] for v in scores.values() if ver in v]
@@ -554,7 +618,7 @@ def main() -> int:
             ghsa = g["recs"].get("GHSA")
             fixv = fixes.get("GHSA")
             if ghsa and not args.no_git:
-                commits = fix_commits(ghsa, repo)
+                commits = fix_commits(f, ghsa, repo)
                 if not fixv:
                     row["fix"] = "no fixed version"
                     row["flags"].append("no fixed version published")
@@ -591,9 +655,35 @@ def main() -> int:
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "rows.json").write_text(json.dumps(rows, indent=1, default=str))
+    (out / "rows.json").write_text(json.dumps(rows, indent=1, default=str, sort_keys=True))
     summarise(rows, out)
+    write_manifest(Path(args.cache), out)
     return 0
+
+
+def _sha(path: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_manifest(cache: Path, out: Path) -> None:
+    """What this run read and wrote, by hash, so a rerun with --offline against the same cache can be shown to
+    give the same rows: every cached response and feed, every git ref in each clone, the script, the outputs."""
+    import hashlib
+    http = {p.name: _sha(p) for p in sorted((cache / "http").iterdir()) if p.is_file()}
+    git = {}
+    for repo in sorted((cache / "git").iterdir()) if (cache / "git").exists() else []:
+        refs = subprocess.run(["git", "-C", str(repo), "for-each-ref", "--format=%(refname) %(objectname)"],
+                              capture_output=True, text=True).stdout
+        git[repo.name] = {"refs": len(refs.splitlines()), "refs_sha256": hashlib.sha256(refs.encode()).hexdigest()}
+    manifest = {"generated": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "offline": OFFLINE,
+                "script_sha256": _sha(Path(__file__)), "rows_sha256": _sha(out / "rows.json"),
+                "http": http, "git": git}
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True))
 
 
 def summarise(rows: list[dict], out: Path) -> None:
@@ -617,6 +707,25 @@ def summarise(rows: list[dict], out: Path) -> None:
     strict = sum(1 for r in rows if any(not set(p["pair"].split("/")) & set(r.get("loose", [])) for p in r["range_pairs"]))
     strict_fix = sum(1 for r in rows if "fix_disagreement" in r["conditions"] and len(
         {v for k, v in ((k, x.get("fixed")) for k, x in r["sources"].items()) if v and k not in r.get("loose", [])}) > 1)
+    changes = sum(1 for r in rows if r.get("changes_answer"))
+    changes_strict = sum(1 for r in rows if r.get("changes_answer_strict"))
+    harmless = Counter(h.split(" ", 1)[1] for r in rows for p in r["range_pairs"] if not p["changes_answer"]
+                       for h in p["harmless_because"])
+    harmless_pairs = sum(1 for r in rows for p in r["range_pairs"] if not p["changes_answer"])
+    # which source says an installable release is NOT affected while another source (matched on the package
+    # itself, with a real range) says it is: the error that leaves a scanner silent
+    misses = Counter()
+    for r in rows:
+        loose = set(r.get("loose", []))
+        missed = set()
+        for p in r["range_pairs"]:
+            if set(p["pair"].split("/")) & loose:
+                continue
+            for k, vs in p["installable"].items():
+                says, _, other = k.partition("_affected_")
+                if vs:
+                    missed.add(other.removesuffix("_not"))
+        misses.update(missed)
     fixr = Counter()
     for r in rows:
         fx = r.get("fix")
@@ -647,6 +756,15 @@ def summarise(rows: list[dict], out: Path) -> None:
          "", "**Conservative counts**, leaving out comparisons with a source matched only by its parent project's "
          "name and NVD records that list only the exact versions a reporter tested:", "",
          f"- range disagreement: {pct(strict, n)}", f"- first-fixed version disagreement: {pct(strict_fix, n)}",
+         "", "## Does it change the answer?", "",
+         "A disagreement matters when it changes the answer to \"is version X affected?\" for a release someone can "
+         "install today (on the registry, not yanked, not a pre-release).", "",
+         f"- Advisories where it does: {pct(changes, n)}; conservatively {pct(changes_strict, n)}",
+         f"- Differing source pairs where it doesn't: {harmless_pairs}, because the versions in question are: "
+         + (", ".join(f"{k} ({v})" for k, v in harmless.most_common()) or "none"), "",
+         "Advisories where a source says an installable release is **not** affected while another says it is "
+         "(conservative comparisons only):", "", "| Source saying \"not affected\" | Advisories |", "|---|---|"] + [
+         f"| {k} | {v} |" for k, v in misses.most_common()] + [
          "", "## Fix presence (GHSA's fix commit vs the tag of GHSA's first fixed version)", "", "| Result | Advisories |", "|---|---|"] + [
          f"| {k} | {v} |" for k, v in fixr.most_common()] + [
          "", "## Flags", "", "| Flag | Advisories |", "|---|---|"] + [f"| {k} | {v} |" for k, v in flags.most_common()] + [
