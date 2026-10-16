@@ -15,6 +15,9 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
 }));
+// Source uploads (a PDF up to 50 MB, base64-encoded in JSON) go through the engine proxy; everything else keeps
+// Express's 100 KB default. Registered first, so the general parser below leaves these bodies alone.
+app.use('/api/engine/v1/sources/upload', express.json({ limit: '72mb' }));
 app.use(express.json());
 app.use(session({
   secret: process.env.SESSION_SECRET || 'rrsrch-secret-key-2025',
