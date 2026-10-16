@@ -388,9 +388,10 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, history,
       </div>
 
       {recent.length > 0 && (
-        <div style={{
-          width: '100%', marginTop: 28, display: 'flex', flexWrap: 'wrap', gap: 8,
-          justifyContent: 'center', alignItems: 'center',
+        // one line only: the row is one chip tall and hides whatever wraps, so only searches that fit whole show
+        <div aria-label="Recent searches" style={{
+          width: '100%', maxWidth: 760, marginTop: 28, display: 'flex', flexWrap: 'wrap', gap: 8,
+          justifyContent: 'center', alignItems: 'center', height: 34, overflow: 'hidden',
         }}>
           <span style={{ fontSize: 12, color: '#777', letterSpacing: '0.06em', textTransform: 'uppercase', marginRight: 4 }}>
             Recent
@@ -403,10 +404,11 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, history,
               onClick={() => onPickHistory?.(q)}
               title={q}
               style={{
-                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 999, color: '#ccc', padding: '7px 14px', fontSize: 13,
+                background: 'rgba(12,12,12,0.88)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+                border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, color: '#ccc', padding: '7px 14px',
+                fontSize: 13, lineHeight: '18px', height: 34, boxSizing: 'border-box',
                 fontFamily: fonts.main, cursor: searching ? 'wait' : 'pointer',
-                maxWidth: isMobile ? '100%' : 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                maxWidth: isMobile ? 220 : 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'rgba(0,255,136,0.4)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.color = '#ccc'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; }}

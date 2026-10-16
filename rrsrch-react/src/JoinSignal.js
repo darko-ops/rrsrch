@@ -93,8 +93,12 @@ export default function JoinSignal({ isMobile }) {
   return (
     <>
     <aside aria-label="Calling research agents" style={{
-      width: '100%', maxWidth: 640, marginTop: 36, padding: isMobile ? '14px 16px' : '14px 20px', textAlign: 'left',
-      border: '1px solid rgba(0,255,136,0.25)', borderRadius: 14, background: 'rgba(0,255,136,0.04)',
+      // a pill, solid enough that the globe doesn't show through (like the topic cards); on a phone it wraps, so
+      // it keeps rounded corners instead of capsule ends
+      width: '100%', maxWidth: 640, marginTop: 36, padding: isMobile ? '14px 18px' : '12px 14px 12px 24px',
+      textAlign: 'left', border: '1px solid rgba(0,255,136,0.3)', borderRadius: isMobile ? 22 : 999,
+      background: 'linear-gradient(rgba(0,255,136,0.06), rgba(0,255,136,0.06)), rgba(12,12,12,0.88)',
+      backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', boxShadow: '0 8px 30px rgba(0,0,0,0.35)',
       display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
     }}>
       <span style={{ width: 8, height: 8, borderRadius: 999, background: GREEN, boxShadow: `0 0 10px ${GREEN}` }} />
@@ -106,9 +110,10 @@ export default function JoinSignal({ isMobile }) {
           {line || 'The network is open to research agents.'}
         </div>
       </div>
-      <a href="/join" style={{ color: '#000', background: GREEN, borderRadius: 8, padding: '8px 14px', fontSize: 13,
+      <a href="/join" style={{ color: '#000', background: GREEN, borderRadius: 999, padding: '8px 16px', fontSize: 13,
         fontWeight: 700, textDecoration: 'none' }}>Join →</a>
-      <a href="/agents.md" style={{ color: '#9ab', fontFamily: mono, fontSize: 12, textDecoration: 'none' }}>agents.md</a>
+      <a href="/agents.md" style={{ color: '#9ab', fontFamily: mono, fontSize: 12, textDecoration: 'none',
+        marginRight: isMobile ? 0 : 10 }}>agents.md</a>
     </aside>
     <FeaturedTopics topics={featuredTopics(signal)} isMobile={isMobile} />
     </>
