@@ -1,11 +1,24 @@
 """Creating and changing repositories. Every change is audited.
 
 Only an admin of the owning organization creates a repository; changing one
-needs its owner role (which org admins have). Public repositories are
-created, or made public, only by a human admin: SPEC-v2 §9.4 keeps new public
-repositories under human approval for now. New rules are a new policy
+needs its owner role (which org admins have). New rules are a new policy
 version; old versions stay, since merge requests and verification runs name
 the version they were judged under.
+
+Public repositories (docs/REPOSITORIES.md). A human admin creates one, or makes
+one public, as before. An agent that is an admin of its organization, with the
+`administer` scope, may too, if:
+
+  - its organization is one RRSRCH has verified, and isn't RRSRCH itself (RRSRCH's
+    own public repositories are opened by a person)
+  - its organization has opened fewer than AGENT_PUBLIC_PER_30D public
+    repositories this way in the last 30 days
+  - the policy keeps independent review: at least one approval, and only from
+    other organizations. Otherwise an agent could open a public repository whose
+    claims show as supported with nobody else having looked.
+
+The same review floor holds whenever an agent changes a public repository's
+policy. The repository records that an agent created it.
 """
 from __future__ import annotations
 
@@ -20,8 +33,33 @@ from ..trust.policy import Policy
 from ..trust.policy import load as load_policy
 
 
+AGENT_PUBLIC_PER_30D = 3
+
+
 def _human(conn, p: Principal) -> bool:
     return conn.execute("SELECT kind FROM agents WHERE id = %s", (p.agent_id,)).fetchone()[0] == "human"
+
+
+def _review_floor(policy: Policy) -> None:
+    if policy.required_approvals < 1 or not policy.approvals_from_other_orgs_only:
+        raise Refused(403, "a public repository an agent runs keeps independent review: set required_approvals to at "
+                           "least 1 and approvals_from_other_orgs_only to true")
+
+
+def _agent_may_publish(conn, p: Principal, org: str, policy: Policy) -> None:
+    """Refuse unless this agent may make a repository of `org` public (see the module docstring)."""
+    if org == "rrsrch":
+        raise Refused(403, "RRSRCH's own public repositories are opened by a person")
+    verified = conn.execute("SELECT verification FROM organizations WHERE id = %s", (org,)).fetchone()
+    if not verified or verified[0] != "verified":
+        raise Refused(403, f"agents of {org} can open public repositories once RRSRCH has verified the organization; "
+                           "until then, create it private, or ask a person who admins it")
+    recent = conn.execute("SELECT count(*) FROM repositories WHERE organization_id = %s AND created_via = 'agent' "
+                          "AND visibility = 'public' AND created_at > now() - interval '30 days'", (org,)).fetchone()[0]
+    if recent >= AGENT_PUBLIC_PER_30D:
+        raise Refused(429, f"{org}'s agents have opened {recent} public repositories in the last 30 days (the limit is "
+                           f"{AGENT_PUBLIC_PER_30D}); try again later, or ask a person who admins it")
+    _review_floor(policy)
 
 
 def create(conn: psycopg.Connection, p: Principal | None, slug: str, topic: str, description: str,
@@ -35,19 +73,24 @@ def create(conn: psycopg.Connection, p: Principal | None, slug: str, topic: str,
         raise Refused(403, "key lacks the 'administer' scope")
     if p.org_role != "admin" or p.organization_id != org:
         raise Refused(403, f"only an admin of {org} can create its repositories")
-    if visibility == "public" and not _human(conn, p):
-        raise Refused(403, "public repositories are created by a human admin")
     if ids.get_repo(conn, slug):
         raise Refused(409, f"{slug} already exists")
     policy = Policy.model_validate(rules)
+    human = _human(conn, p)
+    if visibility == "public" and not human:
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"repo-create:{org}",))   # the limit, exactly
+        _agent_may_publish(conn, p, org, policy)
     features.check_policy(p, policy, visibility)
+    via = "human" if human else "agent"
     repo_id = conn.execute(
-        "INSERT INTO repositories (slug, organization_id, topic, description, visibility, policy_version) "
-        "VALUES (%s, %s, %s, %s, %s, 'v1') RETURNING id", (slug, org, topic, description, visibility)).fetchone()[0]
+        "INSERT INTO repositories (slug, organization_id, topic, description, visibility, policy_version, created_by, "
+        "created_via) VALUES (%s, %s, %s, %s, %s, 'v1', %s, %s) RETURNING id",
+        (slug, org, topic, description, visibility, p.agent_id, via)).fetchone()[0]
     conn.execute("INSERT INTO policies (repository_id, version, rules, created_by) VALUES (%s, 'v1', %s, %s)",
                  (repo_id, policy.model_dump_json(), p.agent_id))
     audit.append(conn, "repository.create", f"repo:{slug}", actor_id=p.agent_id, repository_id=repo_id,
-                 policy_version="v1", detail={"visibility": visibility, "rules": policy.model_dump(mode="json")})
+                 policy_version="v1", detail={"visibility": visibility, "created_via": via,
+                                              "rules": policy.model_dump(mode="json")})
     return repo_id
 
 
@@ -61,8 +104,17 @@ def update(conn: psycopg.Connection, p: Principal | None, slug: str, *, topic: s
     d = access.decide(p, Action.ADMINISTER, repo, role)
     if not d:
         raise Refused(401 if p is None else 403, d.reason)
-    if visibility == "public" and repo.visibility != "public" and not _human(conn, p):
-        raise Refused(403, "a repository is made public by a human")
+    human = _human(conn, p)
+    public_after = (visibility or repo.visibility) == "public"
+    if not human and public_after and (rules is not None or repo.visibility != "public"):
+        # an agent publishing a repository, or changing a public one's rules: the same conditions as creating one
+        current = conn.execute("SELECT policy_version FROM repositories WHERE id = %s", (repo.id,)).fetchone()[0]
+        next_policy = Policy.model_validate(rules) if rules is not None else load_policy(conn, repo.id, current)
+        if repo.visibility != "public":
+            conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"repo-create:{repo.organization_id}",))
+            _agent_may_publish(conn, p, repo.organization_id, next_policy)
+        else:
+            _review_floor(next_policy)
     if visibility == "public" and repo.visibility != "public":
         # publishing waits for disclosure: the lock orders this against an embargo being set at the same moment
         conn.execute("SELECT 1 FROM repositories WHERE id = %s FOR UPDATE", (repo.id,))

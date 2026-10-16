@@ -177,3 +177,74 @@ def test_writes_are_idempotent_and_bounded(world):
                       content=b'{"content": {"proposition": "' + b"x" * 300_000 + b'"}}',
                       )
     assert big.status_code == 413 and big.json()["ok"] is False
+
+
+def _org_agent(url, org, handle, *, verified, kind="model"):
+    with psycopg.connect(url) as c:
+        if not c.execute("SELECT 1 FROM organizations WHERE id = %s", (org,)).fetchone():
+            ids.create_organization(c, org, org.title())
+        if verified:
+            c.execute("UPDATE organizations SET verification = 'verified' WHERE id = %s", (org,))
+        a = ids.register_agent(c, org, handle, kind, org_role="admin")
+        tok, _, _ = ids.issue_key(c, a["id"], {"administer", "read", "propose"})
+    return {"Authorization": f"Bearer {tok}"}
+
+
+REVIEWED = {"required_approvals": 1, "approvals_from_other_orgs_only": True}
+
+
+def test_agents_of_verified_organizations_open_public_repositories(world):
+    client, h, url = world
+    agent = _org_agent(url, "quantlab", "quant-bot", verified=True)
+    pub = {"slug": "quantlab/semis", "topic": "Semiconductor capital intensity", "visibility": "public"}
+
+    # independent review is kept: no approvals, or approvals from the agent's own organization, are refused
+    for rules in ({}, {"required_approvals": 0, "approvals_from_other_orgs_only": True}, {"required_approvals": 2}):
+        r = client.post("/v1/repos", headers=agent, json=pub | {"policy": rules})
+        assert r.status_code == 403 and "independent review" in r.json()["error"], rules
+    r = client.post("/v1/repos", headers=agent, json=pub | {"policy": REVIEWED})
+    assert r.status_code == 201, r.json()
+    repo = r.json()["repository"]
+    assert (repo["visibility"], repo["created_via"], repo["created_by"]) == ("public", "agent", "quant-bot")
+    assert client.get("/v1/repos/quantlab/semis").status_code == 200                      # anyone can read it
+    with psycopg.connect(url) as c:
+        detail = c.execute("SELECT detail FROM audit_events WHERE action = 'repository.create' "
+                           "AND target = 'repo:quantlab/semis'").fetchone()[0]
+    assert detail["created_via"] == "agent" and detail["visibility"] == "public"
+
+    # nor can it loosen review afterwards; a person admin of the organization still could
+    assert client.patch("/v1/repos/quantlab/semis", headers=agent,
+                        json={"policy": {"required_approvals": 0}}).status_code == 403
+    assert client.patch("/v1/repos/quantlab/semis", headers=agent,
+                        json={"policy": REVIEWED | {"min_sources": 2}}).status_code == 200
+
+
+def test_unverified_and_rrsrch_agents_keep_public_repositories_to_people(world):
+    client, h, url = world
+    new = _org_agent(url, "newlab", "new-bot", verified=False)
+    pub = {"slug": "newlab/finance", "topic": "SEC filings", "visibility": "public", "policy": REVIEWED}
+    r = client.post("/v1/repos", headers=new, json=pub)
+    assert r.status_code == 403 and "verified" in r.json()["error"]
+    assert client.post("/v1/repos", headers=new, json=pub | {"visibility": "private"}).status_code == 201
+    assert client.patch("/v1/repos/newlab/finance", headers=new, json={"visibility": "public"}).status_code == 403
+    with psycopg.connect(url) as c:                              # once verified, the agent may publish it itself
+        c.execute("UPDATE organizations SET verification = 'verified' WHERE id = 'newlab'")
+    assert client.patch("/v1/repos/newlab/finance", headers=new, json={"visibility": "public"}).status_code == 200
+
+    rrsrch_agent = _org_agent(url, "rrsrch", "rrsrch-svc", verified=True)
+    r = client.post("/v1/repos", headers=rrsrch_agent, json=pub | {"slug": "rrsrch/finance"})
+    assert r.status_code == 403 and "by a person" in r.json()["error"]
+
+
+def test_an_organizations_agents_open_a_few_public_repositories_a_month(world):
+    client, h, url = world
+    agent = _org_agent(url, "busylab", "busy-bot", verified=True)
+    for i in range(3):
+        r = client.post("/v1/repos", headers=agent, json={"slug": f"busylab/r{i}", "topic": "t", "visibility": "public",
+                                                          "policy": REVIEWED})
+        assert r.status_code == 201, r.json()
+    r = client.post("/v1/repos", headers=agent, json={"slug": "busylab/r3", "topic": "t", "visibility": "public",
+                                                      "policy": REVIEWED})
+    assert r.status_code == 429
+    assert client.post("/v1/repos", headers=agent, json={"slug": "busylab/r3", "topic": "t",
+                                                         "visibility": "private"}).status_code == 201
