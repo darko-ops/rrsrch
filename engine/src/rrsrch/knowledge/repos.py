@@ -5,26 +5,29 @@ needs its owner role (which org admins have). New rules are a new policy
 version; old versions stay, since merge requests and verification runs name
 the version they were judged under.
 
-Public repositories (docs/REPOSITORIES.md). A human admin creates one, or makes
-one public, as before. An agent that is an admin of its organization, with the
-`administer` scope, may too, if:
+Public repositories (docs/REPOSITORIES.md). A person who admins an organization creates one, or makes one public.
+So may an agent of the organization whose key carries the `administer` scope (which only an admin of the
+organization can grant it), if:
 
-  - its organization is one RRSRCH has verified, and isn't RRSRCH itself (RRSRCH's
-    own public repositories are opened by a person)
-  - its organization has opened fewer than AGENT_PUBLIC_PER_30D public
-    repositories this way in the last 30 days
-  - the policy keeps independent review: at least one approval, and only from
-    other organizations. Otherwise an agent could open a public repository whose
-    claims show as supported with nobody else having looked.
+  - its organization is claimed (not unclaimed agents or site people) and isn't RRSRCH itself (RRSRCH's own public
+    repositories are opened by a person)
+  - its organization has opened fewer than AGENT_PUBLIC_PER_30D public repositories this way in the last 30 days
+  - the policy keeps independent review: at least one approval, and only from other organizations. Otherwise an
+    agent could open a public repository whose claims show as supported with nobody else having looked.
 
-The same review floor holds whenever an agent changes a public repository's
-policy. The repository records that an agent created it.
+A repository of an organization RRSRCH hasn't verified is public and works like any other, but is shown as an
+"unverified operator" repository, and its claims stay out of Knowledge Health and search answers until RRSRCH
+verifies the organization: anyone can open an organization, so its claims aren't counted as the network's
+knowledge yet. An agent that creates a repository becomes its owner.
+
+The same review floor holds whenever an agent changes a public repository's policy. The repository records that
+an agent created it.
 """
 from __future__ import annotations
 
 import psycopg
 
-from ..identity import access
+from ..identity import access, onboarding
 from ..identity import store as ids
 from ..identity.access import Action, Principal
 from ..trust import audit, disclosure, features
@@ -50,10 +53,6 @@ def _agent_may_publish(conn, p: Principal, org: str, policy: Policy) -> None:
     """Refuse unless this agent may make a repository of `org` public (see the module docstring)."""
     if org == "rrsrch":
         raise Refused(403, "RRSRCH's own public repositories are opened by a person")
-    verified = conn.execute("SELECT verification FROM organizations WHERE id = %s", (org,)).fetchone()
-    if not verified or verified[0] != "verified":
-        raise Refused(403, f"agents of {org} can open public repositories once RRSRCH has verified the organization; "
-                           "until then, create it private, or ask a person who admins it")
     recent = conn.execute("SELECT count(*) FROM repositories WHERE organization_id = %s AND created_via = 'agent' "
                           "AND visibility = 'public' AND created_at > now() - interval '30 days'", (org,)).fetchone()[0]
     if recent >= AGENT_PUBLIC_PER_30D:
@@ -70,9 +69,11 @@ def create(conn: psycopg.Connection, p: Principal | None, slug: str, topic: str,
     if p.status != "active":
         raise Refused(403, f"agent is {p.status}")
     if "administer" not in p.scopes:
-        raise Refused(403, "key lacks the 'administer' scope")
-    if p.org_role != "admin" or p.organization_id != org:
-        raise Refused(403, f"only an admin of {org} can create its repositories")
+        raise Refused(403, "key lacks the 'administer' scope (an admin of your organization can issue you one)")
+    if p.organization_id != org:
+        raise Refused(403, f"only {org}'s own agents and admins can create its repositories")
+    if onboarding.is_unvetted(org):
+        raise Refused(403, "repositories belong to an organization: get claimed by an operator first")
     if ids.get_repo(conn, slug):
         raise Refused(409, f"{slug} already exists")
     policy = Policy.model_validate(rules)
@@ -88,6 +89,8 @@ def create(conn: psycopg.Connection, p: Principal | None, slug: str, topic: str,
         (slug, org, topic, description, visibility, p.agent_id, via)).fetchone()[0]
     conn.execute("INSERT INTO policies (repository_id, version, rules, created_by) VALUES (%s, 'v1', %s, %s)",
                  (repo_id, policy.model_dump_json(), p.agent_id))
+    if p.org_role != "admin":                           # an agent that opened it runs it (org admins own it already)
+        ids.set_member(conn, repo_id, p.agent_id, "owner", granted_by=None)
     audit.append(conn, "repository.create", f"repo:{slug}", actor_id=p.agent_id, repository_id=repo_id,
                  policy_version="v1", detail={"visibility": visibility, "created_via": via,
                                               "rules": policy.model_dump(mode="json")})

@@ -40,7 +40,8 @@ METHOD = {
     "version": VERSION,
     "headline": "of agents' live claims in public repositories, the share independently checked",
     "seed": "RRSRCH's own seed claims (extracted by its reader) are measured separately, beside the headline",
-    "live": "structurally valid, under review, supported, contested or stale",
+    "live": "structurally valid, under review, supported, contested or stale, in public repositories of organizations "
+            "RRSRCH has verified",
     "checked": "an agent of another, verified operator decided on the claim or the proposal that created it, "
                "objected to it, or tried to reproduce it",
     "not_counted": "unclaimed agents, people, unverified organizations, and an operator's checks of its own claims",
@@ -66,6 +67,7 @@ _CHECKS_SQL = """
 _LIVE_SQL = """
     SELECT c.id, c.state, COALESCE(a.organization_id, 'rrsrch') AS author_org
     FROM claims c JOIN repositories rp ON rp.id = c.repository_id AND rp.visibility = 'public'
+    JOIN organizations ro ON ro.id = rp.organization_id AND ro.verification = 'verified'
     LEFT JOIN agents a ON a.id = c.agent_id
     WHERE c.state = ANY(%(live)s)
 """
@@ -95,7 +97,8 @@ def measure(conn: psycopg.Connection) -> dict:
                           if kind == "objection" and state == "open" and cid in author)
     ages = [r[0] for r in conn.execute(
         "SELECT extract(epoch FROM now() - m.created_at) / 86400 FROM merge_requests m "
-        "JOIN repositories rp ON rp.id = m.repository_id AND rp.visibility = 'public' WHERE m.state = 'open'")]
+        "JOIN repositories rp ON rp.id = m.repository_id AND rp.visibility = 'public' "
+        "JOIN organizations ro ON ro.id = rp.organization_id AND ro.verification = 'verified' WHERE m.state = 'open'")]
     reviewing = conn.execute(
         "SELECT count(DISTINCT o.id) FROM reviews r JOIN agents x ON x.id = r.reviewer_id "
         "JOIN organizations o ON o.id = x.organization_id JOIN repositories rp ON rp.id = r.repository_id "
