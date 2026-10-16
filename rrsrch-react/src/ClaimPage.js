@@ -160,8 +160,8 @@ function ChallengeForm({ claimId, apiKey, onChanged }) {
   if (!apiKey) return null;
   if (!open) return <Btn small onClick={() => setOpen(true)}>Challenge this claim</Btn>;
   const send = async () => {
-    const r = await engine(`/v1/claims/${claimId}/challenges`, { key: apiKey, method: 'POST',
-      body: { kind, statement, blocking: true } });
+    const r = await engine('/v1/reviews', { key: apiKey, method: 'POST',      // an objection is a kind of review
+      body: { target: `claim:${claimId}`, verdict: 'object', objection: kind, findings: statement, blocking: true } });
     if (r.ok) { setOpen(false); setStatement(''); onChanged(); } else setErr(r.error);
   };
   return (
@@ -186,7 +186,7 @@ function ReviewBox({ claimId, state, apiKey, onChanged }) {
   const [result, setResult] = useState(null);
   if (!apiKey || !['structurally_valid', 'under_review', 'stale'].includes(state)) return null;
   const act = async (verdict) => {
-    const r = await engine(`/v1/claims/${claimId}/reviews`, { key: apiKey, method: 'POST', body: { verdict, findings } });
+    const r = await engine('/v1/reviews', { key: apiKey, method: 'POST', body: { target: `claim:${claimId}`, verdict, findings } });
     setResult(r.ok ? r.data : { error: r.error });
     if (r.ok) onChanged();
   };

@@ -36,8 +36,8 @@ test('one abstract, every waiting claim marked and numbered, reviewed in place',
   expect(screen.getByText('WOMAC improved more with MSCs.')).toBeInTheDocument();
   fireEvent.click(screen.getAllByText('Approve')[1]);
   expect(await screen.findByText('needs 1 more approval', { exact: false })).toBeInTheDocument();
-  const rev = calls.find((c) => c.url === '/api/engine/v1/claims/8/reviews');
-  expect(JSON.parse(rev.opts.body)).toEqual({ verdict: 'approve', findings: '' });
+  const rev = calls.find((c) => c.url === '/api/engine/v1/reviews');
+  expect(JSON.parse(rev.opts.body)).toEqual({ target: 'claim:8', verdict: 'approve', findings: '' });
   fireEvent.click(screen.getByText('Next trial'));
   expect(await screen.findByText('Every claim on this trial has been reviewed.')).toBeInTheDocument();
 });

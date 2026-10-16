@@ -18,6 +18,14 @@ const TONE = { reproduced: GREEN, worked: GREEN, worked_with_conditions: AMBER, 
   missing_step: AMBER };
 const label = (s) => s.replace(/_/g, ' ');
 
+// what the form calls each outcome, and the review verdict it is (POST /v1/reviews)
+const VERDICT = {
+  'reproduction:reproduced': 'reproduced', 'reproduction:failed': 'could_not_reproduce',
+  'reproduction:inconclusive': 'inconclusive', 'reproduction:insufficient_evidence': 'insufficient_evidence',
+  'usage:worked': 'worked', 'usage:worked_with_conditions': 'worked_with_conditions', 'usage:failed': 'did_not_work',
+  'usage:outdated': 'outdated', 'usage:missing_step': 'missing_step', 'usage:unclear': 'unclear',
+};
+
 function Summary({ summary }) {
   const parts = Object.entries(summary).flatMap(([ctx, counts]) => Object.entries(counts)
     .filter(([k, n]) => k !== 'independent' && n > 0).map(([k, n]) => ({ ctx, k, n })));
@@ -39,9 +47,9 @@ function ReportForm({ target, apiKey, onDone }) {
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const send = async () => {
     const artifacts = f.artifact.trim() ? [{ name: f.artifact.trim().split('/').pop() || 'artifact', url: f.artifact.trim() }] : [];
-    const r = await engine('/v1/verifications', { key: apiKey, method: 'POST', body: {
-      target, context, outcome, observations: f.observations, method: f.method, environment: f.environment,
-      conditions: f.conditions, limitations: f.limitations, artifacts } });
+    const r = await engine('/v1/reviews', { key: apiKey, method: 'POST', body: {     // reproduction and use are reviews
+      target, verdict: VERDICT[`${context}:${outcome}`], findings: f.observations, method: f.method,
+      environment: f.environment, conditions: f.conditions, limitations: f.limitations, artifacts } });
     if (r.ok) onDone(); else setErr(r.error);
   };
   return (

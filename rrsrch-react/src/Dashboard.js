@@ -488,8 +488,8 @@ function NodeDetail({ node, graph, apiKey, onSelect, onClose }) {
     .map((e) => ({ rel: e.rel, other: e.from === node.id ? e.to : e.from, out: e.from === node.id }));
   const nodeById = Object.fromEntries(graph.nodes.map((n) => [n.id, n]));
   const submitChallenge = async () => {
-    const r = await engine(`/v1/claims/${node.claim_id}/challenges`, { key: apiKey, method: 'POST',
-      body: { kind: challenge.kind, statement: challenge.statement, blocking: true } });
+    const r = await engine('/v1/reviews', { key: apiKey, method: 'POST', body: { target: `claim:${node.claim_id}`,
+      verdict: 'object', objection: challenge.kind, findings: challenge.statement, blocking: true } });
     setChallenge((c) => ({ ...c, msg: r.ok ? `Challenge ${r.data.challenge_id} opened; claim is now ${r.data.claim_state}.` : r.error, open: !r.ok }));
   };
   const d = detail.data;
@@ -592,14 +592,14 @@ function ClaimToReview({ item, apiKey, onDone, number, focused, onFocus }) {
   const [challenge, setChallenge] = useState(null);
   const act = async (verdict) => {
     setBusy(true);
-    const r = await engine(`/v1/claims/${item.id}/reviews`, { key: apiKey, method: 'POST', body: { verdict, findings } });
+    const r = await engine('/v1/reviews', { key: apiKey, method: 'POST', body: { target: `claim:${item.id}`, verdict, findings } });
     setBusy(false);
     setResult(r.ok ? { state: r.data.state, reasons: r.data.reasons } : { error: r.error });
     if (r.ok && ['supported', 'rejected'].includes(r.data.state)) setTimeout(onDone, 1500);
   };
   const sendChallenge = async () => {
-    const r = await engine(`/v1/claims/${item.id}/challenges`, { key: apiKey, method: 'POST',
-      body: { kind: challenge.kind, statement: challenge.statement, blocking: true } });
+    const r = await engine('/v1/reviews', { key: apiKey, method: 'POST', body: { target: `claim:${item.id}`,
+      verdict: 'object', objection: challenge.kind, findings: challenge.statement, blocking: true } });
     setResult(r.ok ? { state: r.data.claim_state, reasons: [`challenge ${r.data.challenge_id} opened`] } : { error: r.error });
     if (r.ok) setChallenge(null);
   };
@@ -855,7 +855,7 @@ function MergeRequestDetail({ id, apiKey, onChanged }) {
             </select>
             <input value={findings} onChange={(e) => setFindings(e.target.value)} placeholder="What you checked"
               style={{ ...inputStyle, flex: 1, minWidth: 180 }} />
-            <Btn kind="primary" onClick={() => act(`/v1/merge-requests/${id}/reviews`, { verdict, findings }, 'Review recorded.')}>Review</Btn>
+            <Btn kind="primary" onClick={() => act('/v1/reviews', { target: `proposal:${id}`, verdict, findings }, 'Review recorded.')}>Review</Btn>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Btn kind={preview.allowed ? 'primary' : 'ghost'} disabled={!preview.allowed}
