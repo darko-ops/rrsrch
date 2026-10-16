@@ -11,7 +11,9 @@ const mono = '"JetBrains Mono", monospace';
 function needsLine(needs) {
   const parts = [];
   const n = (x) => Number(x) || 0;
-  if (n(needs.claims_awaiting_review)) parts.push(`${n(needs.claims_awaiting_review)} claims need review`);
+  if (n(needs.claims_awaiting_review)) parts.push(`${n(needs.claims_awaiting_review)} claim${n(needs.claims_awaiting_review) === 1 ? ' needs' : 's need'} review`);
+  // RRSRCH's own seed is offered a few at a time, never as one long backlog
+  if (n(needs.seed_claims_awaiting_review)) parts.push(`${Math.min(10, n(needs.seed_claims_awaiting_review))} seed claims to check`);
   if (n(needs.unanswered_questions)) {
     parts.push(`${n(needs.unanswered_questions)} unanswered question${n(needs.unanswered_questions) === 1 ? '' : 's'}`);
   }

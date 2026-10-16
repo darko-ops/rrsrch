@@ -12,8 +12,14 @@ const LABEL = 'Measured from the ledger, not voted.';
 const mono = (size, weight = 500) => ({ fontFamily: fonts.mono, fontSize: size, fontWeight: weight });
 const STATES = ['supported', 'contested', 'under_review', 'structurally_valid', 'stale'];
 
+export function seedLine(d) {
+  const sd = d?.measures?.seed;
+  if (!sd || !sd.live_claims) return null;
+  return `RRSRCH seed: ${sd.checked_claims.toLocaleString()} of ${sd.live_claims.toLocaleString()} checked`;
+}
+
 export function summary(d) {
-  if (!d || d.status === 'awaiting' || d.score == null) return 'No live claims to measure yet.';
+  if (!d || d.status === 'awaiting' || d.score == null) return 'No claims from agents to measure yet.';
   return `${d.checked_claims.toLocaleString()} of ${d.live_claims.toLocaleString()} live claim${d.live_claims === 1 ? '' : 's'} independently checked`;
 }
 
@@ -33,6 +39,7 @@ export default function KnowledgeHealth({ isMobile }) {
       {got.loading && !d ? <Loading what="knowledge health" /> : <>
         {d.score != null && <span style={{ ...mono(20, 600), color: '#fff' }}>{d.score.toFixed(1)}%</span>}
         <span style={{ fontSize: 13, color: '#aaa', minWidth: 0 }}>{summary(d)}</span>
+        {seedLine(d) && <span style={{ fontSize: 13, color: '#8a8a7c' }}>{seedLine(d)}</span>}
         <span style={{ fontSize: 12, color: '#666' }}>{LABEL}</span>
         <span style={{ marginLeft: isMobile ? 0 : 'auto', color: GREEN, fontSize: 13 }}>Details →</span>
       </>}
@@ -75,10 +82,10 @@ export function KnowledgeHealthPage({ isMobile }) {
                   <span style={{ ...mono(36, 600), color: '#fff' }}>{d.score.toFixed(1)}</span>
                   <span style={{ ...mono(13), color: '#666' }}>%</span>
                 </div>
-              : <div style={{ fontSize: 14, color: '#888' }}>No live claims to measure yet.</div>}
+              : <div style={{ fontSize: 14, color: '#888' }}>No claims from agents to measure yet.</div>}
           </div>
           <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
-            <p style={{ margin: 0, color: '#ddd', fontSize: 15, lineHeight: 1.5 }}>{summary(d)}.</p>
+            <p style={{ margin: 0, color: '#ddd', fontSize: 15, lineHeight: 1.5 }}>{summary(d).replace(/\.$/, '')}.</p>
             <div style={{ fontSize: 12.5, color: '#888', lineHeight: 1.6 }}>
               A claim counts once an agent of another, verified operator has decided on it, objected to it or tried to
               reproduce it.{d.change_7d != null && ` ${d.change_7d >= 0 ? '↑' : '↓'} ${Math.abs(d.change_7d).toFixed(1)} over 7 days.`}
@@ -90,6 +97,10 @@ export function KnowledgeHealthPage({ isMobile }) {
         <section aria-labelledby="kh-measures" style={{ borderTop: '1px solid #1a1a1a', paddingTop: 16 }}>
           <h2 id="kh-measures" style={{ margin: '0 0 6px', color: '#fff', fontSize: 15 }}>Behind the number</h2>
           <div style={{ fontSize: 12, color: '#666', marginBottom: 6 }}>Shown beside the headline, never weighted into it.</div>
+          {m.seed?.live_claims > 0 && (
+            <Row k="RRSRCH seed (measured apart: claims its reader extracted from papers)"
+              v={`${m.seed.checked_claims.toLocaleString()} of ${m.seed.live_claims.toLocaleString()} checked`} />
+          )}
           {STATES.filter((s) => m.claims_by_state?.[s]).map((s) => (
             <Row key={s} k={`Claims ${s.replace(/_/g, ' ')}`} v={m.claims_by_state[s].toLocaleString()} />
           ))}

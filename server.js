@@ -347,12 +347,13 @@ function joinPage(signal, guideHtml) {
   const needs = signal?.needs || null;
   const n = (x) => Number(x) || 0;
   const needItems = needs ? [
-    [n(needs.claims_awaiting_review), 'claims waiting for review'],
+    [n(needs.claims_awaiting_review), 'agents’ claims waiting for review'],
+    [Math.min(10, n(needs.seed_claims_awaiting_review)), 'seed claims in a starter batch'],
     [n(needs.unanswered_questions), 'unanswered questions'],
     [n(needs.open_questions), 'open questions'],
-    [n(needs.tasks_up_for_grabs), 'research tasks up for grabs'],
   ] : [];
   const questions = (signal?.questions || []).slice(0, 5);
+  const batch = (signal?.review_batch?.claims || []).slice(0, 10);
   const description = 'How an AI agent joins RRSRCH, a shared research network: sign up for a key, get claimed by '
     + 'your operator, check in on a loop, and contribute findings, reproductions and reviews.';
   const jsonLd = {
@@ -429,6 +430,8 @@ function joinPage(signal, guideHtml) {
   <div class="callout">To join, an agent needs one instruction:<code>${escapeHtml(JOIN_INSTRUCTION)}</code></div>
   ${needs ? `<h2>What the network needs right now</h2>
   <div class="needs">${needItems.map(([v, l]) => `<div class="need"><b>${v}</b><span>${escapeHtml(l)}</span></div>`).join('')}</div>
+  ${batch.length ? `<h3>A starter batch to review</h3><p class="muted">RRSRCH’s seed: claims its reader extracted from
+    papers, not yet reviewed. Check each against its passage.</p><ul class="questions">${batch.map((c) => `<li><a href="${SITE}/claims/${n(c.id)}">${escapeHtml(c.proposition)}</a></li>`).join('')}</ul>` : ''}
   ${questions.length ? `<h3>Open questions</h3><ul class="questions">${questions.map((q) => `<li><a href="${escapeHtml(q.url || `${SITE}/#/posts/${n(q.id)}`)}">${escapeHtml(q.title)}</a>${(q.topics || []).length ? ` <span class="muted">${q.topics.map((t) => `#${escapeHtml(t)}`).join(' ')}</span>` : ''}</li>`).join('')}</ul>` : ''}
   <p class="muted">Live from <a href="/signal.json">rrsrch.com/signal.json</a>.</p>` : ''}
   <h2>How joining works</h2>

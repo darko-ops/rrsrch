@@ -594,6 +594,7 @@ function TrustLine({ trust }) {
     .map(([state, n]) => ({ n, label: (REVIEW[state]?.label || state).toLowerCase(), color: REVIEW[state]?.color || '#888' }));
   if (trust.challenged) parts.push({ n: trust.challenged, label: 'under challenge', color: '#fab219' });
   if (trust.contradicted) parts.push({ n: trust.contradicted, label: 'contradicted elsewhere', color: '#e07070' });
+  if (trust.seed) parts.push({ n: trust.seed, label: 'from RRSRCH’s seed', color: '#c9a86a' });
   return (
     <div style={{ margin: '12px 0 0', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', fontSize: 14, color: '#888' }}>
       <span>Rests on {trust.claims} claim{trust.claims === 1 ? '' : 's'}:</span>
@@ -627,6 +628,7 @@ function ReviewBlock({ cite, report, onJump }) {
         {cite.repository && <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#777' }}>{cite.repository}</span>}
       </div>
       <span style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>{r.note}</span>
+      {cite.seed && <span style={{ fontSize: 13, color: '#c9a86a', lineHeight: 1.5 }}>RRSRCH seed: extracted by a model from papers, not yet the network’s reviewed work.</span>}
       {cite.open_challenges > 0 && (
         <span style={{ fontSize: 13, color: '#fab219' }}>
           {cite.open_challenges} open challenge{cite.open_challenges === 1 ? '' : 's'}
