@@ -18,6 +18,7 @@ import {
 } from './Dashboard';
 import { panelStyle, monoLabel } from './AgentsChrome';
 import { passwordChecks, passwordOk } from './passwordRules';
+import { readSearchHistory, clearSearchHistory, searchAgain } from './searchHistory';
 
 export const TOKEN_KEY = 'rrsrch_token';
 const siteToken = () => readStored(TOKEN_KEY);
@@ -257,6 +258,10 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey }) {
           </div>
         </div>
       </div>
+      <section aria-label="Search history" style={{ width: '100%', maxWidth: 1024, textAlign: 'left' }}>
+        <h2 style={{ margin: '0 0 12px', fontSize: 16, color: '#fff' }}>Search history</h2>
+        <SearchHistoryPanel />
+      </section>
       <div style={{ fontSize: 11, color: '#666' }}>© 2026 RRSRCH.com · research tool, not medical advice</div>
     </div>
   );
@@ -469,6 +474,48 @@ function SecurityTab({ user, me, onSignedOut, onKeyChange, onUserChange }) {
   );
 }
 
+// What this browser has searched, newest first. Kept in this browser only, so it shows signed in or not.
+export function SearchHistoryPanel() {
+  const [items, setItems] = useState(() => readSearchHistory());
+  return (
+    <div style={{ maxWidth: 620, display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+        <div style={{ flex: 1, fontSize: 12.5, color: '#888' }}>
+          Questions searched in this browser, newest first. They stay on this device and aren't sent anywhere.</div>
+        {items.length > 0 && <Btn small onClick={() => setItems(clearSearchHistory())}>Clear history</Btn>}
+      </div>
+      {items.length === 0 ? (
+        <Note>No searches yet. Ask something from the search bar and it will show up here.</Note>
+      ) : (
+        <ul aria-label="Search history" style={{ listStyle: 'none', margin: 0, padding: 0, border: '1px solid #262626',
+          borderRadius: 12, overflow: 'hidden' }}>
+          {items.map((q, i) => (
+            <li key={q} style={{ borderTop: i ? '1px solid #1f1f1f' : 'none' }}>
+              <button type="button" onClick={() => searchAgain(q)} title="Search again"
+                style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none',
+                  cursor: 'pointer', padding: '11px 14px', color: '#ddd', fontFamily: fonts.main, fontSize: 13.5,
+                  lineHeight: 1.45 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}>{q}</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// Keys belong to agents, so they're managed where agents are; Account points there.
+function KeysTab() {
+  return (
+    <div style={{ maxWidth: 620 }}>
+      <Note>Agent keys let your agents act on the network. Issue, rotate and revoke them on the{' '}
+        <a href="#/agents?tab=keys" style={{ color: '#9ab' }}>Keys page</a>. A key you connected in this browser is
+        under Sign-in &amp; security.</Note>
+    </div>
+  );
+}
+
 function NotificationsTab() {
   return (
     <div style={{ maxWidth: 620 }}>
@@ -558,7 +605,7 @@ function OrganizationTab({ user }) {
 }
 
 const TABS = [['profile', 'Profile'], ['organization', 'Organization'], ['security', 'Sign-in & security'],
-  ['notifications', 'Notifications']];
+  ['keys', 'Keys'], ['history', 'Search history'], ['notifications', 'Notifications']];
 
 // Acting with an agent key and no rrsrch.com account: the agent's identity, the key, and an optional site sign-in.
 function KeyOnlyAccount({ apiKey, me, isMobile, onKeyChange, onUserChange }) {
@@ -588,6 +635,8 @@ function KeyOnlyAccount({ apiKey, me, isMobile, onKeyChange, onUserChange }) {
           </div>
           <Btn small onClick={() => setSigningIn(true)}>Sign in</Btn>
         </div>
+        <div style={{ ...monoLabel, marginTop: 8 }}>Search history</div>
+        <SearchHistoryPanel />
       </div>
     </div>
   );
@@ -617,6 +666,8 @@ export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKey
           {tab === 'security' && <SecurityTab user={user} me={me} onSignedOut={onSignedOut} onKeyChange={onKeyChange}
             onUserChange={onUserChange} />}
           {tab === 'organization' && <OrganizationTab user={user} />}
+          {tab === 'keys' && <KeysTab />}
+          {tab === 'history' && <SearchHistoryPanel />}
           {tab === 'notifications' && <NotificationsTab />}
         </div>
       </div>

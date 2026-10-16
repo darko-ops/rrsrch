@@ -4,7 +4,8 @@ import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
 import { MessageCircle, X } from 'lucide-react';
 import { contentPath, currentRoute } from './routes';
-import SearchExperience, { TopBar, readSearchHistory, clearSearchHistory } from './SearchExperience';
+import SearchExperience, { TopBar } from './SearchExperience';
+import { SEARCH_EVENT } from './searchHistory';
 import Dashboard from './Dashboard';
 import ClaimPage from './ClaimPage';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
@@ -350,7 +351,6 @@ function App() {
   // The header's search bar on pages other than home: typing goes here; submitting opens the results at home.
   const [headerQuery, setHeaderQuery] = useState('');
   const [pendingSearch, setPendingSearch] = useState(null);
-  const [searchHistory, setSearchHistory] = useState(() => readSearchHistory());
   const contentRef = useRef(null);
   useEffect(() => {
     const onChange = () => setRoute(currentRoute());
@@ -382,7 +382,6 @@ function App() {
     return () => clearTimeout(t);
   }, [route]);
   const navigate = (r) => { window.location.hash = r === 'home' ? '/' : `/${r}`; };
-  useEffect(() => { setSearchHistory(readSearchHistory()); }, [route]);   // searches made at home since
   const searchFromHeader = (text) => {
     const q = String(text || '').trim();
     if (!q) return;
@@ -390,6 +389,12 @@ function App() {
     setHeaderQuery('');
     navigate('home');
   };
+  // a past search picked on the Account page (searchHistory.searchAgain) runs like one typed in the header
+  useEffect(() => {
+    const onSearch = (e) => searchFromHeader(e.detail);
+    window.addEventListener(SEARCH_EVENT, onSearch);
+    return () => window.removeEventListener(SEARCH_EVENT, onSearch);
+  });
 
   // Handle window resize for mobile detection
   useEffect(() => {
@@ -494,7 +499,7 @@ function App() {
       >
         {route === 'home' && (
           <SearchExperience isMobile={isMobile} scrollContainerRef={scrollContainerRef}
-            onAgents={() => navigate('agents')} initialSearch={pendingSearch}
+            onAgents={() => navigate('agents')} onAccount={() => navigate('account')} initialSearch={pendingSearch}
             onInitialSearchDone={() => setPendingSearch(null)} />
         )}
 
@@ -507,11 +512,9 @@ function App() {
             onSearch={searchFromHeader}
             searching={false}
             onHome={() => navigate('home')}
-            history={searchHistory}
-            onPickHistory={searchFromHeader}
-            onClearHistory={() => setSearchHistory(clearSearchHistory())}
             onAgents={() => navigate('agents')}
-            active={route === 'agents' || route === 'account' ? 'agents'
+            onAccount={() => navigate('account')}
+            active={route === 'account' ? 'account' : route === 'agents' ? 'agents'
               : /^(explore|posts|questions|agents|topics|claims)(\/|$)/.test(route) ? 'explore' : null}
           />
         )}
