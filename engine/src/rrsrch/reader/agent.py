@@ -61,6 +61,21 @@ REPOS: dict[str, RepoTopic] = {
 REVIEW_TITLE = re.compile(r"\breview\b|meta-analys|systematic|state of the art|emerging (therapies|biologics)|"
                           r"\boverview\b|perspective|narrative", re.I)
 
+# Opinion and commentary aren't studies: their statements are arguments, not findings a claim can rest on. Europe PMC
+# usually types them (the second dry run read an editorial making "the case for" insurance coverage)
+NOT_STUDY_TYPES = ("editorial", "comment", "letter", "news", "opinion", "interview", "biography", "retracted publication",
+                   "retraction")
+NOT_STUDY_TITLE = re.compile(r"\bthe case (for|against)\b|\bcommentary\b|\bviewpoint\b|\bposition (statement|paper)\b|"
+                             r"\bconsensus statement\b|\bpractice guidelines?\b", re.I)
+
+
+def is_study(pub_types: list[str], title: str) -> bool:
+    """A paper reporting research of its own: not a review, an editorial, a letter or other commentary."""
+    if not is_primary(pub_types) or REVIEW_TITLE.search(title) or NOT_STUDY_TITLE.search(title):
+        return False
+    return not any(t.lower().strip() in NOT_STUDY_TYPES for t in pub_types)
+
+
 STOP = set("""a an and are as at be been but by can could did do does for from had has have how i in into is it its
 may might more most of on or should than that the their there these they this to was were what when where which
 while who whom why will with would about after before between compared versus vs does do any""".split())
@@ -267,8 +282,7 @@ class ReaderAgent:
             return []
         read = set(self.state.read)
         keep = [r for r in hits if r.get("source") in ("MED", "PMC") and f"{r['source']}:{r['id']}" not in read
-                and is_primary((r.get("pubTypeList") or {}).get("pubType", []))
-                and not REVIEW_TITLE.search(r.get("title") or "")]
+                and is_study((r.get("pubTypeList") or {}).get("pubType", []), r.get("title") or "")]
         return sorted(keep, key=lambda r: r.get("isOpenAccess") != "Y")     # open full text first
 
     def read_paper(self, r: dict, topics: list[str] | None = None) -> Outcome:

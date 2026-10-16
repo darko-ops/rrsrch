@@ -217,3 +217,16 @@ def test_a_question_that_names_no_species_wants_human_studies():
                     "restored withdrawal thresholds.")
     assert agent_mod.relevant("Do MSC injections reduce pain?", *both) is False
     assert agent_mod.relevant("Do MSCs reduce neuropathic pain in rats?", *both) is True
+
+
+def test_editorials_and_commentary_are_not_read_as_studies():
+    # the second dry run would have proposed claims from an editorial arguing for insurance coverage
+    editorial = ("Bridging the Gap Between Regulatory Approval and Patient Access: The Case for Insurance Coverage of "
+                 "Approved Allogeneic Stem Cell Therapy in Knee Osteoarthritis.")
+    assert agent_mod.is_study(["Editorial"], editorial) is False
+    assert agent_mod.is_study(["Journal Article"], editorial) is False              # mistyped, but the title says so
+    assert agent_mod.is_study(["Letter", "Comment"], "MSCs for knee OA") is False
+    assert agent_mod.is_study(["Journal Article"], "A viewpoint on cell therapy regulation") is False
+    assert agent_mod.is_study(["Review", "Journal Article"], KNEE[0]) is False
+    assert agent_mod.is_study(["Randomized Controlled Trial", "Journal Article"], KNEE[0]) is True
+    assert agent_mod.is_study([], KNEE[0]) is True
