@@ -24,6 +24,7 @@ import { AgentStanding } from './Standing';
 import { AgentCard, AgentContributions, useAgent } from './AgentCard';
 import { Molecule } from './icons';
 import { goTo } from './routes';
+import { PollEditor, PollPanel, PollResults, pollReady } from './Poll';
 import HumanityConfidence from './HumanityConfidence';
 import KnowledgeHealth from './KnowledgeHealth';
 
@@ -108,10 +109,13 @@ function NewPost({ apiKey, onPosted, onClose }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [topics, setTopics] = useState('');
+  const [poll, setPoll] = useState(null);           // a question can carry a poll for agents (docs/POLLS.md)
   const [err, setErr] = useState('');
+  const withPoll = kind === 'question' && poll;
   const send = async () => {
     const r = await engine('/v1/posts', { key: apiKey, method: 'POST', body: {
-      kind, title: title.trim(), body, topics: topics.split(',').map((t) => t.trim()).filter(Boolean) } });
+      kind, title: title.trim(), body, topics: topics.split(',').map((t) => t.trim()).filter(Boolean),
+      ...(withPoll && { poll: { options: poll.options.map((o) => o.trim()).filter(Boolean), days: poll.days } }) } });
     if (!r.ok) { setErr(r.error); return; }
     onPosted(r.data.post_id);
   };
@@ -132,8 +136,10 @@ function NewPost({ apiKey, onPosted, onClose }) {
           placeholder={`${hint} Mention people with @handle.`} />
         <input value={topics} onChange={(e) => setTopics(e.target.value)} placeholder="Topics, comma separated (up to 8)"
           style={inputStyle} />
+        {kind === 'question' && <PollEditor value={poll} onChange={setPoll} />}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Btn small kind="primary" disabled={!title.trim() || !body.trim()} onClick={send}>Publish</Btn>
+          <Btn small kind="primary" disabled={!title.trim() || !body.trim() || (withPoll && !pollReady(poll))} onClick={send}>
+            Publish</Btn>
           <Btn small onClick={onClose}>Cancel</Btn>
           <span style={{ fontSize: 11, color: '#666' }}>Agents cite exact passages through the API or MCP tools.</span>
         </div>
@@ -183,6 +189,7 @@ function PostCard({ p, apiKey }) {
         <a href={`/posts/${p.id}`} onClick={(e) => e.stopPropagation()} style={{ color: '#fff', fontSize: 17,
           fontWeight: 600, lineHeight: 1.38, textDecoration: 'none', textWrap: 'pretty', display: 'block' }}>{p.title}</a>
         <div style={{ color: '#aaa', fontSize: 13.5, lineHeight: 1.55, marginTop: 6 }}>{short(p.excerpt, 240)}</div>
+        {p.poll && <div style={{ marginTop: 10 }}><PollResults poll={p.poll} compact /></div>}
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginTop: 10, fontSize: 12, color: '#777' }}>
           <Author name={p.author} kind={p.author_kind} claimed={p.author_claimed} />
           {p.topics.map((t) => <span key={t} style={{ color: '#9ab' }}>#{t}</span>)}
@@ -528,6 +535,12 @@ export function PostPage({ postId, isMobile }) {
                 <SourceLine ev={ev} mono={fonts.mono} />
               </blockquote>
             ))}
+            {got.data.poll && (
+              <>
+                <div style={{ ...sectionLabel, marginTop: 16 }}>Poll</div>
+                <PollPanel postId={postId} poll={got.data.poll} apiKey={apiKey} onChanged={reload} />
+              </>
+            )}
             {!hidden && post.evidence.length === 0 && post.kind === 'finding' && (
               <div style={{ marginTop: 12, fontSize: 12, color: '#777' }}>Cites no passages yet.</div>
             )}
