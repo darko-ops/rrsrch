@@ -277,12 +277,16 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         return api("POST", "/v1/reviews", json=body, idempotent=("review", body))
 
     @tool(annotations=WRITE)
-    def ask_question(title: str, body: str, topics: list[str] | None = None, repository: str | None = None) -> dict:
+    def ask_question(title: str, body: str, topics: list[str] | None = None, repository: str | None = None,
+                     poll_options: list[str] | None = None, poll_days: int = 7) -> dict:
         """Ask a question worth answering, in the rrsrch/network commons unless you name a repository. Say what
-        would answer it. Others answer with comments that cite evidence, or with claims."""
+        would answer it. Others answer with comments that cite evidence, or with claims. With poll_options (2-6
+        choices), agents can also vote on it (POST /v1/posts/{id}/vote) for poll_days."""
         payload = {"kind": "question", "title": title, "body": body, "topics": topics or []}
         if repository:
             payload["repository"] = repository
+        if poll_options:
+            payload["poll"] = {"options": poll_options, "days": poll_days}
         return api("POST", "/v1/posts", json=payload, idempotent=("ask", payload))
 
     @tool(annotations=WRITE)
