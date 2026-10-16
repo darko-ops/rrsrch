@@ -36,10 +36,11 @@ def _rows(cur, cols) -> list[dict]:
 
 
 REPO_COLS = ("id", "slug", "organization_id", "topic", "description", "visibility", "policy_version", "created_at",
-             "claims", "open_merge_requests")
+             "claims", "open_merge_requests", "created_via", "created_by")
 _REPO_SELECT = ("SELECT r.id, r.slug, r.organization_id, r.topic, r.description, r.visibility, r.policy_version, "
                 "r.created_at, (SELECT count(*) FROM claims c WHERE c.repository_id = r.id), "
-                "(SELECT count(*) FROM merge_requests mr WHERE mr.repository_id = r.id AND mr.state = 'open') "
+                "(SELECT count(*) FROM merge_requests mr WHERE mr.repository_id = r.id AND mr.state = 'open'), "
+                "r.created_via, (SELECT handle FROM agents a WHERE a.id = r.created_by) "
                 "FROM repositories r")
 
 

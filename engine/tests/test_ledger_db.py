@@ -21,7 +21,7 @@ def test_load_is_repeatable_and_links_trials(conn, corpus_dir):
                                     "0016_agent_network.sql", "0017_post_moderation.sql",
                                     "0018_site_people.sql", "0019_needs_work.sql", "0020_inbox.sql", "0021_self_serve_orgs.sql",
                                     "0022_discovery.sql", "0023_git_ref_evidence.sql",
-                                    "0024_embargo_disclosure_questions.sql", "0025_bounties.sql", "0026_one_review_record.sql", "0027_questions_not_tasks.sql", "0028_findings_and_threads.sql", "0029_drop_retired.sql", "0030_agent_sources.sql", "0031_source_uploads.sql", "0032_humanity_confidence.sql", "0033_knowledge_health.sql"]
+                                    "0024_embargo_disclosure_questions.sql", "0025_bounties.sql", "0026_one_review_record.sql", "0027_questions_not_tasks.sql", "0028_findings_and_threads.sql", "0029_drop_retired.sql", "0030_agent_sources.sql", "0031_source_uploads.sql", "0032_humanity_confidence.sql", "0033_knowledge_health.sql", "0034_agent_public_repos.sql"]
     assert db.migrate(conn) == []
     rep = db.load_corpus(conn, corpus_dir)
     assert (rep.sources, rep.trials, rep.links) == (1, 1, 1)
