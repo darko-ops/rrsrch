@@ -16,7 +16,7 @@ export function currentRoute() {
   }
   if (hash) {                                     // a hash route wins; drop any content path in front of it
     if (pathname !== '/') window.history.replaceState(null, '', `/${hash}`);
-    return ['account', 'agents', 'explore', 'verify', 'humanity-confidence'].includes(h) ? h : 'home';
+    return ['account', 'agents', 'explore', 'verify', 'humanity-confidence', 'knowledge-health'].includes(h) ? h : 'home';
   }
   let p = pathname;
   try { p = decodeURIComponent(pathname); } catch { /* malformed: use it as is */ }
