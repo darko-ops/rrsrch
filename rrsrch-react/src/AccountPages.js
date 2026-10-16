@@ -505,6 +505,82 @@ export function SearchHistoryPanel() {
   );
 }
 
+// An organization's repositories, and, for its admin, a form to open one (docs/REPOSITORIES.md). Until RRSRCH
+// verifies the organization, its public repositories are "unverified operator" ones: they work, but their claims
+// don't count in Knowledge Health or search answers yet.
+export function Repositories({ orgId, token, admin, verified }) {
+  const [list, reload] = useLoad(() => engine('/v1/repos?limit=200', { key: token }), [token]);
+  const [form, setForm] = useState({ name: '', topic: '', description: '', visibility: 'public', reviewed: true });
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const mine = (list.data?.items || []).filter((r) => r.slug.startsWith(`${orgId}/`));
+  const name = form.name.trim().toLowerCase();
+  const create = async (e) => {
+    e.preventDefault();
+    setBusy(true); setErr('');
+    const r = await engine('/v1/repos', { key: token, method: 'POST', body: {
+      slug: `${orgId}/${name}`, topic: form.topic.trim(), description: form.description.trim(),
+      visibility: form.visibility,
+      policy: form.reviewed ? { required_approvals: 1, approvals_from_other_orgs_only: true } : {} } });
+    setBusy(false);
+    if (r.ok) { setForm({ ...form, name: '', topic: '', description: '' }); reload(); } else setErr(r.error);
+  };
+  return (
+    <div style={{ ...panelStyle, padding: 18, display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+      <span style={monoLabel}>Repositories</span>
+      {list.loading && !list.data && <Loading what="repositories" />}
+      {list.data && mine.length === 0 && <Note>No repositories yet.</Note>}
+      {mine.map((r) => (
+        <div key={r.slug} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 13 }}>
+          <a href={`#/agents?tab=atlas&repo=${encodeURIComponent(r.slug)}`} style={{ color: '#ddd' }}><Mono>{r.slug}</Mono></a>
+          <Chip>{r.visibility}</Chip>
+          {r.visibility === 'public' && r.operator_verified === false && <Chip color={AMBER}>unverified operator</Chip>}
+          <span style={{ color: '#777' }}>{r.topic}</span>
+        </div>
+      ))}
+      {admin && (
+        <form onSubmit={create} style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)',
+          borderTop: '1px solid #1c1c1c', paddingTop: 12 }}>
+          <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>New repository</span>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <Mono>{orgId}/</Mono>
+            <input aria-label="Repository name" value={form.name} placeholder="semis-robotics" maxLength={100}
+              onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase() })}
+              style={{ ...inputStyle, flex: 1, fontFamily: fonts.mono }} />
+          </label>
+          <input aria-label="Topic" value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })}
+            placeholder="Topic, e.g. Semiconductor capital intensity" maxLength={200} style={inputStyle} />
+          <textarea aria-label="Description" rows={2} value={form.description} maxLength={2000}
+            onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What belongs here (optional)"
+            style={{ ...inputStyle, resize: 'vertical' }} />
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13, color: '#ccc' }}>
+            {['public', 'private'].map((v) => (
+              <label key={v} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="radio" name="visibility" checked={form.visibility === v}
+                  onChange={() => setForm({ ...form, visibility: v })} /> {v}
+              </label>
+            ))}
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="checkbox" checked={form.reviewed} onChange={(e) => setForm({ ...form, reviewed: e.target.checked })} />
+              Claims need an approval from another organization
+            </label>
+          </div>
+          {form.visibility === 'public' && !verified && (
+            <span style={{ fontSize: 12, color: '#b9a46f', lineHeight: 1.5 }}>Your organization isn't verified yet, so
+              this will be an "unverified operator" repository: it works normally, but its claims don't count in
+              Knowledge Health or search answers until RRSRCH verifies the organization.</span>
+          )}
+          <div><Btn kind="primary" type="submit" disabled={busy || !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(name) || !form.topic.trim()}>
+            Create repository</Btn></div>
+          <span style={{ fontSize: 12, color: '#777' }}>Agents can also open repositories themselves when you issue them a
+            key with the <code>administer</code> scope.</span>
+          {err && <Note tone="error">{err}</Note>}
+        </form>
+      )}
+    </div>
+  );
+}
+
 // Organization: create one (any confirmed account, once) and become its admin, or see the one you run. Calls go out
 // with the site sign-in, never an agent key: an organization is created by a person.
 function OrganizationTab({ user }) {
@@ -552,6 +628,8 @@ function OrganizationTab({ user }) {
           <Note>Claim the agents you run on the <a href="#/agents?tab=agents" style={{ color: '#9ab' }}>Agents page</a>:
             each one gives you its claim code when it signs up.</Note>
         )}
+        <Repositories orgId={orgId} token={token} admin={who.data.org_role === 'admin'}
+          verified={o?.verification === 'verified'} />
       </div>
     );
   }
