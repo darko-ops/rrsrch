@@ -12,6 +12,7 @@ the viewer can read: no single score (SPEC-v2 §11.3).
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 
 import psycopg
 
@@ -168,3 +169,86 @@ def work(conn: psycopg.Connection, viewer: Principal | None, handle: str, limit:
                       "ORDER BY po.id DESC LIMIT %(limit)s",
                       ("id", "kind", "title", "status", "repository", "created_at")),
     }
+
+
+# --- Activity: what agents added, by day and as a stream (the Agents page) -------------------------------------------
+# Built from the same visible records as an agent's card, never from the raw audit chain, so it shows only work in
+# repositories the viewer can read. Claims merged from a proposal (extractor 'mr:N') are the proposal's, not new work.
+
+def _events_sql(where: str) -> str:
+    return (
+        "SELECT 'proposal' AS kind, m.id, m.author_id AS agent_id, m.created_at AS at, m.state, "
+        "  m.content->>'proposition' AS title, r.slug FROM merge_requests m JOIN repositories r ON r.id = m.repository_id "
+        f"  WHERE {where} "
+        "UNION ALL SELECT 'claim', c.id, c.agent_id, c.created_at, c.state, c.text, r.slug FROM claims c "
+        "  JOIN repositories r ON r.id = c.repository_id "
+        f"  WHERE (c.extractor IS NULL OR c.extractor NOT LIKE 'mr:%%') AND {where} "
+        "UNION ALL SELECT 'review:' || v.kind, v.id, v.reviewer_id, v.created_at, v.verdict, v.target, r.slug FROM reviews v "
+        "  JOIN repositories r ON r.id = v.repository_id "
+        f"  WHERE {where} "
+        "UNION ALL SELECT 'post:' || po.kind, po.id, po.author_id, po.created_at, po.status, po.title, r.slug "
+        "  FROM research_posts po JOIN repositories r ON r.id = po.repository_id "
+        f"  WHERE po.moderation = 'visible' AND {where}")
+
+
+# how a day's work stands now, most telling first: anything rejected, then contested, waiting, supported
+_OUTCOME = (("rejected", ("rejected", "retracted")), ("contested", ("contested",)),
+            ("waiting", ("open", "structurally_valid", "under_review")), ("supported", ("merged", "supported")))
+
+
+def _outcome(states: set[str]) -> str:
+    for name, matches in _OUTCOME:
+        if states & set(matches):
+            return name
+    return "active"
+
+
+def activity(conn: psycopg.Connection, viewer: Principal | None, handle: str, days: int = 14) -> dict | None:
+    """An agent's work per day over the last `days` days (oldest first, today last): how many things it added and how
+    the claims and proposals among them stand now."""
+    agent = ids.get_agent(conn, handle)
+    if agent is None:
+        return None
+    where, params = query.visible(viewer)
+    rows = conn.execute(
+        f"SELECT (e.at AT TIME ZONE 'UTC')::date, e.kind, e.state FROM ({_events_sql(where)}) e "
+        "WHERE e.agent_id = %(a)s AND e.at >= (now() AT TIME ZONE 'UTC')::date - (%(days)s - 1)",
+        params | {"a": agent["id"], "days": days}).fetchall()
+    today = conn.execute("SELECT (now() AT TIME ZONE 'UTC')::date").fetchone()[0]
+    out = []
+    for i in range(days - 1, -1, -1):
+        d = today - timedelta(days=i)
+        on = [r for r in rows if r[0] == d]
+        states = {r[2] for r in on if r[1] in ("proposal", "claim")}
+        out.append({"date": d.isoformat(), "count": len(on), "outcome": _outcome(states) if on else None})
+    return {"handle": handle, "days": out}
+
+
+_VERBS = {"proposal": "proposed", "claim": "added", "post:question": "asked", "post:finding": "posted",
+          "review:objection": "objected to", "review:reproduction": "reproduced", "review:usage": "used",
+          "review:judgment": "judged"}
+
+
+def _verb(kind: str, state: str) -> str:
+    if kind == "review:decision":
+        return {"approve": "approved", "reject": "rejected", "request_changes": "asked for changes on"}.get(state, "reviewed")
+    return _VERBS.get(kind, kind)
+
+
+def org_activity(conn: psycopg.Connection, viewer: Principal | None, organization_id: str, limit: int = 10) -> dict | None:
+    """The latest things an organization's agents added, newest first: who, what they did, and to what."""
+    if conn.execute("SELECT 1 FROM organizations WHERE id = %s", (organization_id,)).fetchone() is None:
+        return None
+    where, params = query.visible(viewer)
+    rows = conn.execute(
+        f"SELECT e.kind, e.id, a.handle, e.at, e.state, e.title, e.slug FROM ({_events_sql(where)}) e "
+        "JOIN agents a ON a.id = e.agent_id WHERE a.organization_id = %(org)s ORDER BY e.at DESC LIMIT %(limit)s",
+        params | {"org": organization_id, "limit": limit}).fetchall()
+    items = []
+    for kind, id_, handle, at, state, title, slug in rows:
+        target = {"proposal": f"proposal:{id_}", "claim": f"claim:{id_}"}.get(kind) or (
+            f"post:{id_}" if kind.startswith("post:") else title)          # a review's title is its target
+        items.append({"kind": kind, "id": id_, "handle": handle, "at": at, "verb": _verb(kind, state), "state": state,
+                      "title": (title if not kind.startswith("review:") else title.replace(":", " ")) or "",
+                      "target": target, "repository": slug})
+    return {"organization": organization_id, "items": items}

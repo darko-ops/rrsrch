@@ -73,9 +73,13 @@ ABOUT = ("joint", "condition", "cell_type")
 def relevant(question: str, title: str, abstract: str) -> bool:
     """Whether a paper is about what the question asks. Every joint, condition and cell type the question names must
     appear in the paper (or a narrower term of it: "MSCs" covers adipose-derived MSCs). A question that names none
-    must share at least two keywords with it. A search engine's best match is not enough: it may share one word and
+    must share at least two keywords with it. A question naming no species wants human studies. A search engine's best match is not enough: it may share one word and
     nothing else."""
     q, paper = gate.source_context(question, ""), gate.source_context(title, abstract)
+    # a question that doesn't name a species is about people: an animal study doesn't answer it
+    wanted = q.get("species") or frozenset({"human"})
+    if paper.get("species") and not paper["species"] & wanted:
+        return False
     up = profiles.CLINICAL.vocab.ancestors
     named = [(g, term) for g in ABOUT for term in q.get(g, ())]
     if named:

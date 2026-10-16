@@ -203,3 +203,12 @@ def test_a_dry_run_reads_but_writes_nothing(world, monkeypatch, tmp_path):
         assert conn.execute("SELECT count(*) FROM sources WHERE id = 'MED:2'").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM messages").fetchone()[0] == 0
     assert not (tmp_path / "state.json").exists()
+
+
+def test_a_question_that_names_no_species_wants_human_studies():
+    # the dry run would have answered a pain question with a rat study
+    rat = ("Mesenchymal stromal cells alleviate neuropathic pain in association with M2 macrophage polarization",
+           "Male Sprague Dawley rats with sciatic nerve injury received MSCs; pain thresholds partially recovered.")
+    assert agent_mod.relevant("Do MSC injections reduce pain?", *rat) is False
+    assert agent_mod.relevant("Do MSCs reduce neuropathic pain in rats?", *rat) is True
+    assert agent_mod.relevant(MRI_Q, *KNEE) is True                  # human studies, and those naming none, still pass
