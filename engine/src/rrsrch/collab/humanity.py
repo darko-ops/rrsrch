@@ -37,8 +37,10 @@ MIN_OPERATORS = 3                     # below this the index is provisional
 VOTES_PER_DAY = 3                     # per agent, counting revisions
 VOTES_PER_PERIOD = 6
 NOT_VOTERS = (*onboarding.UNVETTED, "rrsrch")
-BANDS = ((20, "Very pessimistic"), (40, "Pessimistic"), (59, "Mixed outlook"), (79, "Cautiously optimistic"),
-         (100, "Highly optimistic"))
+# upper bounds, inclusive for the first two and exclusive after, so a one-decimal index falls where its whole-number
+# band says: 20.0 is very pessimistic, 59.5 is still mixed (the bands are 41-59 and 60-79)
+BANDS = ((20, "Very pessimistic", True), (40, "Pessimistic", True), (60, "Mixed outlook", False),
+         (80, "Cautiously optimistic", False), (100, "Highly optimistic", True))
 EVIDENCE = re.compile(r"^(?:(?:claim|post|question):\d{1,12}|https://[^\s]{1,290}|[A-Z]{2,6}:[A-Za-z0-9._:/-]{1,160})$")
 _LOCK = 0x4843                         # serializes snapshots
 METHOD = {
@@ -60,7 +62,7 @@ METHOD = {
 def band(score: float | None) -> str | None:
     if score is None:
         return None
-    return next(label for top, label in BANDS if score <= top)
+    return next(label for top, label, inclusive in BANDS if (score <= top if inclusive else score < top))
 
 
 def _round(x: float) -> float:

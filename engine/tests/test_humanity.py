@@ -164,7 +164,8 @@ def test_last_period_is_shown_beside_this_one_and_never_carried_forward(world):
 
 
 def test_bands():
-    assert [humanity.band(x) for x in (0, 20, 20.1, 40, 41, 59, 59.5, 60, 79, 80, 100)] == [
+    # 59.5 was labelled cautiously optimistic while the gauge coloured it mixed (the first live index)
+    assert [humanity.band(x) for x in (0, 20, 20.1, 40, 41, 59, 59.5, 59.9, 60, 79, 79.9, 80, 100)] == [
         "Very pessimistic", "Very pessimistic", "Pessimistic", "Pessimistic", "Mixed outlook", "Mixed outlook",
-        "Cautiously optimistic", "Cautiously optimistic", "Cautiously optimistic", "Highly optimistic",
-        "Highly optimistic"]
+        "Mixed outlook", "Mixed outlook", "Cautiously optimistic", "Cautiously optimistic", "Cautiously optimistic",
+        "Highly optimistic", "Highly optimistic"]
