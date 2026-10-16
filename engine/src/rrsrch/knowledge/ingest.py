@@ -114,6 +114,48 @@ def add_url(conn: psycopg.Connection, p: Principal | None, url: str, *, client=N
     return query.get_source(conn, sid), True
 
 
+UPLOAD_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
+
+
+def add_upload(conn: psycopg.Connection, p: Principal | None, content: bytes, content_type: str, origin: str,
+               title: str = "") -> tuple[dict, bool]:
+    """Store a document an agent sent itself, for a source with no public address (docs/SOURCES.md, step 2). It is
+    agent-supplied: provenance `uploaded`, kept apart from what the engine fetched, and a repository's claims rest on
+    it only if the repository accepts uploads. `origin` is the agent's account of where it came from. The same bytes
+    uploaded again are the same source."""
+    p = _can_add(p)
+    ctype = (content_type or "").split(";")[0].strip().lower()
+    if ctype not in UPLOAD_TYPES:
+        hint = " (PDFs come later; see docs/SOURCES.md)" if ctype == "application/pdf" else ""
+        raise Refused(422, f"{ctype or 'unknown content'} can't be stored yet{hint}")
+    if not content or len(content) > web.MAX_BYTES:
+        raise Refused(422, f"an upload must be 1 byte to {web.MAX_BYTES // (1024 * 1024)} MB")
+    origin = " ".join((origin or "").split())
+    if not 10 <= len(origin) <= 1000:
+        raise Refused(400, "say where the document came from (origin, 10 to 1000 characters): who published it, when, and how you got it")
+    digest = snapshot.sha256(content)
+    sid = f"UP:{digest[:24]}"
+    if conn.execute("SELECT 1 FROM sources WHERE id = %s", (sid,)).fetchone():
+        return query.get_source(conn, sid), False
+    _rate_limited(conn, p)
+    text = htmlmod.decode(content, "utf-8")
+    found_title, body = htmlmod.to_text(text) if ctype != "text/plain" else ("", htmlmod.plain(text))
+    if len(body) < 40:
+        raise Refused(422, "the document has no readable text to cite")
+    title = " ".join((title or found_title or origin).split())[:500]
+    with conn.transaction():
+        conn.execute(
+            "INSERT INTO sources (id, title, has_full_text, snapshot_sha256, kind, provenance, content_type, added_by, "
+            "fetched_at, origin) VALUES (%s, %s, true, %s, 'upload', 'uploaded', %s, %s, now(), %s)",
+            (sid, title, digest, ctype, p.agent_id, origin))
+        db._put_document(conn, sid, "title", title)
+        db._put_document(conn, sid, "fulltext", body)
+        audit.append(conn, "source.add", f"source:{sid}", actor_id=p.agent_id,
+                     detail={"source_id": sid, "kind": "upload", "origin": origin, "content_type": ctype,
+                             "content_sha256": digest, "converter": htmlmod.VERSION})
+    return query.get_source(conn, sid), True
+
+
 def add_source(conn: psycopg.Connection, p: Principal | None, *, source_id: str | None = None,
                doi: str | None = None, url: str | None = None, epmc: EuropePMC | None = None,
                client=None, resolve=None) -> tuple[dict, bool]:

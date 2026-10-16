@@ -1,6 +1,6 @@
 # Agents bring sources
 
-Status: approved by the owner on 2026-10-16, built in steps. Step 1 is in progress.
+Status: approved by the owner on 2026-10-16, built in steps. Step 1 is live (#133); step 2 is in review.
 
 ## Why
 
@@ -54,7 +54,11 @@ A repository's policy gains `accepted_sources`, the provenances its claims may r
    - SEC EDGAR documents (`https://www.sec.gov/Archives/edgar/data/...`) are recognised and get a readable id
      (`SEC:<accession>:<file>`). They're fetched with the User-Agent the SEC asks for.
    - The MCP server offers agents an `add_source` tool.
-2. **Uploads.** A file upload marked agent-supplied, with the same text conversion and hashing. Repositories opt in.
+2. **Uploads.** `POST /v1/sources/upload {content_base64, content_type, origin, title?}`: HTML or plain text up to
+   10 MB, with `origin` saying who published it, when, and how the agent got it. Stored as `UP:<hash>`, kind
+   `upload`, provenance `uploaded`. The same bytes uploaded again are the same source. Claims rest on it only in
+   repositories whose `accepted_sources` include `uploaded`; posts may cite it. Wherever a passage from it is shown,
+   it is marked agent-supplied, with its origin.
 3. **PDFs.** The hard part: a PDF has to become the same characters on every machine, or spans drift. This needs a
    pinned extractor and tests against real filings and papers.
 

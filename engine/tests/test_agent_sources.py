@@ -155,3 +155,46 @@ def test_a_repository_decides_which_provenance_it_accepts(world, fake_web):
     mr = open_mr(client_, h["bot"], {"repository": PILOT, "content": content})
     check = next(c for c in client_.get(f"/v1/merge-requests/{mr}").json()["checks"] if c["name"] == "source_provenance")
     assert check["passed"] is False and "accepts registry" in check["detail"]
+
+
+# --- uploads (step 2) ----------------------------------------------------------------------------------------------
+
+def upload(client_, who, content=FILING.encode(), ctype="text/html", origin="Micron FY2024 annual report, from the "
+           "company's investor relations site, downloaded 2026-10-16", **kw):
+    import base64
+    return client_.post("/v1/sources/upload", headers=who, json={"content_base64": base64.b64encode(content).decode(),
+                                                                  "content_type": ctype, "origin": origin} | kw)
+
+
+def test_an_agent_can_upload_what_has_no_public_address_as_agent_supplied(world):
+    client_, h, url = world
+    assert upload(client_, {}).status_code == 401
+    assert upload(client_, h["bot"], origin="short").status_code == 400          # origin says too little
+    assert upload(client_, h["bot"], ctype="application/pdf").status_code == 422
+    assert upload(client_, h["bot"], content=b"<p>hi</p>").status_code == 422    # nothing worth citing
+    r = upload(client_, h["bot"])
+    assert r.status_code == 201, r.json()
+    src = r.json()["source"]
+    assert src["id"].startswith("UP:") and (src["kind"], src["provenance"], src["url"]) == ("upload", "uploaded", None)
+    assert src["origin"].startswith("Micron FY2024 annual report") and src["added_by"] == "bot"
+    assert upload(client_, h["ext"]).json()["source"]["id"] == src["id"]       # same bytes, same source
+
+    # the pilot doesn't accept uploads unless it opts in
+    span = client_.get(f"/v1/sources/{src['id']}/locate", params={"quote": QUOTE}).json()["spans"][0]
+    content = {"repository": PILOT, "type": "empirical", "proposition": "Micron's fiscal 2024 capex was $8.4 billion.",
+               "evidence": [["supports", {k: span[k] for k in ("source_id", "doc_sha256", "start", "end")}]]}
+    mr = open_mr(client_, h["bot"], {"repository": PILOT, "content": content})
+    check = next(c for c in client_.get(f"/v1/merge-requests/{mr}").json()["checks"] if c["name"] == "source_provenance")
+    assert check["passed"] is False
+    assert client_.patch(f"/v1/repos/{PILOT}", headers=h["admin"],
+                         json={"policy": {"accepted_sources": ["registry", "fetched", "uploaded"]}}).status_code == 200
+    mr2 = open_mr(client_, h["bot"], {"repository": PILOT, "content": content | {"proposition": "Capex was $8.4B in FY2024."}})
+    check = next(c for c in client_.get(f"/v1/merge-requests/{mr2}").json()["checks"] if c["name"] == "source_provenance")
+    assert check["passed"] is True
+
+    # a finding citing it shows readers it's agent-supplied, and where it came from
+    pid = client_.post("/v1/posts", headers=h["bot"], json={"kind": "finding", "title": "Micron capex FY2024",
+                                                             "body": "From its annual report.", "evidence": [
+                                                                 {k: span[k] for k in ("source_id", "doc_sha256", "start", "end")}]}).json()["post_id"]
+    ev = client_.get(f"/v1/posts/{pid}").json()["post"]["evidence"][0]
+    assert (ev["source_provenance"], ev["source_url"]) == ("uploaded", None) and ev["source_origin"].startswith("Micron")

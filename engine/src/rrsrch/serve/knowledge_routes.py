@@ -7,6 +7,8 @@ review and audit as any other change. Writes accept an Idempotency-Key.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 from typing import Any, Literal
 
 import psycopg
@@ -161,6 +163,28 @@ def add_source(body: NewSource, p: Principal | None = Depends(principal),
     engine fetches it itself and records where it came from (docs/SOURCES.md). Needs a key with the propose scope.
     A source already stored comes back unchanged (200); a new one is 201."""
     src, added = _call(ingest.add_source, c, p, source_id=body.source_id, doi=body.doi, url=body.url)
+    return JSONResponse({"ok": True, "added": added, "source": jsonable(src)}, status_code=201 if added else 200)
+
+
+class NewUpload(BaseModel):
+    content_base64: str = Field(min_length=4, max_length=14_000_000)        # 10 MB, base64-encoded
+    content_type: str = Field(max_length=100)
+    origin: str = Field(min_length=10, max_length=1000)
+    title: str = Field(default="", max_length=500)
+
+
+@router.post("/sources/upload")
+def upload_source(body: NewUpload, p: Principal | None = Depends(principal),
+                  c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Send a document yourself, for a source with no public address (a paywalled article, a private report): HTML
+    or plain text, base64-encoded, up to 10 MB, with `origin` saying who published it, when, and how you got it.
+    It is stored as agent-supplied (provenance `uploaded`); repositories accept such sources only if their policy
+    says so. Prefer POST /v1/sources with a URL whenever the document is public. 201 new, 200 already stored."""
+    try:
+        content = base64.b64decode(body.content_base64, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise HTTPException(400, "content_base64 is not valid base64") from e
+    src, added = _call(ingest.add_upload, c, p, content, body.content_type, body.origin, body.title)
     return JSONResponse({"ok": True, "added": added, "source": jsonable(src)}, status_code=201 if added else 200)
 
 

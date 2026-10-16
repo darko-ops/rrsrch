@@ -83,7 +83,7 @@ def _visible_claim(conn, p: Principal | None, claim_id: int) -> tuple | None:
 
 
 EVIDENCE_COLS = ("id", "relation", "source_id", "source_title", "doc_sha256", "span_start", "span_end", "excerpt",
-                 "is_primary", "license", "retrieved_at", "kind", "git")
+                 "is_primary", "license", "retrieved_at", "kind", "git", "source_provenance", "source_url", "source_origin")
 _GIT = ("CASE WHEN e.kind = 'git_ref' THEN json_build_object('repo_url', e.repo_url, 'commit', e.commit_sha, "
         "'tag', e.git_tag, 'path', e.path, 'start_line', e.start_line, 'end_line', e.end_line) END")
 
@@ -91,7 +91,7 @@ _GIT = ("CASE WHEN e.kind = 'git_ref' THEN json_build_object('repo_url', e.repo_
 def _evidence(conn, claim_id: int) -> list[dict]:
     return _rows(conn.execute(
         "SELECT e.id, l.relation, e.source_id, s.title, e.doc_sha256, e.span_start, e.span_end, e.excerpt, "
-        f"e.is_primary, e.license, e.retrieved_at, e.kind, {_GIT} FROM evidence_links l "
+        f"e.is_primary, e.license, e.retrieved_at, e.kind, {_GIT}, s.provenance, s.url, s.origin FROM evidence_links l "
         "JOIN evidence e ON e.id = l.evidence_id LEFT JOIN sources s ON s.id = e.source_id "
         "WHERE l.claim_id = %s ORDER BY e.id, l.relation", (claim_id,)),
         EVIDENCE_COLS)
@@ -267,12 +267,12 @@ def get_source(conn: psycopg.Connection, source_id: str) -> dict | None:
     """A corpus source's metadata and its stored documents (hash and length, not text: text carries
     per-paper licenses). Sources are shared reference material, readable by anyone."""
     row = conn.execute("SELECT s.id, s.pmid, s.pmcid, s.doi, s.title, s.pub_year, s.journal, s.pub_types, s.has_full_text, "
-                       "s.license, s.kind, s.provenance, s.url, s.content_type, a.handle, s.fetched_at "
+                       "s.license, s.kind, s.provenance, s.url, s.content_type, a.handle, s.fetched_at, s.origin "
                        "FROM sources s LEFT JOIN agents a ON a.id = s.added_by WHERE s.id = %s", (source_id,)).fetchone()
     if row is None:
         return None
     src = dict(zip(("id", "pmid", "pmcid", "doi", "title", "pub_year", "journal", "pub_types", "has_full_text",
-                    "license", "kind", "provenance", "url", "content_type", "added_by", "fetched_at"), row))
+                    "license", "kind", "provenance", "url", "content_type", "added_by", "fetched_at", "origin"), row))
     src["documents"] = _rows(conn.execute(
         "SELECT part, sha256, length(text) FROM documents WHERE source_id = %s ORDER BY part", (source_id,)),
         ("part", "sha256", "length"))

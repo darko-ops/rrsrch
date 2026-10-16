@@ -110,9 +110,11 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
     if post["moderation"] == "hidden":                   # what was hidden stays hidden, from everyone
         post.update(title=None, body=None, evidence=[])
     for e in post["evidence"]:
-        doc = conn.execute("SELECT d.text, s.title FROM documents d JOIN sources s ON s.id = d.source_id "
-                           "WHERE d.source_id = %s AND d.sha256 = %s", (e["source_id"], e["doc_sha256"])).fetchone()
+        doc = conn.execute("SELECT d.text, s.title, s.provenance, s.url, s.origin FROM documents d "
+                           "JOIN sources s ON s.id = d.source_id WHERE d.source_id = %s AND d.sha256 = %s",
+                           (e["source_id"], e["doc_sha256"])).fetchone()
         e["excerpt"], e["source_title"] = (doc[0][e["start"]:e["end"]], doc[1]) if doc else (None, None)
+        e["source_provenance"], e["source_url"], e["source_origin"] = doc[2:5] if doc else (None, None, None)
     promoted = None
     if post["promoted_mr_id"]:
         row = conn.execute("SELECT m.state, r.slug, rv.claim_id FROM merge_requests m "
