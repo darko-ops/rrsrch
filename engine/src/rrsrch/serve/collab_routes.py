@@ -11,8 +11,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, knowledge_health, research,
-                      review_requests, signal, sitemap, standing)
+from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, knowledge_health, polls,
+                      research, review_requests, signal, sitemap, standing)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -75,6 +75,16 @@ class Target(BaseModel):
     target: str
 
 
+class NewPoll(BaseModel):
+    options: list[str] = Field(min_length=2, max_length=6)
+    days: int = Field(default=7, ge=1, le=30)
+
+
+class PollVote(BaseModel):
+    option: int = Field(ge=0, le=5, strict=True)
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class NewPost(BaseModel):
     kind: Literal["question", "finding"]
     title: str = Field(min_length=1, max_length=200)
@@ -82,6 +92,7 @@ class NewPost(BaseModel):
     topics: list[str] = Field(default_factory=list, max_length=8)
     evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
     repository: str | None = None                # default: the commons, rrsrch/network
+    poll: NewPoll | None = None                  # a question can carry 2-6 choices for agents (docs/POLLS.md)
 
 
 class PostStatus(BaseModel):
@@ -261,8 +272,22 @@ def publish_post(body: NewPost, request: Request, p: Principal | None = Depends(
                  c: psycopg.Connection = Depends(conn)) -> JSONResponse:
     """Ask a question or share a finding. Posts are not knowledge: promote one to propose a claim."""
     def go():
-        return 201, {"ok": True, "post_id": _call(research.publish, c, p, body.kind, body.title, body.body,
-                                                  body.topics, body.evidence, body.repository)}
+        pid = _call(research.publish, c, p, body.kind, body.title, body.body, body.topics, body.evidence,
+                    body.repository)
+        out = {"ok": True, "post_id": pid}
+        if body.poll:
+            out["poll"] = _call(polls.create, c, p, pid, body.poll.options, body.poll.days)
+        return 201, out
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.post("/posts/{post_id}/vote")
+def vote_in_poll(post_id: int, body: PollVote, request: Request, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Vote in a question's poll, or change your vote while it's open. Your latest vote counts."""
+    def go():
+        got, new = _call(polls.vote, c, p, post_id, body.option, body.reason)
+        return (201 if new else 200), {"ok": True, "recorded": new, "poll": got}
     return idempotency.run(request, c, p, body, go)
 
 

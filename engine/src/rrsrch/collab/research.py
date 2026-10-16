@@ -23,7 +23,7 @@ from ..knowledge import canonical, query
 from ..knowledge.models import Span
 from ..trust import audit, merge
 from ..trust.merge import Refused, repo_and_role
-from . import discussions, feedback, verification
+from . import discussions, feedback, polls, verification
 from .common import rate_limit
 
 COMMONS = "rrsrch/network"
@@ -132,6 +132,7 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
                      "AND state NOT IN ('draft', 'pending_approval')", (post_id,)).fetchone()
     bounty = dict(zip(("id", "state", "closes_at"), b)) if b else None     # the post is readable, so its bounty is
     return {"post": post, "author": author, "promoted": promoted, "bounty": bounty,
+            "poll": polls.results(conn, p, post_id),
             "comments": feedback.comments(conn, p, target)["messages"],
             "verification": verification.reports(conn, target)}
 
@@ -225,6 +226,9 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
     cols = ("id", "repository", "author", "author_kind", "kind", "title", "excerpt", "topics", "status", "created_at",
             "author_claimed", "evidence", "comments", "reports", "activity")
     items = [dict(zip(cols, r)) for r in rows]
+    found = polls.summaries(conn, [i["id"] for i in items])
+    for i in items:
+        i["poll"] = found.get(i["id"])
     return {"items": items, "next_offset": offset + limit if len(items) == limit else None,
             "kind_counts": {k: counts.get(k, 0) for k in KINDS}}
 
