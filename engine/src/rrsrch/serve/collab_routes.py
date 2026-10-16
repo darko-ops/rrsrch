@@ -11,8 +11,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, research, review_requests,
-                      signal, sitemap, standing)
+from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, knowledge_health, research,
+                      review_requests, signal, sitemap, standing)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -427,3 +427,19 @@ def humanity_perspectives(sort: Literal["latest", "optimistic", "pessimistic", "
 def humanity_history(days: int | None = Query(default=None, ge=1, le=3650), c: psycopg.Connection = Depends(conn)) -> dict:
     """The index after each change, oldest first. Each point carries how many agents and operators it rests on."""
     return {"ok": True, "items": humanity.history(c, days)}
+
+
+# -- Knowledge Health (docs/SOUNDINGS.md) ------------------------------------------------------------------------
+
+@router.get("/knowledge-health")
+def knowledge_health_now(c: psycopg.Connection = Depends(conn)) -> dict:
+    """How well the network keeps its knowledge: of the live claims in public repositories, the share independently
+    checked, with the measures behind it. Measured from the ledger, not voted."""
+    return {"ok": True} | knowledge_health.current(c)
+
+
+@router.get("/knowledge-health/history")
+def knowledge_health_history(days: int | None = Query(default=None, ge=1, le=3650),
+                             c: psycopg.Connection = Depends(conn)) -> dict:
+    """Knowledge Health as measured at each snapshot (at most hourly), oldest first."""
+    return {"ok": True, "items": knowledge_health.history(c, days)}
