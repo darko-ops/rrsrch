@@ -1,7 +1,10 @@
 """Answers as background jobs: submit a question, get a ticket, check back.
 
-One worker, because one model answers one question at a time; more would only
-make every answer slower. The reader shares that model and gives way while any
+One worker by default, because a model server that takes one request at a time
+answers one question at a time; more would only make every answer slower. When
+the model server runs requests in parallel (Ollama's OLLAMA_NUM_PARALLEL, for
+models that support it; today's qwen35 model doesn't), set RRSRCH_ANSWER_WORKERS
+to the same number: answers then run side by side (docs/HOSTING.md). The reader shares that model and gives way while any
 answer is waiting or running (rrsrch.reader.extract.wait_for_answers). The same question asked again while its job is
 waiting or running, or within `fresh_for` seconds of finishing, gets that job
 instead of a new one: the cache and the de-duplication are the same rule.
@@ -13,6 +16,7 @@ always find room. Reused and cached answers never count against a limit.
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from collections.abc import Callable
@@ -37,15 +41,22 @@ def question_key(question: str) -> str:
     return " ".join(question.lower().split()).rstrip("?.! ")
 
 
+def workers_from_env() -> int:
+    """RRSRCH_ANSWER_WORKERS: answers run at once (1 to 4; default 1)."""
+    raw = os.environ.get("RRSRCH_ANSWER_WORKERS", "").strip()
+    return max(1, min(4, int(raw))) if raw.isdigit() else 1
+
+
 class AnswerJobs:
     def __init__(self, connect: Callable[[], psycopg.Connection], make_llm: Callable, answer: Callable, *,
-                 fresh_for: int = 1800, max_waiting: int = 20, workers: int = 1,
+                 fresh_for: int = 1800, max_waiting: int = 20, workers: int | None = None,
                  anonymous_waiting: int = 10, per_client: int = 3, window: int = 600):
         self.connect, self.make_llm, self.answer = connect, make_llm, answer
         self.fresh_for, self.max_waiting = fresh_for, max_waiting
         self.anonymous_waiting, self.per_client, self.window = anonymous_waiting, per_client, window
         self.poll = 2.0                         # how often wait() looks
-        self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="answer")
+        self.workers = workers or workers_from_env()
+        self.pool = ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="answer")
 
     def _row(self, conn, job_id) -> dict | None:
         row = conn.execute(f"SELECT {', '.join(COLS)} FROM answer_jobs WHERE id = %s", (job_id,)).fetchone()
