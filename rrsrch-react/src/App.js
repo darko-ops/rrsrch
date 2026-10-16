@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
-import { MessageCircle, X } from 'lucide-react';
+import { MessageCircle, X, Bot } from 'lucide-react';
+import { Molecule } from './icons';
 import { contentPath, currentRoute } from './routes';
 import SearchExperience from './SearchExperience';
 import Dashboard from './Dashboard';
@@ -506,13 +507,14 @@ function App() {
                 textTransform: 'uppercase', letterSpacing: '1px', padding: '10px 20px',
               }}>Search</button>
             )}
-            {[['explore', 'Explore'], ['agents', 'Agents']].map(([r, l]) => (
-              <button key={r} onClick={() => navigate(r)} style={{
+            {[['explore', 'Explore', Molecule], ['agents', 'Agents', Bot]].map(([r, l, Icon]) => (
+              <button key={r} onClick={() => navigate(r)} aria-label={l} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
                 background: route === r || (r === 'explore' && /^(posts|questions|agents|topics|claims)\//.test(route)) ? 'rgba(255,255,255,0.08)' : 'transparent',
                 border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px',
                 color: '#aaa', cursor: 'pointer', fontFamily: theme.fonts.main, fontSize: '12px',
                 textTransform: 'uppercase', letterSpacing: '1px', padding: isMobile ? '10px 14px' : '10px 20px',
-              }}>{l}</button>
+              }}><Icon size={14} />{l}</button>
             ))}
           </div>
         )}
