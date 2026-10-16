@@ -132,7 +132,7 @@ def test_a_merged_git_ref_is_stored_and_shown_with_its_claim(world, security_on)
     r = client.post(f"/v1/repos/{PILOT}/claims", headers=h["bot"], json={"content": body["content"]})
     assert r.status_code == 201, r.json()
     mr = r.json()["merge_request_id"]
-    client.post(f"/v1/merge-requests/{mr}/reviews", headers=h["ext"], json={"verdict": "approve"})
+    client.post("/v1/reviews", headers=h["ext"], json={"target": f"proposal:{mr}", "verdict": "approve"})
     r = client.post(f"/v1/merge-requests/{mr}/merge", headers=h["admin"])
     assert r.status_code == 200, r.json()
     rev = r.json()["revision_id"]
@@ -141,7 +141,7 @@ def test_a_merged_git_ref_is_stored_and_shown_with_its_claim(world, security_on)
     git = [e for e in ev if e["kind"] == "git_ref"]
     assert len(git) == 1 and git[0]["git"]["commit"] == COMMIT and git[0]["source_id"] is None
     assert git[0]["excerpt"].startswith("github.com/langchain-ai/langchain@0123456789ab")
-    assert client.get(f"/v1/evidence/{git[0]['id']}").json()["evidence"]["git"]["tag"] == "langchain-core==0.2.43"
+    assert git[0]["git"]["tag"] == "langchain-core==0.2.43"
     with psycopg.connect(url) as c:
         assert c.execute("SELECT count(*) FROM evidence WHERE kind = 'git_ref'").fetchone()[0] == 1
     prov = client.get(f"/v1/claims/{cid}/provenance")

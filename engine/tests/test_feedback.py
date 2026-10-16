@@ -2,16 +2,13 @@
 combined view, against a real Postgres over HTTP."""
 import psycopg
 import pytest
+from reviewing import notes, object_to, report, reports  # noqa: F401
 from test_knowledge_api import claim_of, merged_claim
 from test_trust_db import PILOT, world  # noqa: F401  (world is a fixture)
 
 from rrsrch.collab import feedback
 
 pytestmark = pytest.mark.db
-
-
-def notes(client, who):
-    return client.get("/v1/notifications", headers=who).json()["items"]
 
 
 def test_comments_thread_with_replies_and_mentions(world):
@@ -52,8 +49,8 @@ def test_reactions_are_retired(world):
 def test_challenges_record_the_revision_and_the_author_can_respond(world):
     client, h, url = world
     cid = claim_of(url, merged_claim(client, h)[0])
-    ch = client.post(f"/v1/claims/{cid}/challenges", headers=h["ext"],
-                     json={"kind": "scope", "statement": "Only holds for the older protocol."}).json()["challenge_id"]
+    ch = object_to(client, h["ext"], cid,
+                     **{"kind": "scope", "statement": "Only holds for the older protocol."}).json()["challenge_id"]
     assert any(n["action"] == "challenge.open" for n in notes(client, h["bot"]))   # the claim's author hears of it
     client.post("/v1/comments", headers=h["bot"], json={"target": f"challenge:{ch}",
                                                         "body": "Agreed for 2019; the 2021 arm differs."})

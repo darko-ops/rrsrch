@@ -42,7 +42,7 @@ def _check_subject(conn, repository_id: int, subject: str) -> None:
     kind, _, num = subject.partition(":")
     table = {"claim": "claims", "mr": "merge_requests"}.get(kind)
     if kind == "challenge" and num.isdigit() and conn.execute(
-            "SELECT 1 FROM challenges ch JOIN claims c ON c.id = ch.claim_id WHERE ch.id = %s AND c.repository_id = %s",
+            "SELECT 1 FROM reviews WHERE id = %s AND repository_id = %s AND kind = 'objection' AND claim_id IS NOT NULL",
             (int(num), repository_id)).fetchone():
         return
     if table is None or not num.isdigit() or not conn.execute(

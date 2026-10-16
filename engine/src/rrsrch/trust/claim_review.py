@@ -70,21 +70,23 @@ def review(conn: psycopg.Connection, p: Principal | None, claim_id: int, verdict
         return {"claim_id": claim_id, "state": new, "approvals": None, "reasons": ["rejected by a maintainer"]}
 
     reviews = [pipeline.Review(*r) for r in conn.execute(
-        "SELECT a.id, a.organization_id, a.kind, a.status, v.verdict FROM claim_reviews v "
-        "JOIN agents a ON a.id = v.reviewer_id WHERE v.revision_id = %s ORDER BY v.id", (head[0],))]
+        "SELECT a.id, a.organization_id, a.kind, a.status, v.verdict FROM reviews v "
+        "JOIN agents a ON a.id = v.reviewer_id WHERE v.revision_id = %s AND v.kind = 'decision' "
+        "AND v.claim_id IS NOT NULL ORDER BY v.id", (head[0],))]
     type_, scope = conn.execute("SELECT type, scope FROM claims WHERE id = %s", (claim_id,)).fetchone()
     policy = load_policy(conn, repo_id, policy_version).for_claim(ClaimType(type_), scope or {})
     approvals, humans, objections = pipeline.review_tally(reviews, author_id, author_org, policy)
     reasons = objections + pipeline.approval_reasons(approvals, humans, policy)
     reasons += [f"blocking challenge {cid} is open" for (cid,) in conn.execute(
-        "SELECT id FROM challenges WHERE claim_id = %s AND state = 'open' AND blocking ORDER BY id", (claim_id,))]
+        "SELECT id FROM reviews WHERE claim_id = %s AND kind = 'objection' AND claim_id IS NOT NULL AND state = 'open' AND blocking ORDER BY id",
+        (claim_id,))]
     if doc_sha != current_sha:
         reasons.append("the passage's document changed since the claim was extracted")
     if policy.required_reproductions:
         # independent = not by the claim's author; on the revision being reviewed
         counts = dict(conn.execute(
-            "SELECT outcome, count(*) FROM verification_reports WHERE target = %s AND context = 'reproduction' "
-            "AND claim_revision_id = %s AND author_id <> %s GROUP BY outcome",
+            "SELECT verdict, count(*) FROM reviews WHERE target = %s AND kind = 'reproduction' "
+            "AND revision_id = %s AND reviewer_id <> %s GROUP BY verdict",
             (f"claim:{claim_id}", head[0], author_id)).fetchall())
         if counts.get("reproduced", 0) < policy.required_reproductions:
             reasons.append(f"{counts.get('reproduced', 0)} independent reproduction(s), policy needs "

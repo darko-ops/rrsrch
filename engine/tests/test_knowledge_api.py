@@ -19,7 +19,7 @@ def merged_claim(client, h, proposition=None, repo=PILOT, reviewer="ext"):
     assert r.status_code == 201, r.json()
     mr = r.json()["merge_request_id"]
     if reviewer:
-        client.post(f"/v1/merge-requests/{mr}/reviews", headers=h[reviewer], json={"verdict": "approve"})
+        client.post("/v1/reviews", headers=h[reviewer], json={"target": f"proposal:{mr}", "verdict": "approve"})
     r = client.post(f"/v1/merge-requests/{mr}/merge", headers=h["admin"])
     assert r.status_code == 200, r.json()
     return r.json()["revision_id"], mr
@@ -87,20 +87,19 @@ def test_a_merged_claim_can_be_read_traced_and_extended(world):
     assert {f"claim:{cid}", "source:MED:1", "agent:bot", "agent:ext", f"mr:{mr}"} <= ids_
     assert {"from": "agent:ext", "rel": "review:approve", "to": f"mr:{mr}"} in graph["edges"]
 
-    ev = client.get(f"/v1/evidence/{claim['evidence'][0]['id']}").json()["evidence"]
-    assert ev["claims"] == [{"claim_id": cid, "repository": PILOT, "relation": "supports", "state": "supported"}]
-    run = client.get(f"/v1/verification-runs/{claim['verification']['id']}").json()["verification_run"]
-    assert run["passed"] is True
 
     extra = "while VAS pain did not differ (p = 0.41)"
     s = TEXT.index(extra)
-    body = {"relation": "context", "source_id": "MED:1", "doc_sha256": SHA, "start": s, "end": s + len(extra)}
-    r = client.post(f"/v1/claims/{cid}/evidence", headers=h["bot"], json=body)
+    span = {"source_id": "MED:1", "doc_sha256": SHA, "start": s, "end": s + len(extra)}
+    with psycopg.connect(url) as c:                    # extending a claim is proposing its next revision
+        head, hash_ = c.execute("SELECT content, content_hash FROM claim_revisions WHERE claim_id = %s "
+                                "ORDER BY version DESC LIMIT 1", (cid,)).fetchone()
+    nxt = head | {"evidence": head["evidence"] + [["context", span]], "parent_hash": hash_}
+    r = client.post("/v1/merge-requests", headers=h["bot"], json={"repository": PILOT, "claim_id": cid, "content": nxt})
     assert r.status_code == 201 and r.json()["checks_passed"], r.json()
     mr2 = r.json()["merge_request_id"]
-    client.post(f"/v1/merge-requests/{mr2}/reviews", headers=h["ext"], json={"verdict": "approve"})
+    client.post("/v1/reviews", headers=h["ext"], json={"target": f"proposal:{mr2}", "verdict": "approve"})
     assert client.post(f"/v1/merge-requests/{mr2}/merge", headers=h["admin"]).status_code == 200
-    assert client.post(f"/v1/claims/{cid}/evidence", headers=h["bot"], json=body).status_code == 409
 
     revs = client.get(f"/v1/claims/{cid}/revisions").json()["revisions"]
     assert [r["version"] for r in revs] == [1, 2] and revs[1]["parent_id"] == revs[0]["id"]

@@ -38,7 +38,7 @@ def target_repo(conn: psycopg.Connection, target: str) -> int:
     kind, num = m[1], int(m[2])
     sql = {"claim": "SELECT repository_id FROM claims WHERE id = %s",
            "mr": "SELECT repository_id FROM merge_requests WHERE id = %s",
-           "challenge": "SELECT c.repository_id FROM challenges ch JOIN claims c ON c.id = ch.claim_id WHERE ch.id = %s",
+           "challenge": "SELECT repository_id FROM reviews WHERE id = %s AND kind = 'objection' AND claim_id IS NOT NULL",
            "message": "SELECT d.repository_id FROM messages m JOIN discussions d ON d.id = m.discussion_id "
                       "WHERE m.id = %s",
            "post": "SELECT repository_id FROM research_posts WHERE id = %s"}[kind]
@@ -200,9 +200,9 @@ def claim_feedback(conn: psycopg.Connection, p: Principal | None, claim_id: int)
     target = f"claim:{claim_id}"
     reviews = [dict(zip(("reviewer", "reviewer_kind", "verdict", "findings", "created_at", "revision"), r))
                for r in conn.execute(
-        "SELECT a.handle, a.kind, v.verdict, v.findings, v.created_at, rv.version FROM claim_reviews v "
+        "SELECT a.handle, a.kind, v.verdict, v.findings, v.created_at, rv.version FROM reviews v "
         "JOIN agents a ON a.id = v.reviewer_id JOIN claim_revisions rv ON rv.id = v.revision_id "
-        "WHERE v.claim_id = %s ORDER BY v.id", (claim_id,))]
+        "WHERE v.claim_id = %s AND v.kind = 'decision' ORDER BY v.id", (claim_id,))]
     chs = challenges_mod.list_for_claim(conn, claim_id)
     for c in chs:
         c["responses"] = comments(conn, p, f"challenge:{c['id']}")["messages"]

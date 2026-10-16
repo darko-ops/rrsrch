@@ -63,12 +63,12 @@ def test_a_claim_is_proposed_reviewed_and_merged(world):
 
     r = client.post(f"/v1/merge-requests/{mr}/merge", headers=h["admin"])
     assert r.status_code == 409 and any("approval" in x for x in r.json()["reasons"])
-    assert client.post(f"/v1/merge-requests/{mr}/reviews", headers=h["bot"],
-                       json={"verdict": "approve"}).status_code == 403                 # authors don't review
+    assert client.post("/v1/reviews", headers=h["bot"],
+                       json={"target": f"proposal:{mr}", "verdict": "approve"}).status_code == 403                 # authors don't review
     assert client.post(f"/v1/merge-requests/{mr}/merge", headers=h["bot"]).status_code == 403   # contributors don't merge
 
-    assert client.post(f"/v1/merge-requests/{mr}/reviews", headers=h["ext"],
-                       json={"verdict": "approve", "findings": "span matches"}).status_code == 201
+    assert client.post("/v1/reviews", headers=h["ext"],
+                       json={"target": f"proposal:{mr}", "verdict": "approve", "findings": "span matches"}).status_code == 200
     preview = client.get(f"/v1/merge-requests/{mr}").json()["merge_preview"]
     assert preview["allowed"] is False and preview["reasons"] == ["merger: authentication required"]
     r = client.post(f"/v1/merge-requests/{mr}/merge", headers=h["admin"])
@@ -89,7 +89,7 @@ def test_a_claim_is_proposed_reviewed_and_merged(world):
 def test_concurrent_revisions_of_one_head_cannot_both_merge(world):
     client, h, url = world
     mr = open_mr(client, h["bot"], {"repository": PILOT, "content": content()})
-    client.post(f"/v1/merge-requests/{mr}/reviews", headers=h["ext"], json={"verdict": "approve"})
+    client.post("/v1/reviews", headers=h["ext"], json={"target": f"proposal:{mr}", "verdict": "approve"})
     rev = client.post(f"/v1/merge-requests/{mr}/merge", headers=h["admin"]).json()["revision_id"]
     with psycopg.connect(url) as c:
         claim_id, head = c.execute("SELECT claim_id, content_hash FROM claim_revisions WHERE id = %s", (rev,)).fetchone()
@@ -99,7 +99,7 @@ def test_concurrent_revisions_of_one_head_cannot_both_merge(world):
     a, b = (open_mr(client, h["bot"], {"repository": PILOT, "claim_id": claim_id,
                                        "content": content(w, parent=head)}) for w in wording)
     for m in (a, b):
-        client.post(f"/v1/merge-requests/{m}/reviews", headers=h["ext"], json={"verdict": "approve"})
+        client.post("/v1/reviews", headers=h["ext"], json={"target": f"proposal:{m}", "verdict": "approve"})
     assert client.post(f"/v1/merge-requests/{a}/merge", headers=h["admin"]).status_code == 200
     r = client.post(f"/v1/merge-requests/{b}/merge", headers=h["admin"])
     assert r.status_code == 409 and any("parent_is_head" in x for x in r.json()["reasons"])
@@ -122,7 +122,7 @@ def test_bad_proposals_and_objections(world):
     assert {c["name"] for c in got["checks"] if not c["passed"]} == {"evidence_gate:numbers"}
 
     mr = open_mr(client, h["bot"], {"repository": PILOT, "content": content()})
-    client.post(f"/v1/merge-requests/{mr}/reviews", headers=h["ext"], json={"verdict": "reject"})
+    client.post("/v1/reviews", headers=h["ext"], json={"target": f"proposal:{mr}", "verdict": "reject"})
     r = client.post(f"/v1/merge-requests/{mr}/merge", headers=h["admin"])
     assert r.status_code == 409 and any("says reject" in x for x in r.json()["reasons"])
     assert client.post(f"/v1/merge-requests/{mr}/close", headers=h["ext"],

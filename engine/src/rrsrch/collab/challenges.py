@@ -44,7 +44,8 @@ def open_challenge(conn: psycopg.Connection, p: Principal | None, claim_id: int,
         spans = [Span.model_validate(e).model_dump() for e in evidence]
     except ValueError as e:
         raise Refused(400, f"evidence: {e}") from e
-    rate_limit(conn, "SELECT count(*) FROM challenges WHERE author_id = %s AND claim_id = %s AND state = 'open'",
+    rate_limit(conn, "SELECT count(*) FROM reviews WHERE reviewer_id = %s AND claim_id = %s AND kind = 'objection' AND claim_id IS NOT NULL "
+                     "AND state = 'open'",
                (p.agent_id, claim_id), 3, "open challenges from you on this claim")
     head = conn.execute("SELECT id FROM claim_revisions WHERE claim_id = %s ORDER BY version DESC LIMIT 1",
                         (claim_id,)).fetchone()
@@ -80,7 +81,8 @@ def _close(conn, p: Principal, ch: dict, outcome: str, resolution: str | None) -
     # a contested claim goes back to supported once nothing holds it: no open blocking challenge, and no
     # upheld one still waiting for a revision that addresses it
     held = conn.execute(
-        "SELECT count(*) FROM challenges c WHERE c.claim_id = %s AND c.blocking AND (c.state = 'open' OR "
+        "SELECT count(*) FROM reviews c WHERE c.claim_id = %s AND c.kind = 'objection' AND c.blocking "
+        "AND (c.state = 'open' OR "
         "(c.state = 'upheld' AND c.resolved_at > coalesce((SELECT max(created_at) FROM claim_revisions "
         "WHERE claim_id = c.claim_id), '-infinity')))", (ch["claim_id"],)).fetchone()[0]
     if state == "contested" and not held:
@@ -119,7 +121,8 @@ def list_for_claim(conn: psycopg.Connection, claim_id: int) -> list[dict]:
     cols = ("id", "author", "author_kind", "kind", "statement", "evidence", "blocking", "state", "resolution",
             "resolved_by", "created_at", "resolved_at", "revision")
     return [dict(zip(cols, r)) for r in conn.execute(
-        "SELECT c.id, a.handle, a.kind, c.kind, c.statement, c.evidence, c.blocking, c.state, c.resolution, r.handle, "
-        "c.created_at, c.resolved_at, (SELECT version FROM claim_revisions WHERE id = c.revision_id) "
-        "FROM challenges c JOIN agents a ON a.id = c.author_id "
-        "LEFT JOIN agents r ON r.id = c.resolved_by WHERE c.claim_id = %s ORDER BY c.id", (claim_id,))]
+        "SELECT c.id, a.handle, a.kind, c.details->>'objection', c.findings, coalesce(c.details->'evidence', '[]'), "
+        "c.blocking, c.state, c.resolution, r.handle, c.created_at, c.resolved_at, "
+        "(SELECT version FROM claim_revisions WHERE id = c.revision_id) "
+        "FROM reviews c JOIN agents a ON a.id = c.reviewer_id LEFT JOIN agents r ON r.id = c.resolved_by "
+        "WHERE c.claim_id = %s AND c.kind = 'objection' ORDER BY c.id", (claim_id,))]

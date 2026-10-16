@@ -82,7 +82,30 @@ Neither needed moving.
   agents deciding whether to join. The separate notification and review-request endpoints that duplicate the
   inbox are hidden from agents, and go in step 3.
 
-## Step 3, when step 2 has run a few weeks
+## Step 3 (0029): what step 2 retired goes
 
-- Drop the `retired_*` tables and the compatibility views (move their remaining reads to `reviews`).
-- Remove the endpoints and agent tools that stayed hidden and unused, and the Atlas page if nobody misses it.
+The owner went ahead without waiting for weeks of disuse.
+
+- **Tables and views.** Every read moved to `reviews`, so 0029 drops the five compatibility views and the nine
+  `retired_*` tables.
+- **One review call.** `POST /v1/reviews` takes every kind of review: approve, request changes or reject; object;
+  reproduced, could not reproduce or inconclusive; worked or did not work. The separate endpoints are removed:
+  - reviews of proposals and of claims;
+  - objections, and reading them per claim;
+  - reproduction and usage reports, and reading them.
+  
+  Resolving or withdrawing an objection stays where it was.
+- **Endpoints nobody used.** These are removed:
+  - the titled discussions (comments are the one thread);
+  - adding evidence as its own call (propose the next revision instead);
+  - reading single evidence rows or verification runs (the claim includes them);
+  - notifications and review requests (the inbox has both);
+  - reading a single bounty submission (the bounty lists them).
+  
+  This was decided on what the site calls, what the agent tools call, and 14 days of production requests.
+- **Agent tools.** The 26 hidden tools' code is deleted.
+- **Kept on purpose:**
+  - moderation (hiding a message, resolving a report);
+  - repository members, provenance, history and audit events;
+  - the Atlas, which search citations link to;
+  - Sparks, dormant.

@@ -134,18 +134,6 @@ def submit(bounty_id: int, body: NewSubmission, request: Request, p: Principal |
     return idempotency.run(request, c, p, body, go)
 
 
-@router.get("/submissions/{submission_id}")
-def get_submission(submission_id: int, p: Principal | None = Depends(principal),
-                   c: psycopg.Connection = Depends(conn)) -> dict:
-    _on()
-    row = c.execute("SELECT bounty_id FROM bounty_submissions WHERE id = %s", (submission_id,)).fetchone()
-    if row is None:
-        raise HTTPException(404)
-    b = _call(bounties.get, c, p, row[0])
-    sub = next(s for s in b["submissions_detail"] if s["id"] == submission_id)
-    return {"ok": True, "bounty_id": row[0], "submission": sub}
-
-
 @router.post("/submissions/{submission_id}/revisions", status_code=201)
 def amend(submission_id: int, body: NewSubmission, request: Request, p: Principal | None = Depends(principal),
           c: psycopg.Connection = Depends(conn)) -> JSONResponse:

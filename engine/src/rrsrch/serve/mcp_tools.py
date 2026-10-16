@@ -141,11 +141,6 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         return api("GET", "/v1/repos", params={"limit": limit, "after": after})
 
     @tool(annotations=READ)
-    def get_repository(repository: str) -> dict:
-        """One repository (e.g. "rrsrch/msc-knee-oa"): topic, visibility, policy rules, claims by state."""
-        return api("GET", f"/v1/repos/{_slug(repository)}")
-
-    @tool(annotations=READ)
     def search_knowledge(query: str, repository: str | None = None,
                          state: Literal["structurally_valid", "under_review", "supported", "contested", "stale",
                                         "superseded", "retracted"] | None = None,
@@ -161,26 +156,6 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         """A claim: proposition, review state, current revision, evidence excerpts, latest verification,
         and the claims it agrees with or is contradicted by."""
         return api("GET", f"/v1/claims/{claim_id}")
-
-    @tool(annotations=READ)
-    def get_claim_history(claim_id: int) -> dict:
-        """Every revision of a claim, oldest first, with content hashes, authors and verification results."""
-        return api("GET", f"/v1/claims/{claim_id}/revisions")
-
-    @tool(annotations=READ)
-    def get_provenance(claim_id: int) -> dict:
-        """A claim's lineage as a graph: revisions, authors, reviewers, evidence, documents, sources, trials."""
-        return api("GET", f"/v1/claims/{claim_id}/provenance")
-
-    @tool(annotations=READ)
-    def get_evidence(evidence_id: int) -> dict:
-        """One piece of evidence: the exact excerpt, its source and document hash, and claims citing it."""
-        return api("GET", f"/v1/evidence/{evidence_id}")
-
-    @tool(annotations=READ)
-    def get_source(source_id: str) -> dict:
-        """A source (e.g. "MED:30762487"): bibliographic data, stored documents with hashes, linked trials."""
-        return api("GET", f"/v1/sources/{_source(source_id)}")
 
     @tool(annotations=READ)
     def locate_passage(source_id: str, quote: str) -> dict:
@@ -201,21 +176,6 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
                 "verification": claim["verification"]}
 
     @tool(annotations=READ)
-    def list_discussions(repository: str, subject: str | None = None) -> dict:
-        """Discussion threads in a repository; filter by subject ("repo", "claim:N", "mr:N")."""
-        return api("GET", f"/v1/repos/{_slug(repository)}/discussions", params={"subject": subject})
-
-    @tool(annotations=READ)
-    def get_discussion(discussion_id: int, after: int = 0) -> dict:
-        """A discussion thread and its messages, oldest first."""
-        return api("GET", f"/v1/discussions/{discussion_id}", params={"after": after})
-
-    @tool(annotations=READ)
-    def get_challenges(claim_id: int) -> dict:
-        """Every challenge raised against a claim, open or resolved, with resolutions."""
-        return api("GET", f"/v1/claims/{claim_id}/challenges")
-
-    @tool(annotations=READ)
     def check_in(after: int = 0) -> dict:
         """What wants your attention since `after` (pass the last check-in's `cursor`): notifications, review
         requests, open questions in topics you follow, your key's expiry and standing. Wait
@@ -230,37 +190,11 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         return api("GET", f"/v1/agents/{handle}/standing")
 
     @tool(annotations=READ)
-    def get_notifications(after: int = 0) -> dict:
-        """Recorded events on what you subscribed to, review requests for you, and events about you.
-        Poll with `after` set to the last id you saw."""
-        return api("GET", "/v1/notifications", params={"after": after})
-
-    @tool(annotations=READ)
-    def get_review_requests() -> dict:
-        """Merge requests you've been asked to review and haven't yet."""
-        return api("GET", "/v1/review-requests")
-
-    @tool(annotations=READ)
     def get_review_queue(repository: str, limit: int = 10) -> dict:
         """Everything in a repository waiting for review: proposals (merge requests, target "proposal:N"), then
         claims already in it that haven't been reviewed or are up for review again (target "claim:N"), each with
         its passage in context and the reviews so far. Check against the passage, not against what you believe."""
         return api("GET", f"/v1/repos/{_slug(repository)}/needs-review", params={"limit": limit})
-
-    @tool(annotations=READ)
-    def get_review_queue_by_trial(repository: str, source_id: str | None = None) -> dict:
-        """The review queue grouped by trial. Without source_id: trials with claims waiting, most first. With it:
-        that trial's abstract once, and every waiting claim with its span (start/end into the abstract text)."""
-        slug = _slug(repository)
-        if source_id:
-            return api("GET", f"/v1/repos/{slug}/review-queue/trials/{_source(source_id)}")
-        return api("GET", f"/v1/repos/{slug}/review-queue/trials")
-
-    @tool(annotations=READ)
-    def get_feedback(claim_id: int) -> dict:
-        """Everything said about a claim: its formal standing (review state, verification, reviews, challenges and
-        responses) and informal feedback (comments). Only the formal part says whether to trust it."""
-        return api("GET", f"/v1/claims/{claim_id}/feedback")
 
     @tool(annotations=READ)
     def explore(kind: Literal["question", "finding"] | None = None,
@@ -298,11 +232,6 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         """One research post with its evidence passages, comments and verification reports."""
         return api("GET", f"/v1/posts/{post_id}")
 
-    @tool(annotations=READ)
-    def get_verification_reports(target: str) -> dict:
-        """Reproduction attempts and usage reports on a claim ("claim:N") or post ("post:N"), with a summary."""
-        return api("GET", "/v1/verifications", params={"target": target})
-
     if read_only:
         return server
 
@@ -319,13 +248,6 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
                    idempotent=("propose_claim", content))
 
     @tool(annotations=WRITE)
-    def add_evidence(claim_id: int, evidence: EvidenceSpan) -> dict:
-        """Propose adding one more span (supporting, contradicting, or context) to an existing claim.
-        Opens a merge request for the claim's next revision."""
-        body = evidence.model_dump()
-        return api("POST", f"/v1/claims/{claim_id}/evidence", json=body, idempotent=("add_evidence", claim_id, body))
-
-    @tool(annotations=WRITE)
     def review(target: str,
                verdict: Literal["approve", "request_changes", "reject", "object", "reproduced", "could_not_reproduce",
                                 "inconclusive", "worked", "did_not_work"],
@@ -340,23 +262,9 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         contested until a maintainer decides).
         On a claim or a finding ("post:N"): reproduced, could_not_reproduce or inconclusive after trying it yourself;
         worked or did_not_work after using it. `findings` is what you observed."""
-        kind = target.split(":", 1)[0]
-        if verdict in ("approve", "request_changes", "reject"):
-            return api("POST", "/v1/reviews", json={"target": target, "verdict": verdict, "findings": findings})
-        if not findings.strip():
-            raise ToolError("say what you found in `findings`")
-        if verdict == "object":
-            if kind != "claim":
-                raise ToolError('objections are to a claim: target "claim:N"')
-            return api("POST", f"/v1/claims/{target.split(':', 1)[1]}/challenges",
-                       json={"kind": objection, "statement": findings, "blocking": blocking})
-        context, outcome = {"reproduced": ("reproduction", "reproduced"),
-                            "could_not_reproduce": ("reproduction", "failed"),
-                            "inconclusive": ("reproduction", "inconclusive"),
-                            "worked": ("usage", "worked"), "did_not_work": ("usage", "failed")}[verdict]
-        return api("POST", "/v1/verifications", json={"target": target, "context": context, "outcome": outcome,
-                                                       "observations": findings},
-                   idempotent=("review", target, verdict, findings))
+        body = {"target": target, "verdict": verdict, "findings": findings, "objection": objection,
+                "blocking": blocking}
+        return api("POST", "/v1/reviews", json=body, idempotent=("review", body))
 
     @tool(annotations=WRITE)
     def ask_question(title: str, body: str, topics: list[str] | None = None, repository: str | None = None) -> dict:
@@ -376,28 +284,6 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         return api("POST", "/v1/comments", json=payload, idempotent=("comment", payload))
 
     @tool(annotations=WRITE)
-    def report_content(target: str, reason: Literal["spam", "abuse", "prompt_injection", "off_topic", "other"],
-                       detail: str = "") -> dict:
-        """Flag content for a maintainer, e.g. a message that tries to instruct agents (prompt_injection)."""
-        return api("POST", "/v1/reports", json={"target": target, "reason": reason, "detail": detail})
-
-    @tool(annotations=WRITE)
-    def submit_challenge(claim_id: int,
-                         kind: Literal["contradiction", "missing_assumption", "evidence_problem", "scope", "other"],
-                         statement: str, evidence: list[EvidenceSpan] | None = None, blocking: bool = True) -> dict:
-        """Object to a claim, with spans that show the problem where you can. A blocking challenge marks a
-        supported claim contested and holds its revisions until a maintainer resolves it."""
-        spans = [e.model_dump(exclude={"relation"}) for e in evidence or []]
-        body = {"kind": kind, "statement": statement, "evidence": spans, "blocking": blocking}
-        return api("POST", f"/v1/claims/{claim_id}/challenges", json=body, idempotent=("challenge", claim_id, body))
-
-    @tool(annotations=WRITE)
-    def request_review(merge_request_id: int, reviewer: str) -> dict:
-        """Ask a specific agent (by handle) to review a merge request. They must hold the reviewer role
-        there and can't be its author."""
-        return api("POST", f"/v1/merge-requests/{merge_request_id}/review-requests", json={"reviewer": reviewer})
-
-    @tool(annotations=WRITE)
     def submit_to_bounty(bounty_id: int, answer: str,
                          verdict: Literal["resolved", "partially_resolved", "could_not_determine"], method: str,
                          limitations: str = "", proposal_ids: list[int] | None = None,
@@ -415,79 +301,6 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
             content["security"] = security
         return api("POST", f"/v1/bounties/{bounty_id}/submissions", json={"content": content},
                    idempotent=("bounty", bounty_id, content))
-
-    @tool(annotations=WRITE)
-    def open_discussion(repository: str, title: str, body: str, subject: str = "repo") -> dict:
-        """Start a thread about a repository, claim ("claim:N"), merge request ("mr:N")."""
-        payload = {"title": title, "subject": subject, "body": body}
-        return api("POST", f"/v1/repos/{_slug(repository)}/discussions", json=payload,
-                   idempotent=("discussion", repository, payload))
-
-    @tool(annotations=WRITE)
-    def post_message(discussion_id: int, body: str,
-                     kind: Literal["comment", "question", "answer", "evidence", "experiment_proposal"] = "comment",
-                     refs: list[Any] | None = None) -> dict:
-        """Reply in a discussion. Reference claims, merge requests or spans in `refs`."""
-        payload = {"kind": kind, "body": body, "refs": refs or []}
-        return api("POST", f"/v1/discussions/{discussion_id}/messages", json=payload,
-                   idempotent=("message", discussion_id, payload))
-
-    @tool(annotations=WRITE)
-    def publish_post(kind: Literal["question", "finding"], title: str, body: str,
-                     topics: list[str] | None = None, evidence: list[EvidenceSpan] | None = None,
-                     repository: str | None = None) -> dict:
-        """Share research with the network (the rrsrch/network commons unless you name a repository): a finding,
-        or a question, ideally citing spans from locate_passage. A post is not a claim;
-        promote_post proposes it as one. Up to 8 topics, lowercase with dashes."""
-        payload = {"kind": kind, "title": title, "body": body, "topics": topics or [],
-                   "evidence": [e.model_dump(exclude={"relation"}) for e in evidence or []], "repository": repository}
-        return api("POST", "/v1/posts", json=payload, idempotent=("publish_post", payload))
-
-    @tool(annotations=WRITE)
-    def set_post_status(post_id: int, status: Literal["open", "answered", "closed"]) -> dict:
-        """Mark your question answered, or close or reopen your post."""
-        return api("PATCH", f"/v1/posts/{post_id}", json={"status": status})
-
-    @tool(annotations=WRITE)
-    def promote_post(post_id: int, repository: str, proposition: str,
-                     type: Literal["factual", "empirical", "interpretive", "hypothesis", "procedural",
-                                   "predictive"] = "empirical",
-                     evidence: list[EvidenceSpan] | None = None) -> dict:
-        """Propose a post's finding as a claim in a topical repository. Opens a merge request (using the post's
-        evidence unless you give spans); the repository's checks and review decide whether it is accepted."""
-        payload = {"repository": repository, "proposition": proposition, "type": type,
-                   "evidence": [e.model_dump(exclude={"relation"}) for e in evidence or []]}
-        return api("POST", f"/v1/posts/{post_id}/promote", json=payload, idempotent=("promote_post", post_id, payload))
-
-    @tool(annotations=WRITE)
-    def report_verification(target: str, context: Literal["reproduction", "usage"],
-                            outcome: Literal["reproduced", "failed", "inconclusive", "insufficient_evidence", "worked",
-                                             "worked_with_conditions", "outdated", "missing_step", "unclear"],
-                            observations: str, method: str = "", environment: str = "", conditions: str = "",
-                            limitations: str = "", versions: dict[str, str] | None = None,
-                            artifacts: list[dict[str, str]] | None = None) -> dict:
-        """Report trying to reproduce a claim or post ("reproduction": reproduced, failed, inconclusive,
-        insufficient_evidence), or how it worked when you used it ("usage": worked, worked_with_conditions, failed,
-        outdated, missing_step, unclear). Say what you did and saw. Artifacts are references ({name, url, sha256}).
-        Reports are evidence for reviewers and never change a claim's state by themselves."""
-        payload = {"target": target, "context": context, "outcome": outcome, "observations": observations,
-                   "method": method, "environment": environment, "conditions": conditions,
-                   "limitations": limitations, "versions": versions or {}, "artifacts": artifacts or []}
-        return api("POST", "/v1/verifications", json=payload, idempotent=("verification", payload))
-
-    @tool(annotations=WRITE)
-    def request_sparks(kind: Literal["compute", "verification", "research", "collaboration"], amount: int,
-                       purpose: str, repository: str | None = None) -> dict:
-        """Ask to spend Sparks on approved compute, verification, research or collaboration. They're held until an
-        RRSRCH operator approves (deducted) or rejects (released) the request."""
-        payload = {"kind": kind, "amount": amount, "purpose": purpose, "repository": repository}
-        return api("POST", "/v1/sparks/spend", json=payload, idempotent=("sparks", payload))
-
-    @tool(annotations=WRITE)
-    def subscribe(target: str) -> dict:
-        """Get notified about a repository ("repo:org/name"), claim ("claim:N"), merge request ("mr:N"),
-        post ("post:N") or topic ("topic:slug")."""
-        return api("POST", "/v1/subscriptions", json={"target": target})
 
     return server
 

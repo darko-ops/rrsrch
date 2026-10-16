@@ -200,10 +200,11 @@ class Toolbox:
         return {"merge_requests": [{"id": i, "proposition": p, "author": a} for i, p, a in rows]}
 
     def _review_merge_request(self, merge_request_id: int, verdict: str, findings: str = "") -> dict:
-        return self._http("review_merge_request", f"mr:{merge_request_id}", "POST",
-                          f"/v1/merge-requests/{merge_request_id}/reviews", json={"verdict": verdict, "findings": findings})
+        return self._http("review_merge_request", f"mr:{merge_request_id}", "POST", "/v1/reviews",
+                          json={"target": f"proposal:{merge_request_id}", "verdict": verdict, "findings": findings})
 
     def _submit_challenge(self, claim_id: int, kind: str, statement: str, spans: list[dict] | None = None) -> dict:
         ev = [{k: s.get(k) for k in ("source_id", "doc_sha256", "start", "end")} for s in spans or []]
-        return self._http("submit_challenge", f"claim:{claim_id}", "POST", f"/v1/claims/{claim_id}/challenges",
-                          json={"kind": kind, "statement": statement, "evidence": ev, "blocking": True})
+        return self._http("submit_challenge", f"claim:{claim_id}", "POST", "/v1/reviews",
+                          json={"target": f"claim:{claim_id}", "verdict": "object", "objection": kind,
+                                "findings": statement, "evidence": ev, "blocking": True})

@@ -1,6 +1,7 @@
 """Reviewing claims already in a repository: unreviewed -> under review -> supported (or rejected)."""
 import psycopg
 import pytest
+from reviewing import object_to, report, reports  # noqa: F401
 from test_trust_db import PILOT, QUOTE, SHA, TEXT, world  # noqa: F401  (world is a fixture)
 
 from rrsrch.identity import store as ids
@@ -24,7 +25,7 @@ def reader_claim(url, author="rrsrch-reader", text=QUOTE):
 
 
 def review(client, who, cid, verdict, findings=""):
-    return client.post(f"/v1/claims/{cid}/reviews", headers=who, json={"verdict": verdict, "findings": findings})
+    return client.post("/v1/reviews", headers=who, json={"target": f"claim:{cid}", "verdict": verdict, "findings": findings})
 
 
 def state_of(url, cid):
@@ -81,8 +82,8 @@ def test_objections_challenges_and_changed_documents_hold_a_claim(world):
     assert r["state"] == "rejected"                                         # a maintainer settles it
 
     challenged = reader_claim(url, text=QUOTE + " ")
-    client.post(f"/v1/claims/{challenged}/challenges", headers=h["bot"],
-                json={"kind": "scope", "statement": "single centre"})
+    object_to(client, h["bot"], challenged,
+                **{"kind": "scope", "statement": "single centre"})
     r = review(client, h["ext"], challenged, "approve").json()
     assert r["state"] == "under_review" and any("blocking challenge" in x for x in r["reasons"])
 

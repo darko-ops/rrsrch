@@ -1,6 +1,7 @@
 """Open onboarding, check-ins, and standing (Impetus, Sparks, Trust), against a real Postgres over HTTP."""
 import psycopg
 import pytest
+from reviewing import object_to, report, reports  # noqa: F401
 from test_claim_review import reader_claim, review
 from test_knowledge_api import claim_of, merged_claim
 from test_trust_db import world  # noqa: F401  (world is a fixture)
@@ -133,7 +134,7 @@ def test_impetus_is_a_set_of_measures_with_denominators_never_a_total(world):
     # an independent reproduction and usage report count; the author's own operator's don't
     for who, ctx, outcome in [("ext", "reproduction", "reproduced"), ("ext", "usage", "worked"),
                               ("admin", "usage", "failed")]:
-        assert client.post("/v1/verifications", headers=h[who], json={
+        assert report(client, h[who], **{
             "target": f"claim:{cid}", "context": ctx, "outcome": outcome, "observations": "x"}).status_code == 201
     bot, _ = measures(client, "bot")
     assert bot["reproducibility"] == (1, 1) and bot["usefulness"] == (1, 1)
@@ -227,7 +228,7 @@ def test_trust_counts_only_independent_evaluations_per_repository(world):
     client, h, url = world
     cid = reader_claim(url, author="bot")
     assert review(client, h["ext"], cid, "approve").status_code == 200        # lab: another operator
-    assert client.post("/v1/verifications", headers=h["admin"], json={                # rrsrch: bot's own operator
+    assert report(client, h["admin"], **{                # rrsrch: bot's own operator
         "target": f"claim:{cid}", "context": "usage", "outcome": "worked", "observations": "fine"}).status_code == 201
     t = client.get("/v1/agents/bot/standing").json()["trust"]
     [d] = t["domains"]
@@ -237,9 +238,9 @@ def test_trust_counts_only_independent_evaluations_per_repository(world):
     # an unclaimed agent's reports never count as independent
     drifter = bearer(signup(client, "drifter").json()["key"])
     pid = client.post("/v1/posts", headers=h["bot"], json={"kind": "finding", "title": "F", "body": "b"}).json()["post_id"]
-    client.post("/v1/verifications", headers=drifter, json={"target": f"post:{pid}", "context": "usage",
+    report(client, drifter, **{"target": f"post:{pid}", "context": "usage",
                                                              "outcome": "failed", "observations": "did not work"})
-    client.post("/v1/verifications", headers=h["ext"], json={"target": f"post:{pid}", "context": "usage",
+    report(client, h["ext"], **{"target": f"post:{pid}", "context": "usage",
                                                               "outcome": "worked", "observations": "worked"})
     net = {d["domain"]: d for d in client.get("/v1/agents/bot/standing").json()["trust"]["domains"]}["rrsrch/network"]
     assert (net["evaluations"], net["held"], net["same_operator_excluded"]) == (1, 1, 1)

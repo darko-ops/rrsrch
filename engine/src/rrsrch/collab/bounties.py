@@ -333,7 +333,7 @@ def transition(conn: psycopg.Connection, p: Principal | None, bounty_id: int, to
     if to == "resolved":
         pending = conn.execute(
             "SELECT count(*) FROM bounty_submissions s WHERE s.bounty_id = %s AND (s.state = ANY(%s) OR EXISTS ("
-            "SELECT 1 FROM bounty_challenges c WHERE c.submission_id = s.id AND c.state = 'open'))",
+            "SELECT 1 FROM reviews c WHERE c.submission_id = s.id AND c.kind = 'objection' AND c.state = 'open'))",
             (bounty_id, list(ACTIVE))).fetchone()[0]
         if pending:
             raise Refused(409, f"{pending} submission(s) still need a decision (or have an open challenge)")
@@ -356,18 +356,20 @@ def _check_links(conn, b: dict, s: Submission) -> None:
         if not conn.execute("SELECT 1 FROM merge_requests WHERE id = %s AND repository_id = %s", (mr, rid)).fetchone():
             raise Refused(400, f"links: proposal {mr} is not in this bounty's repository")
     for rep in L.reports:
-        if not conn.execute("SELECT 1 FROM verification_reports WHERE id = %s AND repository_id = %s",
+        if not conn.execute("SELECT 1 FROM reviews WHERE id = %s AND repository_id = %s "
+                            "AND kind IN ('reproduction', 'usage')",
                             (rep, rid)).fetchone():
             raise Refused(400, f"links: report {rep} is not in this bounty's repository")
     for ch in L.challenges:
-        if not conn.execute("SELECT 1 FROM challenges h JOIN claims c ON c.id = h.claim_id WHERE h.id = %s "
+        if not conn.execute("SELECT 1 FROM reviews h JOIN claims c ON c.id = h.claim_id WHERE h.id = %s "
+                            "AND h.kind = 'objection' "
                             "AND c.repository_id = %s", (ch, rid)).fetchone():
             raise Refused(400, f"links: challenge {ch} is not in this bounty's repository")
     need = set(rubric.get("requires") or [])
     if "proposal" in need and not L.proposals:
         raise Refused(400, "the rubric requires a proposal: link the proposal that carries your correction")
     if "reproduction" in need and not (L.reports and conn.execute(
-            "SELECT 1 FROM verification_reports WHERE id = ANY(%s) AND context = 'reproduction'", (L.reports,)).fetchone()):
+            "SELECT 1 FROM reviews WHERE id = ANY(%s) AND kind = 'reproduction'", (L.reports,)).fetchone()):
         raise Refused(400, "the rubric requires a reproduction report")
     if "commit_evidence" in need and not (L.proposals and conn.execute(
             "SELECT 1 FROM merge_requests m, jsonb_array_elements(m.content->'evidence') e "
@@ -503,7 +505,7 @@ def judge(conn: psycopg.Connection, p: Principal | None, sid: int, decision: str
     if on_appeal:
         if decision == "needs_info":
             raise Refused(400, "an appeal is decided: accepted, partially_accepted or rejected")
-        if conn.execute("SELECT 1 FROM bounty_judgments WHERE submission_id = %s AND judge_id = %s",
+        if conn.execute("SELECT 1 FROM reviews WHERE submission_id = %s AND reviewer_id = %s AND kind = 'judgment'",
                         (sid, p.agent_id)).fetchone():
             raise Refused(403, "an appeal goes to someone who hasn't judged this submission")
     verdict = conn.execute("SELECT content->>'verdict' FROM bounty_submission_revisions WHERE submission_id = %s "
@@ -528,7 +530,8 @@ def judge(conn: psycopg.Connection, p: Principal | None, sid: int, decision: str
 
 
 def _last_judgment(conn, sid: int) -> tuple[int, int] | None:
-    return conn.execute("SELECT id, judge_id FROM bounty_judgments WHERE submission_id = %s AND decision <> 'needs_info' "
+    return conn.execute("SELECT id, reviewer_id FROM reviews WHERE submission_id = %s AND kind = 'judgment' "
+                        "AND verdict <> 'needs_info' "
                         "ORDER BY id DESC LIMIT 1", (sid,)).fetchone()
 
 
@@ -549,7 +552,8 @@ def challenge(conn: psycopg.Connection, p: Principal | None, sid: int, statement
     if not 1 <= len(statement) <= 4000:
         raise Refused(400, "statement must be 1-4000 characters")
     ev = [str(e)[:500] for e in (evidence or [])][:20]
-    if conn.execute("SELECT 1 FROM bounty_challenges WHERE submission_id = %s AND author_id = %s AND state = 'open'",
+    if conn.execute("SELECT 1 FROM reviews WHERE submission_id = %s AND reviewer_id = %s AND kind = 'objection' "
+                    "AND state = 'open'",
                     (sid, p.agent_id)).fetchone():
         raise Refused(409, "you already have an open challenge on this submission")
     cid = conn.execute(    # one review record (0026): an objection to the submission's judgment
@@ -578,7 +582,7 @@ def resolve_challenge(conn: psycopg.Connection, p: Principal | None, challenge_i
         raise Refused(409, f"challenge is {state}")
     if not (_is_owner(conn, p, b) or access.can_operate_network(p)):
         raise Refused(403, "the repository's owner or an RRSRCH operator resolves a challenge")
-    judge_id = conn.execute("SELECT judge_id FROM bounty_judgments WHERE id = %s", (jid,)).fetchone()[0]
+    judge_id = conn.execute("SELECT reviewer_id FROM reviews WHERE id = %s", (jid,)).fetchone()[0]
     if p.agent_id in (author, judge_id):
         raise Refused(403, "neither the challenger nor the judge resolves the challenge")
     conn.execute("UPDATE reviews SET state = %s, resolved_by = %s, resolution = %s, resolved_at = now() "
@@ -665,12 +669,15 @@ def submission_detail(conn, sid: int) -> dict:
         "WHERE submission_id = %s ORDER BY version", (sid,))]
     judgments = [dict(zip(("id", "revision_id", "judge", "decision", "reasons", "on_appeal", "created_at"), r))
                  for r in conn.execute(
-        "SELECT j.id, j.revision_id, a.handle, j.decision, j.reasons, j.on_appeal, j.created_at FROM bounty_judgments j "
-        "JOIN agents a ON a.id = j.judge_id WHERE j.submission_id = %s ORDER BY j.id", (sid,))]
+        "SELECT j.id, j.submission_revision_id, a.handle, j.verdict, j.findings, "
+        "coalesce((j.details->>'on_appeal')::boolean, false), j.created_at FROM reviews j "
+        "JOIN agents a ON a.id = j.reviewer_id WHERE j.submission_id = %s AND j.kind = 'judgment' ORDER BY j.id",
+        (sid,))]
     challenges = [dict(zip(("id", "judgment_id", "author", "statement", "evidence", "state", "resolution",
                             "created_at"), r)) for r in conn.execute(
-        "SELECT c.id, c.judgment_id, a.handle, c.statement, c.evidence, c.state, c.resolution, c.created_at "
-        "FROM bounty_challenges c JOIN agents a ON a.id = c.author_id WHERE c.submission_id = %s ORDER BY c.id", (sid,))]
+        "SELECT c.id, (c.details->>'judgment_id')::bigint, a.handle, c.findings, coalesce(c.details->'evidence', '[]'), "
+        "c.state, c.resolution, c.created_at FROM reviews c JOIN agents a ON a.id = c.reviewer_id "
+        "WHERE c.submission_id = %s AND c.kind = 'objection' ORDER BY c.id", (sid,))]
     ap = conn.execute("SELECT reason, created_at FROM bounty_appeals WHERE submission_id = %s", (sid,)).fetchone()
     return {"revisions": revs, "current": revs[-1]["content"] if revs else None, "judgments": judgments,
             "challenges": challenges, "appeal": {"reason": ap[0], "created_at": ap[1]} if ap else None}

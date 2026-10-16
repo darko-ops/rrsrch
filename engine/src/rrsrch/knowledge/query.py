@@ -127,8 +127,9 @@ def get_claim(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> d
         run = dict(zip(("id", "policy_version", "checks", "passed", "created_at"), r)) if r else None
     rel = _relations(conn, p, claim_id)
     challenges = _rows(conn.execute(
-        "SELECT ch.id, ch.kind, ch.blocking, ch.state, a.handle FROM challenges ch JOIN agents a ON a.id = ch.author_id "
-        "WHERE ch.claim_id = %s AND ch.state IN ('open', 'upheld') ORDER BY ch.id", (claim_id,)),
+        "SELECT ch.id, ch.details->>'objection', ch.blocking, ch.state, a.handle FROM reviews ch "
+        "JOIN agents a ON a.id = ch.reviewer_id WHERE ch.claim_id = %s AND ch.kind = 'objection' "
+        "AND ch.state IN ('open', 'upheld') ORDER BY ch.id", (claim_id,)),
         ("id", "kind", "blocking", "state", "author"))
     derived = [d for (d,) in conn.execute("SELECT derived_from_id FROM claim_derivations WHERE claim_id = %s "
                                           "ORDER BY 1", (claim_id,))]
@@ -203,8 +204,8 @@ def provenance(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> 
         edge(c, "derived_from", node(f"claim:{parent}", "claim"))
     for (child,) in conn.execute("SELECT claim_id FROM claim_derivations WHERE derived_from_id = %s", (claim_id,)):
         edge(node(f"claim:{child}", "claim"), "derived_from", c)
-    for ch in conn.execute("SELECT ch.id, ch.state, a.handle FROM challenges ch JOIN agents a ON a.id = ch.author_id "
-                           "WHERE ch.claim_id = %s", (claim_id,)):
+    for ch in conn.execute("SELECT ch.id, ch.state, a.handle FROM reviews ch JOIN agents a ON a.id = ch.reviewer_id "
+                           "WHERE ch.claim_id = %s AND ch.kind = 'objection'", (claim_id,)):
         x = node(f"challenge:{ch[0]}", "challenge", state=ch[1])
         edge(x, "challenges", c)
         edge(node(f"agent:{ch[2]}", "agent"), "raised", x)
@@ -301,7 +302,7 @@ def atlas(conn: psycopg.Connection, repository_id: int, limit: int = 300) -> dic
     total = conn.execute("SELECT count(*) FROM claims WHERE repository_id = %s", (repository_id,)).fetchone()[0]
     claims = _rows(conn.execute(
         "SELECT c.id, c.text, c.state, c.type, a.handle, "
-        "  (SELECT count(*) FROM challenges ch WHERE ch.claim_id = c.id AND ch.state = 'open') "
+        "  (SELECT count(*) FROM reviews ch WHERE ch.claim_id = c.id AND ch.kind = 'objection' AND ch.state = 'open') "
         "FROM claims c JOIN agents a ON a.id = c.agent_id WHERE c.repository_id = %s ORDER BY c.id DESC LIMIT %s",
         (repository_id, limit)), ("id", "text", "state", "type", "author", "open_challenges"))
     ids = [c["id"] for c in claims]
@@ -350,7 +351,7 @@ def review_queue(conn: psycopg.Connection, repository_id: int, states: tuple[str
     """Claims waiting for review, oldest first, each with the passage it rests on shown in context."""
     rows = _rows(conn.execute(
         "SELECT c.id, c.text, c.state, c.type, a.handle, s.id, s.title, s.pub_year, d.text, c.span_start, c.span_end, "
-        "  (SELECT count(*) FROM challenges ch WHERE ch.claim_id = c.id AND ch.state = 'open') "
+        "  (SELECT count(*) FROM reviews ch WHERE ch.claim_id = c.id AND ch.kind = 'objection' AND ch.state = 'open') "
         "FROM claims c JOIN agents a ON a.id = c.agent_id JOIN documents d ON d.id = c.document_id "
         "JOIN sources s ON s.id = d.source_id "
         "WHERE c.repository_id = %s AND c.state = ANY(%s) AND c.id > %s ORDER BY c.id LIMIT %s",
@@ -360,8 +361,8 @@ def review_queue(conn: psycopg.Connection, repository_id: int, states: tuple[str
     ids = [r["id"] for r in rows]
     reviews: dict[int, list] = {}
     for cid, handle, verdict, findings in conn.execute(
-            "SELECT v.claim_id, a.handle, v.verdict, v.findings FROM claim_reviews v JOIN agents a ON a.id = v.reviewer_id "
-            "JOIN claim_revisions rv ON rv.id = v.revision_id WHERE v.claim_id = ANY(%s) "
+            "SELECT v.claim_id, a.handle, v.verdict, v.findings FROM reviews v JOIN agents a ON a.id = v.reviewer_id "
+            "JOIN claim_revisions rv ON rv.id = v.revision_id WHERE v.claim_id = ANY(%s) AND v.kind = 'decision' "
             "AND rv.version = (SELECT max(version) FROM claim_revisions WHERE claim_id = v.claim_id) ORDER BY v.id",
             (ids,)):
         reviews.setdefault(cid, []).append({"reviewer": handle, "verdict": verdict, "findings": findings})
@@ -396,15 +397,15 @@ def review_trial(conn: psycopg.Connection, repository_id: int, states: tuple[str
         return None
     claims = _rows(conn.execute(
         "SELECT c.id, c.text, c.state, c.type, a.handle, d.part, c.span_start, c.span_end, "
-        "  (SELECT count(*) FROM challenges ch WHERE ch.claim_id = c.id AND ch.state = 'open') "
+        "  (SELECT count(*) FROM reviews ch WHERE ch.claim_id = c.id AND ch.kind = 'objection' AND ch.state = 'open') "
         "FROM claims c JOIN agents a ON a.id = c.agent_id JOIN documents d ON d.id = c.document_id "
         "WHERE c.repository_id = %s AND c.state = ANY(%s) AND d.source_id = %s ORDER BY d.part <> 'abstract', d.part, c.span_start, c.id",
         (repository_id, list(states), source_id)),
         ("id", "proposition", "state", "type", "contributor", "part", "start", "end", "open_challenges"))
     reviews: dict[int, list] = {}
     for cid, handle, verdict, findings in conn.execute(
-            "SELECT v.claim_id, a.handle, v.verdict, v.findings FROM claim_reviews v JOIN agents a ON a.id = v.reviewer_id "
-            "JOIN claim_revisions rv ON rv.id = v.revision_id WHERE v.claim_id = ANY(%s) "
+            "SELECT v.claim_id, a.handle, v.verdict, v.findings FROM reviews v JOIN agents a ON a.id = v.reviewer_id "
+            "JOIN claim_revisions rv ON rv.id = v.revision_id WHERE v.claim_id = ANY(%s) AND v.kind = 'decision' "
             "AND rv.version = (SELECT max(version) FROM claim_revisions WHERE claim_id = v.claim_id) ORDER BY v.id",
             ([c["id"] for c in claims],)):
         reviews.setdefault(cid, []).append({"reviewer": handle, "verdict": verdict, "findings": findings})

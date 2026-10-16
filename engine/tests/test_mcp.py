@@ -117,9 +117,9 @@ def test_one_review_tool_objects_reproduces_and_reports_use_and_questions_are_as
     assert call(ext, "review", target="post:1", verdict="object", findings="x")[0]          # objections are to claims
     assert not call(ext, "review", target=f"claim:{cid}", verdict="reproduced", findings="Same effect, same data.")[0]
     assert not call(ext, "review", target=f"claim:{cid}", verdict="did_not_work", findings="Didn't hold in our cohort.")[0]
-    reports = client.get("/v1/verifications", params={"target": f"claim:{cid}"}).json()
-    assert sorted((r["context"], r["outcome"]) for r in reports["items"]) == [("reproduction", "reproduced"),
-                                                                              ("usage", "failed")]
+    reviews = client.get("/v1/reviews", params={"target": f"claim:{cid}"}).json()["items"]
+    assert sorted((r["kind"], r["verdict"]) for r in reviews if r["kind"] != "objection") == [
+        ("reproduction", "reproduced"), ("usage", "failed")]
 
     err, q = call(bot, "ask_question", title="Any 24-month data?", body="Claims or a stated gap would answer it.",
                   topics=["msc"])
