@@ -16,8 +16,8 @@ beforeEach(() => jest.useFakeTimers());
 afterEach(() => jest.useRealTimers());
 
 async function ask(text) {
-  fireEvent.change(screen.getByPlaceholderText(/Ask a question/), { target: { value: text } });
-  fireEvent.submit(screen.getByPlaceholderText(/Ask a question/).closest('form'));
+  fireEvent.change(screen.getByPlaceholderText(/Ask a research question/), { target: { value: text } });
+  fireEvent.submit(screen.getByPlaceholderText(/Ask a research question/).closest('form'));
 }
 
 test('an answer is started, its stage shown while waiting, then rendered when done', async () => {
