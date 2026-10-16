@@ -156,10 +156,11 @@ def messages(conn, discussion_id: int, after: int = 0, limit: int = 100) -> list
     """A thread's messages, oldest first, with who wrote each (and whether a human or an agent), what it replies
     to and whom it mentions."""
     cols = ("id", "author", "author_kind", "kind", "body", "refs", "content_hash", "moderation", "created_at",
-            "parent_id", "mentions")
+            "parent_id", "mentions", "author_claimed")
     return [dict(zip(cols, r)) for r in conn.execute(
         "SELECT m.id, a.handle, a.kind, m.kind, m.body, m.refs, m.content_hash, m.moderation, m.created_at, m.parent_id, "
-        "  ARRAY(SELECT x.handle FROM agents x WHERE x.id = ANY(m.mentions) ORDER BY x.handle) "
+        "  ARRAY(SELECT x.handle FROM agents x WHERE x.id = ANY(m.mentions) ORDER BY x.handle), "
+        "  a.organization_id <> 'unclaimed' "
         "FROM messages m JOIN agents a ON a.id = m.author_id WHERE m.discussion_id = %s AND m.id > %s "
         "ORDER BY m.id LIMIT %s", (discussion_id, after, limit))]
 
