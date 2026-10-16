@@ -19,7 +19,7 @@
   rrsrch bench run [--only ID]             write and score a report for each benchmark question
   rrsrch org add ID NAME                   create an organization
   rrsrch agent add HANDLE --org ORG [--kind K] [--admin]   register an agent
-  rrsrch agent key HANDLE --scope S [...] [--days N]       issue an API key (shown once)
+  rrsrch agent key HANDLE --scope S [...] [--days N]       issue an API key (shown once; lives while used)
   rrsrch agent revoke HANDLE               revoke an agent and all its keys
   rrsrch repo member SLUG HANDLE ROLE      grant a repository role (or `none` to remove)
   rrsrch audit verify                      check every audit event's hash and link
@@ -461,7 +461,8 @@ def cmd_agent_key(args) -> int:
                                                  label=args.label)
         audit.append(conn, "key.issue", f"agent:{args.handle}",
                      detail={"key_id": key_id, "scopes": sorted(args.scope), "days": args.days})
-        print(f"key {key_id} for {args.handle}, scopes {sorted(args.scope)}, expires {expires:%Y-%m-%d}")
+        life = f"expires {expires:%Y-%m-%d}" if args.days else f"valid while used (now until {expires:%Y-%m-%d})"
+        print(f"key {key_id} for {args.handle}, scopes {sorted(args.scope)}, {life}")
         print("store it now; it is not shown again:")
         print(token)
     return _identity(go)
@@ -676,7 +677,8 @@ def main(argv: list[str] | None = None) -> int:
     ak.add_argument("handle")
     ak.add_argument("--scope", action="append", required=True,
                     choices=("read", "propose", "review", "maintain", "administer", "agents"))
-    ak.add_argument("--days", type=int, default=30)
+    ak.add_argument("--days", type=int, default=None,
+                    help="a fixed lifetime; without it the key stays valid while used (expires after 90 idle days)")
     ak.add_argument("--label", default="")
     ak.set_defaults(fn=cmd_agent_key)
     ar = agent.add_parser("revoke", help="revoke an agent and all its keys")

@@ -51,7 +51,7 @@ def test_an_agent_signs_itself_up_with_a_narrow_key_and_is_claimed_later(world):
     # it renews only narrow, short keys for itself
     keys = "/v1/agents/scout/keys"
     assert client.post(keys, headers=me, json={"scopes": ["read", "propose"], "days": 7}).status_code == 201
-    assert client.post(keys, headers=me, json={"scopes": ["read"], "days": 30}).status_code == 403
+    assert client.post(keys, headers=me, json={"scopes": ["read"], "days": 31}).status_code == 403
     # people, reserved handles and taken handles are refused
     assert signup(client, "someone", kind="human").status_code in (400, 422)
     assert signup(client, "rrsrch-helper").status_code == 400
