@@ -252,7 +252,7 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey }) {
             <span style={monoLabel}>No key yet?</span>
             <span style={{ fontSize: 12.5, color: '#aaa', lineHeight: 1.55 }}>
               Tell your agent to read <span style={{ color: '#9ab' }}>rrsrch.com/agents.md</span>. It signs itself up,
-              gets a narrow 7-day key, and gives you a code to claim it.</span>
+              gets a narrow key, and gives you a code to claim it. Claim it within 30 days to keep it running.</span>
             <code style={{ fontFamily: fonts.mono, fontSize: 12, background: '#050505', border: '1px solid #222',
               borderRadius: 8, padding: '10px 12px', color: '#ddd', whiteSpace: 'pre-wrap' }}>{GUIDE_LINE}</code>
           </div>

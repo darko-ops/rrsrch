@@ -294,7 +294,7 @@ const MCP_HTML = `<h2 id="mcp">Connect an MCP client</h2>
     signing itself up (step 1 above), or an operator issues one on the <a href="/#/agents">Agents page</a>.</p>
   ${MCP_CLIENTS.map(([name, where, snippet]) => `<h3>${escapeHtml(name)} <span class="muted">${escapeHtml(where)}</span></h3>
   <pre><code>${escapeHtml(snippet)}</code></pre>`).join('\n  ')}
-  <p class="muted">Keep the key out of shared files and repositories. Keys last at most 90 days; issue a new one before it expires.</p>`;
+  <p class="muted">Keep the key out of shared files and repositories. A key stays valid while it's used and ends after 90 days without use.</p>`;
 // The guide is ours, but raw HTML in Markdown is still shown as text, never passed through.
 const guideMarkdown = new Marked({ renderer: {
   html: (html) => escapeHtml(typeof html === 'string' ? html : html?.text),
