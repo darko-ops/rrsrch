@@ -23,6 +23,7 @@ const AddAgentPage = React.lazy(() => import('./AddAgent'));
 // lazily, never statically: AgentCard imports from this module, and a static import both ways crashed the production
 // bundle at load ("Cannot access 'T' before initialization")
 const AgentCardFor = React.lazy(() => import('./AgentCard').then((m) => ({ default: m.AgentCardFor })));
+const AgentWorkFor = React.lazy(() => import('./AgentCard').then((m) => ({ default: m.AgentWorkFor })));
 const InboxPage = React.lazy(() => import('./Inbox'));
 const MembersPanel = React.lazy(() => import('./Members'));
 const AccountSignedIn = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedIn })));
@@ -261,7 +262,7 @@ function KeysList({ apiKey, handle, canManage }) {
   };
   if (state.loading) return <Loading what="keys" />;
   if (state.error) return <Note tone="error">{state.error}</Note>;
-  const keys = state.data.keys;
+  const keys = state.data?.keys || [];
   if (!keys.length) return <Note>No keys yet.</Note>;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 6, marginTop: 8 }}>
@@ -287,13 +288,11 @@ function KeysList({ apiKey, handle, canManage }) {
 }
 
 function AgentRow({ agent, apiKey, me, isAdmin }) {
-  const [open, setOpen] = useState(null); // keys | issue | standing
-  const [issued, setIssued] = useState(null);
+  const [open, setOpen] = useState(null); // work | standing
   const [confirm, setConfirm] = useState(false);
   const [err, setErr] = useState('');
   const [status, setStatus] = useState(agent.status);
   const isMe = me && me.handle === agent.handle;
-  const canManage = isAdmin || isMe;
   const revokeAgent = async () => {
     const r = await engine(`/v1/agents/${agent.handle}/revoke`, { key: apiKey, method: 'POST' });
     if (r.ok) { setStatus('revoked'); setConfirm(false); } else setErr(r.error);
@@ -302,11 +301,8 @@ function AgentRow({ agent, apiKey, me, isAdmin }) {
     <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <AgentCardFor agent={{ ...agent, status }} apiKey={apiKey} actions={<>
           {isMe && <Chip color={GREEN}>you</Chip>}
+          <Btn small kind={open === 'work' ? 'primary' : undefined} onClick={() => setOpen(open === 'work' ? null : 'work')}>Work</Btn>
           <Btn small onClick={() => setOpen(open === 'standing' ? null : 'standing')}>Track record</Btn>
-          {canManage && <Btn small onClick={() => setOpen(open === 'keys' ? null : 'keys')}>Keys</Btn>}
-          {canManage && status === 'active' && (
-            <Btn small onClick={() => setOpen(open === 'issue' ? null : 'issue')}>Issue key</Btn>
-          )}
           {isAdmin && status === 'active' && !isMe && (
             confirm
               ? <><Btn small kind="danger" onClick={revokeAgent}>Revoke agent and all keys</Btn>
@@ -314,13 +310,8 @@ function AgentRow({ agent, apiKey, me, isAdmin }) {
               : <Btn small kind="danger" onClick={() => setConfirm(true)}>Revoke</Btn>
           )}
         </>} />
+      {open === 'work' && <AgentWorkFor handle={agent.handle} apiKey={apiKey} />}
       {open === 'standing' && <AgentStanding handle={agent.handle} apiKey={apiKey} />}
-      {open === 'keys' && <KeysList apiKey={apiKey} handle={agent.handle} canManage={canManage} />}
-      {open === 'issue' && !issued && (
-        <IssueKeyForm apiKey={apiKey} handle={agent.handle} ownScopes={isAdmin ? null : me?.scopes}
-          onIssued={(k) => setIssued(k)} />
-      )}
-      {issued && <NewKeyNotice issued={issued} onDone={() => { setIssued(null); setOpen('keys'); }} />}
       {err && <Note tone="error">{err}</Note>}
     </div>
   );
@@ -371,7 +362,7 @@ function AgentsTab({ apiKey, me }) {
   const [agents, reload] = useLoad(() => engine(`/v1/agents?organization=${encodeURIComponent(org)}&limit=200`), [org]);
   return (
     <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      {!me && <Note>Connect an agent's key under <a href="#/agents?tab=account" style={{ color: '#9ab' }}>Account</a> to register, claim or manage agents.</Note>}
+      {!me && <Note>Sign in, or connect an agent's key, under <a href="#/account" style={{ color: '#9ab' }}>Account</a> to see and manage your agents.</Note>}
       {isAdmin && (
         <Panel title={`Register an agent in ${org}`}>
           <RegisterAgent apiKey={apiKey} onRegistered={reload} />
@@ -899,16 +890,16 @@ function MergeRequests({ apiKey, repo, isMobile }) {
 // -- the shell: a sidebar of pages (design handoff: agents pages, §1) ---------------------------------------
 
 const PAGES = {
-  agents: 'Agents', keys: 'Keys', add: 'Add an agent', review: 'Review', bounties: 'Bounties', inbox: 'Inbox',
+  agents: 'Agents', add: 'Add an agent', review: 'Review', bounties: 'Bounties', inbox: 'Inbox',
   atlas: 'Atlas', account: 'Account',
 };
 const GROUPS = [
-  ['Your agents', ['agents', 'keys', 'add']],
-  ['Review', ['review', 'bounties', 'inbox']],
+  ['Your agents', ['agents', 'add']],
+  ['Work', ['review', 'bounties', 'inbox']],
   ['Network', ['atlas']],
 ];
 // the review queue and merge requests were two pages for one job; links to either open the one Review page
-const LEGACY_TABS = { queue: 'review', merge: 'review', tasks: 'review' };   // tasks retired (docs/SIMPLIFY.md)
+const LEGACY_TABS = { queue: 'review', merge: 'review', tasks: 'review', keys: 'account' };   // keys live in Account   // tasks retired (docs/SIMPLIFY.md)
 // pages kept but out of the sidebar (docs/SIMPLIFY.md): links still open them
 const SIMPLIFIED_AWAY = ['atlas'];
 
@@ -939,7 +930,7 @@ function Sidebar({ active, onPick, me, user, health, counts, isMobile, hidden = 
   const who = me?.handle || user?.name;
   const c = counts || {};
   const waiting = c.queue == null && c.merge == null ? undefined : (c.queue || 0) + (c.merge || 0);
-  const count = { agents: c.agents, keys: c.keys, review: waiting, tasks: c.tasks, inbox: c.inbox_unread };
+  const count = { agents: c.agents, review: waiting, tasks: c.tasks, inbox: c.inbox_unread };
   const tone = { review: waiting ? AMBER : null, inbox: c.inbox_unread ? GREEN : null };
   if (isMobile) {
     return (
@@ -993,14 +984,17 @@ function Sidebar({ active, onPick, me, user, health, counts, isMobile, hidden = 
 }
 
 // Keys: the connected agent's own keys, and a new one
-function KeysPage({ apiKey, me }) {
+function KeysPage({ apiKey, me, header = true }) {
   const [issued, setIssued] = useState(null);
   const [n, setN] = useState(0);
+  const isAdmin = !!me && me.org_role === 'admin' && me.scopes.includes('agents');
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <PageHeader title="Keys" subtitle="Keys for the agent you're acting as. Each key is shown once, carries only the scopes it was issued with, and expires." />
+      {header && <PageHeader title="Keys" subtitle="Keys for the agent you're acting as. Each key is shown once, carries only the scopes it was issued with, and expires." />}
+      {!header && <div style={{ fontSize: 12.5, color: '#888' }}>Each key is shown once, carries only the scopes it was
+        issued with, and expires.</div>}
       {!me || me.organization_id === 'people'
-        ? <Note>Connect an agent's key under <a href="#/agents?tab=account" style={{ color: '#9ab' }}>Account</a> to manage its keys.</Note>
+        ? <Note>Connect an agent's key under Sign-in &amp; security to manage its keys.</Note>
         : <>
           <Panel title={`Issue a key for ${me.handle}`}>
             {issued
@@ -1011,8 +1005,38 @@ function KeysPage({ apiKey, me }) {
           <Panel title="Keys">
             <KeysList key={n} apiKey={apiKey} handle={me.handle} canManage />
           </Panel>
+          {isAdmin && <OrgAgentKeys apiKey={apiKey} me={me} />}
         </>}
     </div>
+  );
+}
+
+// An organization admin manages the keys of every agent the organization runs.
+function OrgAgentKeys({ apiKey, me }) {
+  const [agents] = useLoad(() => engine(`/v1/agents?organization=${encodeURIComponent(me.organization_id)}&limit=200`),
+    [me.organization_id]);
+  const [open, setOpen] = useState(null);       // handle: keys | issue:<handle>
+  const [issued, setIssued] = useState(null);
+  const others = (agents.data?.items || []).filter((a) => a.handle !== me.handle && a.status === 'active');
+  if (!others.length) return null;
+  return (
+    <Panel title={`Keys for ${me.organization_id}'s other agents`}>
+      {others.map((a) => (
+        <div key={a.handle} style={{ display: 'grid', gap: 8, padding: '8px 0', borderTop: '1px solid #1c1c1c' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Mono>{a.handle}</Mono>
+            <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+              <Btn small onClick={() => setOpen(open === a.handle ? null : a.handle)}>Keys</Btn>
+              <Btn small onClick={() => { setIssued(null); setOpen(open === `issue:${a.handle}` ? null : `issue:${a.handle}`); }}>Issue key</Btn>
+            </span>
+          </div>
+          {open === a.handle && <KeysList apiKey={apiKey} handle={a.handle} canManage />}
+          {open === `issue:${a.handle}` && (issued
+            ? <NewKeyNotice issued={issued} onDone={() => { setIssued(null); setOpen(a.handle); }} />
+            : <IssueKeyForm apiKey={apiKey} handle={a.handle} ownScopes={null} onIssued={setIssued} />)}
+        </div>
+      ))}
+    </Panel>
   );
 }
 
@@ -1027,7 +1051,10 @@ function RepoPage({ title, subtitle, repos, repo, onRepo, children }) {
 
 export default function Dashboard({ isMobile, initialTab }) {
   const [link, setLink] = useState(() => hashParams());
-  const [tab, setTabState] = useState(() => pageOf(initialTab || link.get('tab') || readStored(TAB_STORAGE) || 'agents'));
+  const [tab, setTabState] = useState(() => {
+    const stored = pageOf(readStored(TAB_STORAGE) || 'agents');       // a saved tab never opens Account by itself
+    return pageOf(initialTab || link.get('tab') || (stored === 'account' ? 'agents' : stored));
+  });
   const [apiKey, setApiKeyState] = useState(() => readStored(KEY_STORAGE));
   const [siteToken, setSiteToken] = useState(() => readStored('rrsrch_token'));
   const [user, setUser] = useState(null);
@@ -1039,11 +1066,17 @@ export default function Dashboard({ isMobile, initialTab }) {
 
   const setTab = (t) => {
     const page = pageOf(t);
+    if (page === 'account') { window.location.hash = '/account'; return; }   // Account is its own page
     setTabState(page); writeStored(TAB_STORAGE, page);
     window.history.replaceState(null, '', `#/agents?tab=${page}`);
   };
   const setApiKey = useCallback((k) => { setApiKeyState(k || ''); writeStored(KEY_STORAGE, k || ''); }, []);
   useEffect(() => { if (initialTab) setTabState(pageOf(initialTab)); }, [initialTab]);
+  useEffect(() => {             // an old #/agents?tab=account or ?tab=keys link: Account is its own page now
+    if (!initialTab && tab === 'account') {
+      window.location.replace(`#/account${link.get('tab') === 'keys' ? '?tab=keys' : ''}`);
+    }
+  }, [initialTab, tab, link]);
   useEffect(() => {
     const onHash = () => {
       const p = hashParams();
@@ -1120,13 +1153,11 @@ export default function Dashboard({ isMobile, initialTab }) {
   if (tab === 'agents') {
     page = (
       <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-        <PageHeader title="Agents" subtitle="The agents your organization runs, and how agents join the network." />
+        <PageHeader title="Your agents" subtitle="The agents you run: what each is working on now, and what it has contributed." />
         <AgentsTab apiKey={acting} me={me} />
         <MembersPanel apiKey={acting} {...repoProps} />
       </div>
     );
-  } else if (tab === 'keys') {
-    page = <KeysPage apiKey={apiKey} me={apiKey ? me : null} />;
   } else if (tab === 'review') {
     page = (
       <RepoPage title="Review" subtitle="Everything in this repository waiting for review: proposed changes, then claims already in it that nobody has reviewed yet. The repository's policy decides what is accepted." {...repoProps}>
@@ -1147,8 +1178,11 @@ export default function Dashboard({ isMobile, initialTab }) {
   } else {
     page = (
       <AccountSignedIn user={user} apiKey={apiKey} me={me} isMobile={isMobile} onSignedOut={signedOut}
-        onKeyChange={(k) => setApiKey(k)} onUserChange={setUser} />
+        onKeyChange={(k) => setApiKey(k)} onUserChange={setUser} initialTab={link.get('tab')} />
     );
+  }
+  if (tab === 'account') {              // Account is about you, not your agents: no Agents sidebar
+    return <React.Suspense fallback={<Loading what="your account" />}>{page}</React.Suspense>;
   }
 
   return (
@@ -1169,6 +1203,6 @@ export {
   layoutAtlas, TrialQueue, engine, readStored, writeStored, actingKey, SIGN_IN, KEY_STORAGE, fonts, GREEN, AMBER, RED,
   BLUE, STATE_COLOR, Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
   // for the redesigned Agents pages (Atlas.js, Inbox.js, AccountPages.js)
-  Field, CopyText, IssueKeyForm, NewKeyNotice, KeysList, AgentsTab, COLUMNS, ROW, EDGE_COLOR, edgePath, NodeDetail,
+  Field, CopyText, IssueKeyForm, NewKeyNotice, KeysList, KeysPage, AgentsTab, COLUMNS, ROW, EDGE_COLOR, edgePath, NodeDetail,
   ClaimQueue, MergeRequests, MergeRequestDetail, SCOPES, MCP_BASE,
 };

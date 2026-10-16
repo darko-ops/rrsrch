@@ -14,7 +14,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   engine, KEY_STORAGE, readStored, writeStored, fonts, GREEN, AMBER, RED, BLUE, Btn, Chip, Note, Mono, Loading,
-  inputStyle, useLoad,
+  inputStyle, useLoad, KeysPage,
 } from './Dashboard';
 import { panelStyle, monoLabel } from './AgentsChrome';
 import { passwordChecks, passwordOk } from './passwordRules';
@@ -505,26 +505,6 @@ export function SearchHistoryPanel() {
   );
 }
 
-// Keys belong to agents, so they're managed where agents are; Account points there.
-function KeysTab() {
-  return (
-    <div style={{ maxWidth: 620 }}>
-      <Note>Agent keys let your agents act on the network. Issue, rotate and revoke them on the{' '}
-        <a href="#/agents?tab=keys" style={{ color: '#9ab' }}>Keys page</a>. A key you connected in this browser is
-        under Sign-in &amp; security.</Note>
-    </div>
-  );
-}
-
-function NotificationsTab() {
-  return (
-    <div style={{ maxWidth: 620 }}>
-      <Note>Email notifications aren't available yet. Your inbox on the{' '}
-        <a href="#/agents?tab=inbox" style={{ color: '#9ab' }}>Inbox page</a> has everything addressed to you.</Note>
-    </div>
-  );
-}
-
 // Organization: create one (any confirmed account, once) and become its admin, or see the one you run. Calls go out
 // with the site sign-in, never an agent key: an organization is created by a person.
 function OrganizationTab({ user }) {
@@ -604,8 +584,10 @@ function OrganizationTab({ user }) {
   );
 }
 
+// Account is about you: who you are, how you sign in, your organization, your keys, and your searches. Your agents
+// and their work are on the Agents page.
 const TABS = [['profile', 'Profile'], ['organization', 'Organization'], ['security', 'Sign-in & security'],
-  ['keys', 'Keys'], ['history', 'Search history'], ['notifications', 'Notifications']];
+  ['keys', 'Keys'], ['history', 'Search history']];
 
 // Acting with an agent key and no rrsrch.com account: the agent's identity, the key, and an optional site sign-in.
 function KeyOnlyAccount({ apiKey, me, isMobile, onKeyChange, onUserChange }) {
@@ -635,6 +617,8 @@ function KeyOnlyAccount({ apiKey, me, isMobile, onKeyChange, onUserChange }) {
           </div>
           <Btn small onClick={() => setSigningIn(true)}>Sign in</Btn>
         </div>
+        <div style={{ ...monoLabel, marginTop: 8 }}>Keys</div>
+        <KeysPage apiKey={apiKey} me={me} header={false} />
         <div style={{ ...monoLabel, marginTop: 8 }}>Search history</div>
         <SearchHistoryPanel />
       </div>
@@ -642,8 +626,8 @@ function KeyOnlyAccount({ apiKey, me, isMobile, onKeyChange, onUserChange }) {
   );
 }
 
-export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKeyChange, onUserChange }) {
-  const [tab, setTab] = useState('profile');
+export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKeyChange, onUserChange, initialTab }) {
+  const [tab, setTab] = useState(() => (TABS.some(([id]) => id === initialTab) ? initialTab : 'profile'));
   if (!user) {
     return <KeyOnlyAccount apiKey={apiKey} me={me} isMobile={isMobile} onKeyChange={onKeyChange} onUserChange={onUserChange} />;
   }
@@ -666,9 +650,8 @@ export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKey
           {tab === 'security' && <SecurityTab user={user} me={me} onSignedOut={onSignedOut} onKeyChange={onKeyChange}
             onUserChange={onUserChange} />}
           {tab === 'organization' && <OrganizationTab user={user} />}
-          {tab === 'keys' && <KeysTab />}
+          {tab === 'keys' && <KeysPage apiKey={apiKey} me={apiKey ? me : null} header={false} />}
           {tab === 'history' && <SearchHistoryPanel />}
-          {tab === 'notifications' && <NotificationsTab />}
         </div>
       </div>
     </div>

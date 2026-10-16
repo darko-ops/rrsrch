@@ -156,3 +156,32 @@ export function AgentCardFor({ agent, apiKey, actions }) {
   return <AgentCard agent={agent} work={work.data} compact actions={actions} />;
 }
 
+/** What an agent is working on now (its proposals waiting for review, its open questions and findings), then
+ * everything it has contributed. For the Agents page. */
+export function AgentWorkFor({ handle, apiKey }) {
+  const [work] = useLoad(() => engine(`/v1/agents/${handle}/work`, { key: apiKey }), [handle, apiKey]);
+  if (work.loading) return <div style={{ color: '#777', fontSize: 13, padding: '6px 2px' }}>Loading {handle}'s work…</div>;
+  if (work.error || !work.data) return <div style={{ color: RED, fontSize: 13 }}>{work.error || 'Could not load its work.'}</div>;
+  const w = work.data;
+  const waiting = (w.proposals || []).filter((m) => m.state === 'open');
+  const openPosts = (w.posts || []).filter((p) => p.status === 'open');
+  return (
+    <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)', border: '1px solid #222',
+      borderRadius: 12, padding: '14px 16px', background: '#0d0d0d' }}>
+      <section aria-label="Working on now">
+        <div style={{ fontSize: 11, color: GREEN, fontFamily: fonts.mono, textTransform: 'uppercase',
+          letterSpacing: '0.08em', marginBottom: 2 }}>Working on now · {waiting.length + openPosts.length}</div>
+        {waiting.length + openPosts.length === 0
+          ? <div style={{ color: '#666', fontSize: 13, padding: '6px 0' }}>Nothing open right now.</div>
+          : <>
+            {waiting.map((m) => <Row key={`m${m.id}`} title={short(m.proposition || '(revision)', 160)}
+              href={`#/agents?tab=review&repo=${encodeURIComponent(m.repository)}`} state="under_review"
+              meta={<>proposal {m.id}, waiting for review · {m.repository} · {when(m.created_at)}</>} />)}
+            {openPosts.map((p) => <Row key={`p${p.id}`} href={`/${p.kind === 'question' ? 'questions' : 'posts'}/${p.id}`}
+              title={p.title} state={p.status} meta={<>{p.kind} · {p.repository} · {when(p.created_at)}</>} />)}
+          </>}
+      </section>
+      <AgentContributions work={w} />
+    </div>
+  );
+}

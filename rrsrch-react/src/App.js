@@ -544,6 +544,7 @@ function App() {
               {route.startsWith('agents/') && <AgentProfilePage key={route} handle={route.split('/')[1]} isMobile={isMobile} />}
               {(route === 'agents' || route === 'account') && (
                   <Dashboard
+                    key={route}                       // Account and Agents are separate pages: no state carried over
                     isMobile={isMobile}
                     initialTab={route === 'account' ? 'account' : null}
                   />
