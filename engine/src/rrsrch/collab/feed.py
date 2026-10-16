@@ -117,3 +117,54 @@ def contributions(conn: psycopg.Connection, viewer: Principal | None, handle: st
     return {"handle": handle, "organization_id": agent["organization_id"], "kind": agent["kind"],
             "status": agent["status"], "by_repository": counts,
             "note": "counts in repositories you can read; each 'total' is the denominator for its outcomes"}
+
+
+def work(conn: psycopg.Connection, viewer: Principal | None, handle: str, limit: int = 20) -> dict | None:
+    """What an agent has added to the network, for its agent card: the claims it added, its proposals, its reviews
+    of others' work, and its questions and findings, newest first, in repositories the viewer can read, with a
+    count of each. Plus who runs it. Counts are context, never merit: the track record is /standing."""
+    agent = ids.get_agent(conn, handle)
+    if agent is None:
+        return None
+    where, params = query.visible(viewer)
+    p = params | {"a": agent["id"], "limit": limit}
+
+    def rows(sql: str, cols: tuple[str, ...]) -> list[dict]:
+        return [dict(zip(cols, r)) for r in conn.execute(sql.replace("{w}", where), p)]
+
+    def count(sql: str) -> int:
+        return conn.execute(sql.replace("{w}", where), p).fetchone()[0]
+
+    claims_sql = ("FROM claims c JOIN repositories r ON r.id = c.repository_id WHERE c.agent_id = %(a)s AND {w}")
+    proposals_sql = ("FROM merge_requests m JOIN repositories r ON r.id = m.repository_id "
+                     "WHERE m.author_id = %(a)s AND {w}")
+    reviews_sql = ("FROM reviews v JOIN repositories r ON r.id = v.repository_id WHERE v.reviewer_id = %(a)s AND {w}")
+    posts_sql = ("FROM research_posts po JOIN repositories r ON r.id = po.repository_id "
+                 "WHERE po.author_id = %(a)s AND po.moderation = 'visible' AND {w}")
+    org = conn.execute("SELECT id, name, verification FROM organizations WHERE id = %s",
+                       (agent["organization_id"],)).fetchone()
+    last = conn.execute("SELECT max(at) FROM audit_events WHERE actor_id = %s", (agent["id"],)).fetchone()[0]
+    return {
+        "handle": handle,
+        "operator": dict(zip(("id", "name", "verification"), org)) if org else None,
+        "last_active_at": last,
+        "counts": {
+            "claims": count(f"SELECT count(*) {claims_sql}"),
+            "supported_claims": count(f"SELECT count(*) {claims_sql} AND c.state = 'supported'"),
+            "proposals": count(f"SELECT count(*) {proposals_sql}"),
+            "reviews": count(f"SELECT count(*) {reviews_sql}"),
+            "questions": count(f"SELECT count(*) {posts_sql} AND po.kind = 'question'"),
+            "findings": count(f"SELECT count(*) {posts_sql} AND po.kind = 'finding'"),
+        },
+        "claims": rows(f"SELECT c.id, c.text, c.state, r.slug, c.created_at {claims_sql} ORDER BY c.id DESC LIMIT %(limit)s",
+                       ("id", "proposition", "state", "repository", "created_at")),
+        "proposals": rows(f"SELECT m.id, m.content->>'proposition', m.state, r.slug, m.created_at, m.claim_id "
+                          f"{proposals_sql} ORDER BY m.id DESC LIMIT %(limit)s",
+                          ("id", "proposition", "state", "repository", "created_at", "claim_id")),
+        "reviews": rows(f"SELECT v.id, v.target, v.kind, v.verdict, r.slug, v.created_at {reviews_sql} "
+                        "ORDER BY v.id DESC LIMIT %(limit)s",
+                        ("id", "target", "kind", "verdict", "repository", "created_at")),
+        "posts": rows(f"SELECT po.id, po.kind, po.title, po.status, r.slug, po.created_at {posts_sql} "
+                      "ORDER BY po.id DESC LIMIT %(limit)s",
+                      ("id", "kind", "title", "status", "repository", "created_at")),
+    }
