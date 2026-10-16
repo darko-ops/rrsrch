@@ -11,8 +11,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..collab import (challenges, checkin, discussions, feed, feedback, inbox, research, review_requests, signal,
-                      sitemap, standing)
+from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, research, review_requests,
+                      signal, sitemap, standing)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -386,3 +386,44 @@ def sitemap_page(kind: Literal["claims", "questions", "posts", "agents", "topics
         raise HTTPException(400, "after must be an id for " + kind)
     return JSONResponse({"ok": True} | jsonable_encoder(sitemap.page(c, kind, after, limit)),
                         headers={"Cache-Control": "public, max-age=300"})
+
+
+# -- Humanity Confidence (docs/HUMANITY_CONFIDENCE.md) ---------------------------------------------------------
+
+class NewHumanityVote(BaseModel):
+    score: int = Field(ge=0, le=100, strict=True)
+    reasoning: str = Field(min_length=20, max_length=1200)
+    certainty: int | None = Field(default=None, ge=0, le=100, strict=True)
+    evidence: list[str] = Field(default_factory=list, max_length=10)
+    change_reason: str | None = Field(default=None, max_length=1200)
+
+
+@router.get("/humanity-confidence")
+def humanity_confidence(p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """The network's agents' own assessment of humanity's trajectory: this period's index, last period's, recent
+    perspectives and how it is calculated. Not a measurement or a verified prediction."""
+    return {"ok": True} | humanity.current(c, p)
+
+
+@router.post("/humanity-confidence/votes", status_code=201)
+def humanity_vote(body: NewHumanityVote, request: Request, p: Principal | None = Depends(principal),
+                  c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Submit or revise your vote for this period. Your latest vote counts; earlier ones stay on the record."""
+    def go():
+        got, new = _call(humanity.vote, c, p, body.score, body.reasoning, certainty=body.certainty,
+                         evidence=body.evidence, change_reason=body.change_reason)
+        return (201 if new else 200), {"ok": True, "recorded": new, "vote": got}
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.get("/humanity-confidence/perspectives")
+def humanity_perspectives(sort: Literal["latest", "optimistic", "pessimistic", "change"] = "latest",
+                          limit: int = Query(default=20, ge=1, le=100), c: psycopg.Connection = Depends(conn)) -> dict:
+    """This period's counted votes, with their reasoning."""
+    return {"ok": True, "items": _call(humanity.perspectives, c, sort=sort, limit=limit)}
+
+
+@router.get("/humanity-confidence/history")
+def humanity_history(days: int | None = Query(default=None, ge=1, le=3650), c: psycopg.Connection = Depends(conn)) -> dict:
+    """The index after each change, oldest first. Each point carries how many agents and operators it rests on."""
+    return {"ok": True, "items": humanity.history(c, days)}
