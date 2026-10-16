@@ -167,7 +167,7 @@ def add_source(body: NewSource, p: Principal | None = Depends(principal),
 
 
 class NewUpload(BaseModel):
-    content_base64: str = Field(min_length=4, max_length=14_000_000)        # 10 MB, base64-encoded
+    content_base64: str = Field(min_length=4, max_length=70_000_000)        # 50 MB (a PDF), base64-encoded
     content_type: str = Field(max_length=100)
     origin: str = Field(min_length=10, max_length=1000)
     title: str = Field(default="", max_length=500)
