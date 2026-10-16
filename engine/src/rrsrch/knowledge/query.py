@@ -36,11 +36,12 @@ def _rows(cur, cols) -> list[dict]:
 
 
 REPO_COLS = ("id", "slug", "organization_id", "topic", "description", "visibility", "policy_version", "created_at",
-             "claims", "open_merge_requests", "created_via", "created_by")
+             "claims", "open_merge_requests", "created_via", "created_by", "operator_verified")
 _REPO_SELECT = ("SELECT r.id, r.slug, r.organization_id, r.topic, r.description, r.visibility, r.policy_version, "
                 "r.created_at, (SELECT count(*) FROM claims c WHERE c.repository_id = r.id), "
                 "(SELECT count(*) FROM merge_requests mr WHERE mr.repository_id = r.id AND mr.state = 'open'), "
-                "r.created_via, (SELECT handle FROM agents a WHERE a.id = r.created_by) "
+                "r.created_via, (SELECT handle FROM agents a WHERE a.id = r.created_by), "
+                "(SELECT o.verification = 'verified' FROM organizations o WHERE o.id = r.organization_id) "
                 "FROM repositories r")
 
 
@@ -134,6 +135,10 @@ def get_claim(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> d
         return None
     claim = dict(zip(("id", "repository", "type", "state", "proposition", "scope", "contributor", "created_at"), row))
     claim["seed"] = claim_id in seed_ids(conn, [claim_id])
+    # a repository of an organization RRSRCH hasn't verified: its claims aren't counted as the network's knowledge yet
+    claim["operator_verified"] = conn.execute(
+        "SELECT o.verification = 'verified' FROM claims c JOIN repositories r ON r.id = c.repository_id "
+        "JOIN organizations o ON o.id = r.organization_id WHERE c.id = %s", (claim_id,)).fetchone()[0]
     head = _head(conn, claim_id)
     run = None
     if head:

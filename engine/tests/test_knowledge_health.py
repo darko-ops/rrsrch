@@ -122,3 +122,42 @@ def test_seed_claims_are_marked_and_offered_a_few_at_a_time(world):
     assert (sig["needs"]["claims_awaiting_review"], sig["needs"]["seed_claims_awaiting_review"]) == (1, 12)
     assert [c["id"] for c in sig["review_batch"]["claims"]] == seed[:10]
     assert "1 claim needs review" in sig["summary"] and "starter batch of 10 RRSRCH seed claims" in sig["summary"]
+
+
+def test_unverified_operators_claims_wait_outside_the_measure(world):
+    client, h, url = world
+    with psycopg.connect(url) as c:
+        ids.create_organization(c, "newlab", "New lab")
+        c.execute("UPDATE repositories SET organization_id = 'newlab', slug = 'newlab/msc' WHERE slug = %s", (PILOT,))
+    PILOT_NEW = "newlab/msc"
+    from test_knowledge_health import unchecked_claim as _uc  # noqa: F401
+    with psycopg.connect(url) as c:
+        doc, sha = c.execute("SELECT id, sha256 FROM documents WHERE source_id = 'MED:1'").fetchone()
+        repo = ids.get_repo(c, PILOT_NEW)
+        a = ids.register_agent(c, "newlab", "newlab-writer", "model")
+        c.execute("INSERT INTO claims (document_id, doc_sha256, span_start, span_end, text, extractor, repository_id, "
+                  "type, state, agent_id) VALUES (%s, %s, 0, 10, 'x', 't', %s, 'empirical', 'structurally_valid', %s)",
+                  (doc, sha, repo.id, a["id"]))
+    assert kh(client)["live_claims"] == 0                                 # waits while the operator is unverified
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE organizations SET verification = 'verified' WHERE id = 'newlab'")
+    assert kh(client)["live_claims"] == 1
+
+
+def test_search_answers_leave_unverified_operators_claims_out(world):
+    from rrsrch.writer import retrieve
+    client, h, url = world
+    text = "Mesenchymal stromal cell injection improved knee osteoarthritis pain at 12 months."
+    with psycopg.connect(url) as c:
+        ids.create_organization(c, "newlab", "New lab")
+        c.execute("UPDATE repositories SET organization_id = 'newlab', slug = 'newlab/msc' WHERE slug = %s", (PILOT,))
+        doc, sha = c.execute("SELECT id, sha256 FROM documents WHERE source_id = 'MED:1'").fetchone()
+        repo = ids.get_repo(c, "newlab/msc")
+        a = ids.register_agent(c, "newlab", "newlab-writer", "model")
+        cid = c.execute("INSERT INTO claims (document_id, doc_sha256, span_start, span_end, text, extractor, repository_id, "
+                        "type, state, agent_id) VALUES (%s, %s, 0, 10, %s, 't', %s, 'empirical', 'structurally_valid', %s) "
+                        "RETURNING id", (doc, sha, text, repo.id, a["id"])).fetchone()[0]
+        q = "injection improved"                         # plain words, so the claim matches on wording alone
+        assert cid not in [x.id for x in retrieve.candidates(c, q)]
+        c.execute("UPDATE organizations SET verification = 'verified' WHERE id = 'newlab'")
+        assert cid in [x.id for x in retrieve.candidates(c, q)]

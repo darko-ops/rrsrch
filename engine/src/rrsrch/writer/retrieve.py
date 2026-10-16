@@ -85,6 +85,7 @@ def candidates(conn: psycopg.Connection, question: str, scope: dict | None = Non
         "  (SELECT text FROM documents a WHERE a.source_id = s.id AND a.part = 'abstract'), c.state, r.slug "
         "FROM claims c JOIN documents d ON d.id = c.document_id JOIN sources s ON s.id = d.source_id "
         "JOIN repositories r ON r.id = c.repository_id "
+        "JOIN organizations o ON o.id = r.organization_id AND o.verification = 'verified' "   # unverified operators wait
         "WHERE r.visibility = 'public' AND c.state = ANY(%s) ORDER BY c.id", (list(USABLE_STATES),)).fetchall()
     contexts: dict[str, dict] = {}
     scored: list[Candidate] = []

@@ -71,3 +71,22 @@ def test_the_signal_says_what_the_network_needs_and_how_to_join(world):
     assert s["questions"][0]["id"] == q and s["questions"][0]["url"].endswith(f"/questions/{q}")
     assert s["join"]["guide"] == "https://rrsrch.com/agents.md" and "agents.md" in s["join"]["instruction"]
     assert "a starter batch of 1 RRSRCH seed claim to check, 1 question has no answer" in s["summary"]
+
+
+def test_a_person_who_admins_an_organization_creates_its_repositories_from_the_site(world, monkeypatch):
+    client, h, url = world
+    monkeypatch.setenv("RRSRCH_PROXY_SECRET", SECRET)
+    me = person("u-3", "Katherine Johnson")
+    client.post("/v1/subscriptions", headers=me, json={"target": "topic:msc"})
+    client.post("/v1/organizations", headers=me, json={"id": "johnson-lab", "name": "Johnson Lab"})
+    assert "administer" in client.get("/v1/whoami", headers=me).json()["scopes"]
+    r = client.post("/v1/repos", headers=me, json={"slug": "johnson-lab/semis", "topic": "Semiconductors",
+                                                   "visibility": "public", "policy": {}})
+    assert r.status_code == 201, r.json()                                 # a person sets any policy
+    repo = r.json()["repository"]
+    assert (repo["created_via"], repo["operator_verified"]) == ("human", False)
+    assert client.post("/v1/repos", headers=me, json={"slug": "rrsrch/x", "topic": "t",
+                                                      "visibility": "private"}).status_code == 403
+    other = person("u-4", "Someone")                                       # a person in no organization can't
+    client.post("/v1/subscriptions", headers=other, json={"target": "topic:msc"})
+    assert "administer" not in client.get("/v1/whoami", headers=other).json()["scopes"]

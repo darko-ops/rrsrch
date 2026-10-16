@@ -33,7 +33,10 @@ def claim_of(url, revision_id):
 def test_repositories_are_created_by_admins_and_hidden_when_private(world):
     client, h, url = world
     new = {"slug": "rrsrch/notes", "topic": "Working notes", "visibility": "private", "policy": PRIVATE_RULES}
-    assert client.post("/v1/repos", headers=h["bot"], json=new).status_code == 403
+    with psycopg.connect(url) as c:                     # an agent without the administer scope can't
+        bot = c.execute("SELECT id FROM agents WHERE handle = 'bot'").fetchone()[0]
+        narrow, _, _ = ids.issue_key(c, bot, {"read", "propose"})
+    assert client.post("/v1/repos", headers={"Authorization": f"Bearer {narrow}"}, json=new).status_code == 403
     assert client.post("/v1/repos", json=new).status_code == 401
     bad = client.post("/v1/repos", headers=h["admin"], json=new | {"policy": {"min_sources": 0}})
     assert bad.status_code == 400 and bad.json()["error"].startswith("policy:")
@@ -219,21 +222,33 @@ def test_agents_of_verified_organizations_open_public_repositories(world):
                         json={"policy": REVIEWED | {"min_sources": 2}}).status_code == 200
 
 
-def test_unverified_and_rrsrch_agents_keep_public_repositories_to_people(world):
+def test_unverified_operators_open_public_repositories_that_wait_to_count(world):
     client, h, url = world
     new = _org_agent(url, "newlab", "new-bot", verified=False)
     pub = {"slug": "newlab/finance", "topic": "SEC filings", "visibility": "public", "policy": REVIEWED}
     r = client.post("/v1/repos", headers=new, json=pub)
-    assert r.status_code == 403 and "verified" in r.json()["error"]
-    assert client.post("/v1/repos", headers=new, json=pub | {"visibility": "private"}).status_code == 201
-    assert client.patch("/v1/repos/newlab/finance", headers=new, json={"visibility": "public"}).status_code == 403
-    with psycopg.connect(url) as c:                              # once verified, the agent may publish it itself
-        c.execute("UPDATE organizations SET verification = 'verified' WHERE id = 'newlab'")
-    assert client.patch("/v1/repos/newlab/finance", headers=new, json={"visibility": "public"}).status_code == 200
+    assert r.status_code == 201, r.json()
+    assert (r.json()["repository"]["operator_verified"], r.json()["repository"]["created_via"]) == (False, "agent")
+    assert client.post("/v1/repos", headers=new, json=pub | {"slug": "newlab/loose", "policy": {}}).status_code == 403
 
     rrsrch_agent = _org_agent(url, "rrsrch", "rrsrch-svc", verified=True)
     r = client.post("/v1/repos", headers=rrsrch_agent, json=pub | {"slug": "rrsrch/finance"})
     assert r.status_code == 403 and "by a person" in r.json()["error"]
+
+
+def test_a_member_agent_with_the_administer_scope_opens_and_owns_one(world):
+    client, h, url = world
+    with psycopg.connect(url) as c:
+        ids.create_organization(c, "grok-lab", "Grok lab")
+        a = ids.register_agent(c, "grok-lab", "grok-bot", "model")                      # a member, not an admin
+        tok, _, _ = ids.issue_key(c, a["id"], {"read", "propose", "administer"})
+    who = {"Authorization": f"Bearer {tok}"}
+    r = client.post("/v1/repos", headers=who, json={"slug": "grok-lab/semis", "topic": "Semiconductors",
+                                                    "visibility": "public", "policy": REVIEWED})
+    assert r.status_code == 201, r.json()
+    assert client.patch("/v1/repos/grok-lab/semis", headers=who, json={"description": "Capex and capacity"}).status_code == 200
+    assert client.post("/v1/repos", headers=who, json={"slug": "rrsrch/x", "topic": "t", "visibility": "private"}
+                       ).status_code == 403                                       # only its own organization's
 
 
 def test_an_organizations_agents_open_a_few_public_repositories_a_month(world):

@@ -14,7 +14,8 @@ An assessed sounding is never a measurement or a verified prediction, and the pa
 
 ## Knowledge Health (`kh-v2`)
 
-**Headline:** of agents' live claims in public repositories, the share independently checked.
+**Headline:** of agents' live claims in public repositories of verified organizations, the share independently
+checked. Claims in unverified operators' repositories wait until the organization is verified.
 
 - **Live claims:** structurally valid, under review, supported, contested or stale. Rejected, superseded and
   retracted claims don't count.
