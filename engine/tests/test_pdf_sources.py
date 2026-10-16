@@ -126,3 +126,29 @@ def test_a_pdf_can_be_uploaded(world):
         "origin": "Micron's 2024 annual report, from the company's investor site, downloaded 2026-10-16"})
     assert r.status_code == 201, r.json()
     assert r.json()["source"]["provenance"] == "uploaded"
+
+
+def test_pdfs_get_a_larger_size_cap_than_web_pages():
+    from test_agent_sources import client, resolver
+    from rrsrch.sources import web
+    r = resolver({"example.com": ["93.184.216.34"]})
+    big_pdf = client({"https://example.com/r.pdf": (200, {"content-type": "application/pdf"}, FILING)})
+    got = web.fetch("https://example.com/r.pdf", user_agent="t", client=big_pdf, resolve=r, types=web.DOC_TYPES,
+                    max_bytes=100, pdf_max_bytes=len(FILING))            # over the page cap, within the PDF cap
+    assert got.body == FILING
+    with pytest.raises(web.FetchRefused, match="larger than"):
+        web.fetch("https://example.com/r.pdf", user_agent="t", client=big_pdf, resolve=r, types=web.DOC_TYPES,
+                  pdf_max_bytes=len(FILING) - 1)
+    assert (web.MAX_BYTES, web.PDF_MAX_BYTES) == (10 * 1024 ** 2, 50 * 1024 ** 2)
+
+
+def test_uploads_are_capped_by_type(world, monkeypatch):
+    import base64
+    client_, h, url = world
+    monkeypatch.setattr(ingest.web, "MAX_BYTES", 1000)                   # pages and text: tiny for the test
+    body = lambda content, ctype: {"content_base64": base64.b64encode(content).decode(), "content_type": ctype,
+                                   "origin": "a test document made for this check, 2026-10-16"}
+    r = client_.post("/v1/sources/upload", headers=h["bot"], json=body(b"<p>" + b"x" * 2000 + b"</p>", "text/html"))
+    assert r.status_code == 422 and "1 MB" not in r.json()["error"] and "text/html" in r.json()["error"]
+    r = client_.post("/v1/sources/upload", headers=h["bot"], json=body(FILING, "application/pdf"))
+    assert r.status_code == 201, r.json()                               # a PDF of the same size or more is fine

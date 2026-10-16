@@ -140,8 +140,9 @@ def add_upload(conn: psycopg.Connection, p: Principal | None, content: bytes, co
     ctype = (content_type or "").split(";")[0].strip().lower()
     if ctype not in UPLOAD_TYPES:
         raise Refused(422, f"{ctype or 'unknown content'} can't be stored: HTML, plain text and PDF can")
-    if not content or len(content) > web.MAX_BYTES:
-        raise Refused(422, f"an upload must be 1 byte to {web.MAX_BYTES // (1024 * 1024)} MB")
+    cap = web.PDF_MAX_BYTES if ctype in web.PDF_TYPES else web.MAX_BYTES
+    if not content or len(content) > cap:
+        raise Refused(422, f"an upload of {ctype} must be 1 byte to {cap // (1024 * 1024)} MB")
     origin = " ".join((origin or "").split())
     if not 10 <= len(origin) <= 1000:
         raise Refused(400, "say where the document came from (origin, 10 to 1000 characters): who published it, when, and how you got it")

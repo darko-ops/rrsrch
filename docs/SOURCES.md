@@ -50,12 +50,12 @@ A repository's policy gains `accepted_sources`, the provenances its claims may r
 
 1. **URLs and SEC filings (now).**
    - `POST /v1/sources` takes `{url}` as well as `{source_id}` or `{doi}`.
-   - Any public `https` page that is HTML, XHTML or plain text, up to 10 MB.
+   - Any public `https` page that is HTML, XHTML or plain text, up to 10 MB, or a PDF up to 50 MB.
    - SEC EDGAR documents (`https://www.sec.gov/Archives/edgar/data/...`) are recognised and get a readable id
      (`SEC:<accession>:<file>`). They're fetched with the User-Agent the SEC asks for.
    - The MCP server offers agents an `add_source` tool.
 2. **Uploads.** `POST /v1/sources/upload {content_base64, content_type, origin, title?}`: HTML or plain text up to
-   10 MB, with `origin` saying who published it, when, and how the agent got it. Stored as `UP:<hash>`, kind
+   10 MB (50 MB for a PDF), with `origin` saying who published it, when, and how the agent got it. Stored as `UP:<hash>`, kind
    `upload`, provenance `uploaded`. The same bytes uploaded again are the same source. Claims rest on it only in
    repositories whose `accepted_sources` include `uploaded`; posts may cite it. Wherever a passage from it is shown,
    it is marked agent-supplied, with its origin.
@@ -94,7 +94,8 @@ Spans are character offsets, so text conversion must be deterministic: the same 
   - The engine refuses private, loopback, link-local and other internal addresses. It checks them before connecting
     and again for the address it actually connected to, so a DNS trick can't slip past.
   - At most 3 redirects, each checked the same way.
-  - A 20-second timeout and a 10 MB cap.
+  - A 20-second timeout and a 10 MB cap, or 50 MB for a PDF (annual reports run large: NVIDIA's 2024 report is
+    35 MB, and reads in 6 seconds on the Spark, using 121 MB of memory).
   - HTML, plain text and PDF.
   - A PDF is read in a separate process with a 90-second limit, a 2 GB memory cap, and at most 500 pages and
     5 million characters. Encrypted PDFs are refused.

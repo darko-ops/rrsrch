@@ -3,7 +3,7 @@
 An agent names a URL; the engine fetches it. Since the engine runs inside a private network, a URL must not be able
 to reach anything internal: only https on the standard port, only hosts whose every address is public, checked
 before connecting and again for the address actually connected to (so a DNS answer that changes in between can't
-slip past), at most 3 redirects, each checked the same way, a timeout and a size cap.
+slip past), at most 3 redirects, each checked the same way, a timeout and a size cap (10 MB, or 50 MB for a PDF).
 """
 from __future__ import annotations
 
@@ -15,7 +15,8 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 
-MAX_BYTES = 10 * 1024 * 1024
+MAX_BYTES = 10 * 1024 * 1024             # HTML and plain text
+PDF_MAX_BYTES = 50 * 1024 * 1024         # PDFs: annual reports and filings run large
 TIMEOUT = 20.0
 MAX_REDIRECTS = 3
 TEXT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
@@ -81,7 +82,8 @@ def _peer(response: httpx.Response) -> str | None:
 
 
 def fetch(url: str, *, user_agent: str, client: httpx.Client | None = None, resolve: Callable = socket.getaddrinfo,
-          max_bytes: int = MAX_BYTES, types: tuple[str, ...] = TEXT_TYPES) -> Fetched:
+          max_bytes: int = MAX_BYTES, types: tuple[str, ...] = TEXT_TYPES,
+          pdf_max_bytes: int = PDF_MAX_BYTES) -> Fetched:
     """Fetch a public document. Raises FetchRefused with a reason an agent can act on."""
     own = client is None
     client = client or httpx.Client(timeout=TIMEOUT, follow_redirects=False)
@@ -102,14 +104,15 @@ def fetch(url: str, *, user_agent: str, client: httpx.Client | None = None, reso
                     ctype = r.headers.get("content-type", "").split(";")[0].strip().lower()
                     if ctype not in types:
                         raise FetchRefused(f"{ctype or 'unknown content'} can't be stored: HTML, plain text and PDF can")
+                    cap = pdf_max_bytes if ctype in PDF_TYPES else max_bytes
                     declared = r.headers.get("content-length")
-                    if declared and declared.isdigit() and int(declared) > max_bytes:
-                        raise FetchRefused(f"the document is larger than {max_bytes // (1024 * 1024)} MB")
+                    if declared and declared.isdigit() and int(declared) > cap:
+                        raise FetchRefused(f"the document is larger than {cap // (1024 * 1024)} MB")
                     body = bytearray()
                     for chunk in r.iter_bytes():
                         body += chunk
-                        if len(body) > max_bytes:
-                            raise FetchRefused(f"the document is larger than {max_bytes // (1024 * 1024)} MB")
+                        if len(body) > cap:
+                            raise FetchRefused(f"the document is larger than {cap // (1024 * 1024)} MB")
                     return Fetched(current, ctype, r.charset_encoding, bytes(body))
             except httpx.HTTPError as e:
                 raise FetchRefused(f"could not fetch the URL: {type(e).__name__}") from e
