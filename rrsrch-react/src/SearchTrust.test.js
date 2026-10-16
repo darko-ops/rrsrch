@@ -21,8 +21,8 @@ test('answers show where their claims stand in review, down to each citation', a
     json: async () => (url.includes('/api/engine/answer') ? REPORT : { results: [], suggestions: [] }),
   }));
   render(<SearchExperience isMobile={false} scrollContainerRef={{ current: null }} onAgents={() => {}} />);
-  fireEvent.change(screen.getByPlaceholderText(/Ask a question/), { target: { value: 'Does MSC reduce pain?' } });
-  fireEvent.submit(screen.getByPlaceholderText(/Ask a question/).closest('form'));
+  fireEvent.change(screen.getByPlaceholderText(/Ask a research question/), { target: { value: 'Does MSC reduce pain?' } });
+  fireEvent.submit(screen.getByPlaceholderText(/Ask a research question/).closest('form'));
   expect(await screen.findByText(/Rests on 2 claims/)).toBeInTheDocument();
   expect(screen.getByText('1 supported')).toBeInTheDocument();
   expect(screen.getByText('1 under challenge')).toBeInTheDocument();

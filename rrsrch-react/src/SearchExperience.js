@@ -270,19 +270,19 @@ function SearchBox({
         if (!t || searching) return;
         onSubmit(t);
       }}
-      style={{ width: '100%', maxWidth: compact ? 1040 : '100%' }}
+      style={{ width: '100%', maxWidth: compact ? 720 : 640, margin: '0 auto' }}
     >
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: compact ? 14 : 16,
+          gap: 12,
           padding: compact
-            ? (isMobile ? '12px 16px' : '14px 22px')
-            : (isMobile ? '16px 18px' : '22px 28px'),
+            ? (isMobile ? '9px 14px' : '10px 18px')
+            : (isMobile ? '12px 16px' : '14px 20px'),
           background: 'rgba(255,255,255,0.06)',
           border: '1px solid rgba(255,255,255,0.16)',
-          borderRadius: compact ? 28 : 36,
+          borderRadius: compact ? 22 : 26,
           backdropFilter: 'blur(12px)',
           transition: 'border-color 0.2s, background 0.2s',
         }}
@@ -297,7 +297,7 @@ function SearchBox({
           }
         }}
       >
-        <Search size={compact ? 18 : 22} color="#888" style={{ flexShrink: 0 }} />
+        <Search size={compact ? 16 : 18} color="#888" style={{ flexShrink: 0 }} />
         <input
           type="search"
           value={value}
@@ -306,7 +306,7 @@ function SearchBox({
           aria-label="Ask a research question"
           style={{
             flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
-            color: '#fff', fontSize: compact ? (isMobile ? 15 : 17) : (isMobile ? 16 : 20),
+            color: '#fff', fontSize: compact ? (isMobile ? 14 : 15) : (isMobile ? 15 : 16),
             fontFamily: fonts.main, lineHeight: 1.4,
           }}
         />
@@ -379,7 +379,7 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, history,
           onSubmit={onSearch}
           searching={searching}
           isMobile={isMobile}
-          placeholder="Ask a question about MSC therapy for knee osteoarthritis"
+          placeholder="Ask a research question. Answers cite their evidence."
         />
       </div>
 
@@ -2439,7 +2439,7 @@ function TopBar({
             searching={searching}
             isMobile={isMobile}
             compact
-            placeholder="Ask a question about MSC therapy for knee osteoarthritis"
+            placeholder="Ask a research question. Answers cite their evidence."
           />
         </div>
       )}
