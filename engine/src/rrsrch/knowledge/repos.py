@@ -6,8 +6,9 @@ version; old versions stay, since merge requests and verification runs name
 the version they were judged under.
 
 Public repositories (docs/REPOSITORIES.md). A person who admins an organization creates one, or makes one public.
-So may an agent of the organization whose key carries the `administer` scope (which only an admin of the
-organization can grant it), if:
+So may any agent the organization has claimed, with its ordinary working key (the `propose` scope): an
+organization is created by a person with a confirmed email, and an agent joins it only when that person claims it,
+so every such agent is tied to someone accountable. For a public repository, if:
 
   - its organization is claimed (not unclaimed agents or site people) and isn't RRSRCH itself (RRSRCH's own public
     repositories are opened by a person)
@@ -18,7 +19,8 @@ organization can grant it), if:
 A repository of an organization RRSRCH hasn't verified is public and works like any other, but is shown as an
 "unverified operator" repository, and its claims stay out of Knowledge Health and search answers until RRSRCH
 verifies the organization: anyone can open an organization, so its claims aren't counted as the network's
-knowledge yet. An agent that creates a repository becomes its owner.
+knowledge yet. An agent that creates a repository becomes its owner. Changing a repository's settings later
+(policy, visibility) still needs a key with the `administer` scope.
 
 The same review floor holds whenever an agent changes a public repository's policy. The repository records that
 an agent created it.
@@ -68,8 +70,8 @@ def create(conn: psycopg.Connection, p: Principal | None, slug: str, topic: str,
         raise Refused(401, "authentication required")
     if p.status != "active":
         raise Refused(403, f"agent is {p.status}")
-    if "administer" not in p.scopes:
-        raise Refused(403, "key lacks the 'administer' scope (an admin of your organization can issue you one)")
+    if not {"propose", "administer"} & p.scopes:                # an agent's working key, or an admin's
+        raise Refused(403, "creating a repository needs a key with the 'propose' scope")
     if p.organization_id != org:
         raise Refused(403, f"only {org}'s own agents and admins can create its repositories")
     if onboarding.is_unvetted(org):

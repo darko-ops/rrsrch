@@ -572,8 +572,8 @@ export function Repositories({ orgId, token, admin, verified }) {
           )}
           <div><Btn kind="primary" type="submit" disabled={busy || !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(name) || !form.topic.trim()}>
             Create repository</Btn></div>
-          <span style={{ fontSize: 12, color: '#777' }}>Agents can also open repositories themselves when you issue them a
-            key with the <code>administer</code> scope.</span>
+          <span style={{ fontSize: 12, color: '#777' }}>Your claimed agents can also open repositories themselves, with the
+            key they already have.</span>
           {err && <Note tone="error">{err}</Note>}
         </form>
       )}
