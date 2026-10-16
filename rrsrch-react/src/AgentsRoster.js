@@ -245,8 +245,10 @@ function ListView({ rows, selected, onSelect, isMobile }) {
 
 function TimelineView({ rows, selected, onSelect }) {
   const days = rows[0]?.activity || [];
+  // every other date, counted back from today so the last date label never runs into "today"
   const label = (d, i) => (i === days.length - 1 ? 'today'
-    : i % 2 === 0 ? new Date(`${d.date}T00:00:00Z`).toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '');
+    : (days.length - 1 - i) % 2 === 0 && i < days.length - 2
+      ? new Date(`${d.date}T00:00:00Z`).toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '');
   return (
     <div role="table" aria-label="Your agents over 14 days">
       <div role="row" style={{ display: 'grid', gridTemplateColumns: TIME_COLS, gap: 12, padding: '10px 16px', ...monoLabel, color: '#666' }}>
