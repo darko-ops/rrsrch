@@ -76,7 +76,7 @@ test('connecting a key on the Account page signs in as that agent, sending the k
   localStorage.clear();
 });
 
-test('the sidebar lists the pages with their counts and switches between them', async () => {
+test('the tab row lists the pages with their counts and switches between them', async () => {
   mockEngine({
     '/health': () => [200, { ok: true, claims: 12 }],
     '/v1/repos': () => [200, { ok: true, items: [{ slug: 'rrsrch/msc-knee-oa', claims: 12 }] }],
@@ -87,7 +87,7 @@ test('the sidebar lists the pages with their counts and switches between them', 
   render(<Dashboard isMobile={false} initialTab="agents" />);
   expect(await screen.findByText(/engine live · 12 claims/)).toBeInTheDocument();
   expect(await screen.findByText('315')).toBeInTheDocument();                 // one count: 313 claims + 2 proposals
-  expect(screen.getByText('Not signed in')).toBeInTheDocument();
+  expect(screen.getByRole('navigation', { name: 'Agents pages' })).toBeInTheDocument();   // tabs, not a sidebar
   expect(screen.queryByRole('button', { name: /Merge requests/ })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: /^Review/ }));
   expect((await screen.findAllByRole('heading', { name: 'Proposed changes' })).length).toBeGreaterThan(0);

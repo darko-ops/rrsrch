@@ -26,6 +26,7 @@ const AgentCardFor = React.lazy(() => import('./AgentCard').then((m) => ({ defau
 const AgentWorkFor = React.lazy(() => import('./AgentCard').then((m) => ({ default: m.AgentWorkFor })));
 const InboxPage = React.lazy(() => import('./Inbox'));
 const MembersPanel = React.lazy(() => import('./Members'));
+const AgentsHome = React.lazy(() => import('./AgentsRoster'));
 const AccountSignedIn = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedIn })));
 const AccountSignedOut = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedOut })));
 
@@ -353,6 +354,27 @@ function RegisterAgent({ apiKey, onRegistered }) {
       <Btn kind="primary" type="submit" disabled={busy || !handle.trim()}>Register</Btn>
       {err && <div style={{ width: '100%' }}><Note tone="error">{err}</Note></div>}
     </form>
+  );
+}
+
+// Below the roster, for organization admins: register an agent directly, RRSRCH's organization verifications, and
+// who may do what in the repository. Collapsed until wanted.
+function ManageAgents({ apiKey, me, repos, repo, onRepo }) {
+  const [open, setOpen] = useState(false);
+  const org = me?.organization_id;
+  const isAdmin = !!me && me.org_role === 'admin' && me.scopes.includes('agents');
+  if (!isAdmin) return null;
+  return (
+    <section aria-label="Manage">
+      <Btn small onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Manage'}: register agents, members{org === 'rrsrch' ? ', verifications' : ''}</Btn>
+      {open && (
+        <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0, 1fr)', marginTop: 14 }}>
+          <Panel title={`Register an agent in ${org}`}><RegisterAgent apiKey={apiKey} onRegistered={() => {}} /></Panel>
+          {org === 'rrsrch' && <OrgVerifications apiKey={apiKey} />}
+          <MembersPanel apiKey={apiKey} repos={repos} repo={repo} onRepo={onRepo} />
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -908,78 +930,38 @@ function hashParams() {
 }
 
 const pageOf = (t) => (PAGES[LEGACY_TABS[t] || t] ? (LEGACY_TABS[t] || t) : 'agents');
-const initials = (name) => String(name || '?').split(/[\s-]+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 
-function SideItem({ id, active, count, tone, onPick, children }) {
-  const on = active === id;
-  return (
-    <button type="button" onClick={() => onPick(id)} aria-current={on ? 'page' : undefined} style={{
-      display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 10px', borderRadius: 8, border: 'none',
-      cursor: 'pointer', textAlign: 'left', fontFamily: fonts.main, fontSize: 13.5,
-      background: on ? 'rgba(255,255,255,0.06)' : 'transparent', color: on ? '#fff' : '#999',
-      boxShadow: on ? `inset 2px 0 0 ${GREEN}` : 'none',
-    }}>
-      {children}
-      {count != null && <span style={{ marginLeft: 'auto', fontFamily: fonts.mono, fontSize: 11, color: tone || '#666' }}>{count}</span>}
-    </button>
-  );
-}
-
-function Sidebar({ active, onPick, me, user, health, counts, isMobile, hidden = [] }) {
-  const groups = GROUPS.map(([label, ids]) => [label, ids.filter((id) => !hidden.includes(id))]);
-  const who = me?.handle || user?.name;
+// The Agents area's pages as a row of tabs (design handoff option 2a), with the engine's health and who you are.
+function TabRow({ active, onPick, me, health, counts, hidden = [] }) {
+  const ids = GROUPS.flatMap(([, list]) => list).filter((id) => !hidden.includes(id));
   const c = counts || {};
   const waiting = c.queue == null && c.merge == null ? undefined : (c.queue || 0) + (c.merge || 0);
-  const count = { agents: c.agents, review: waiting, tasks: c.tasks, inbox: c.inbox_unread };
-  const tone = { review: waiting ? AMBER : null, inbox: c.inbox_unread ? GREEN : null };
-  if (isMobile) {
-    return (
-      <nav style={{ display: 'flex', gap: 4, overflowX: 'auto', borderBottom: '1px solid #222', paddingBottom: 8 }}>
-        {[...groups.flatMap(([, ids]) => ids), 'account'].map((id) => (
-          <div key={id} style={{ flex: '0 0 auto' }}>
-            <SideItem id={id} active={active} onPick={onPick} count={count[id]} tone={tone[id]}>{PAGES[id]}</SideItem>
-          </div>
-        ))}
-      </nav>
-    );
-  }
+  const count = { agents: c.agents, review: waiting, inbox: c.inbox_unread };
+  const tone = { agents: '#666', review: waiting ? AMBER : '#666', inbox: c.inbox_unread ? GREEN : '#666' };
   return (
-    <aside style={{ display: 'flex', flexDirection: 'column', gap: 22, position: 'sticky', top: 96, minHeight: 560 }}>
-      <div style={{ padding: '0 10px 18px', borderBottom: '1px solid #222', display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-        {who ? (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{who}</span>
-            {me?.organization_id && me.organization_id !== 'people'
-              ? <Chip color={GREEN}>{me.organization_id} · {me.org_role}</Chip>
-              : <Chip color={BLUE}>human</Chip>}
-          </div>
-        ) : <span style={{ color: '#888', fontSize: 13 }}>Not signed in</span>}
+    <nav aria-label="Agents pages" style={{ display: 'flex', gap: 4, alignItems: 'center', borderBottom: '1px solid #222',
+      paddingBottom: 12, flexWrap: 'wrap' }}>
+      {ids.map((id) => {
+        const on = active === id;
+        return (
+          <button key={id} type="button" onClick={() => onPick(id)} aria-current={on ? 'page' : undefined} style={{
+            padding: '7px 12px', borderRadius: 8, fontSize: 13.5, border: 'none', cursor: 'pointer', fontFamily: fonts.main,
+            display: 'inline-flex', gap: 8, alignItems: 'baseline', whiteSpace: 'nowrap',
+            background: on ? 'rgba(255,255,255,0.06)' : 'transparent', color: on ? '#fff' : '#999',
+            boxShadow: on ? `inset 0 -2px 0 ${GREEN}` : 'none' }}>
+            {PAGES[id]}
+            {count[id] != null && <span style={{ fontFamily: fonts.mono, fontSize: 11, color: tone[id] }}>{count[id]}</span>}
+          </button>
+        );
+      })}
+      <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontFamily: fonts.mono, fontSize: 11, color: '#888' }}>
           <span style={{ width: 7, height: 7, borderRadius: 4, background: health === null ? '#555' : health.ok ? GREEN : RED }} />
           {health === null ? 'checking engine' : health.ok ? `engine live · ${health.claims} claims` : 'engine offline'}
         </span>
-      </div>
-      {groups.map(([label, ids]) => (
-        <div key={label}>
-          <div style={{ fontFamily: fonts.mono, fontWeight: 500, fontSize: 10.5, textTransform: 'uppercase',
-            letterSpacing: '0.08em', color: '#666', padding: '0 10px 6px' }}>{label}</div>
-          {ids.map((id) => (
-            <SideItem key={id} id={id} active={active} onPick={onPick} count={count[id]} tone={tone[id]}>{PAGES[id]}</SideItem>
-          ))}
-        </div>
-      ))}
-      <div style={{ marginTop: 'auto', borderTop: '1px solid #222', paddingTop: 14 }}>
-        <SideItem id="account" active={active} onPick={onPick}>
-          <span style={{ width: 26, height: 26, borderRadius: 999, background: '#1f2a2f', color: '#9ab', display: 'inline-flex',
-            alignItems: 'center', justifyContent: 'center', fontFamily: fonts.mono, fontWeight: 600, fontSize: 11 }}>
-            {initials(who)}</span>
-          <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)' }}>
-            <span style={{ fontSize: 13, color: '#ccc' }}>{who || 'Sign in'}</span>
-            <span style={{ fontSize: 11, color: '#666' }}>Account</span>
-          </span>
-        </SideItem>
-      </div>
-    </aside>
+        {me?.organization_id && me.organization_id !== 'people' && <Chip color={GREEN}>{me.organization_id} · {me.org_role}</Chip>}
+      </span>
+    </nav>
   );
 }
 
@@ -1152,10 +1134,9 @@ export default function Dashboard({ isMobile, initialTab }) {
   let page;
   if (tab === 'agents') {
     page = (
-      <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-        <PageHeader title="Your agents" subtitle="The agents you run: what each is working on now, and what it has contributed." />
-        <AgentsTab apiKey={acting} me={me} />
-        <MembersPanel apiKey={acting} {...repoProps} />
+      <div style={{ display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+        <AgentsHome apiKey={acting} me={me} isMobile={isMobile} {...repoProps} />
+        <ManageAgents apiKey={acting} me={me} {...repoProps} />
       </div>
     );
   } else if (tab === 'review') {
@@ -1186,9 +1167,8 @@ export default function Dashboard({ isMobile, initialTab }) {
   }
 
   return (
-    <div style={{ fontFamily: fonts.main, display: isMobile ? 'grid' : 'grid', gap: isMobile ? 16 : 32,
-      gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '220px minmax(0, 1fr)', alignItems: 'start' }}>
-      <Sidebar active={tab} onPick={setTab} me={me} user={user} health={health} counts={counts} isMobile={isMobile}
+    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)', alignItems: 'start' }}>
+      <TabRow active={tab} onPick={setTab} me={me} health={health} counts={counts}
         hidden={[...SIMPLIFIED_AWAY, ...(bountiesMode === 'on' || (bountiesMode === 'operator' && me?.organization_id === 'rrsrch'
           && me?.org_role === 'admin') ? [] : ['bounties'])].filter((id) => id !== tab)} />
       <main style={{ minWidth: 0 }}>
