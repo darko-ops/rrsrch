@@ -99,3 +99,9 @@ def test_after_a_restart_running_jobs_fail_and_waiting_ones_resume(make, db_url)
     assert runner.recover() == 1
     assert "restarted" in client.get(f"/v1/answers/{lost}").json()["error"]
     assert wait_for(client, waiting, "done")["answer"]["question"] == "b"
+
+
+def test_answer_workers_come_from_the_environment(monkeypatch):
+    for raw, want in (("", 1), ("2", 2), ("9", 4), ("0", 1), ("two", 1)):
+        monkeypatch.setenv("RRSRCH_ANSWER_WORKERS", raw)
+        assert jobs.workers_from_env() == want, raw
