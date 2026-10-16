@@ -3,8 +3,9 @@
  * Landing keeps the parent's 3D planet behind it. Results use a solid black column.
  */
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { Search, Clock, Loader2, ExternalLink, X, Bot } from 'lucide-react';
+import { Search, Loader2, ExternalLink, X, Bot, CircleUser } from 'lucide-react';
 import { Molecule } from './icons';
+import { readSearchHistory, pushSearchHistory } from './searchHistory';
 import JoinSignal from './JoinSignal';
 
 const fonts = {
@@ -2360,56 +2361,13 @@ function SearchResultsPage({
   );
 }
 
-const HISTORY_KEY = 'rrsrch_search_history';
 const PROFILE_KEY = 'rrsrch_user_profile';
 
-export function readSearchHistory() {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY) || sessionStorage.getItem(HISTORY_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? list.filter((x) => typeof x === 'string' && x.trim()) : [];
-  } catch {
-    return [];
-  }
-}
-
-function pushSearchHistory(q) {
-  const next = [q, ...readSearchHistory().filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, 30);
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-  return next;
-}
-
-export function clearSearchHistory() {
-  try {
-    localStorage.removeItem(HISTORY_KEY);
-    sessionStorage.removeItem(HISTORY_KEY);
-  } catch { /* ignore */ }
-  return [];
-}
-
-// The header on every page: RRSRCH, the search bar, then Network, Agents and History. Only the home page's landing
-// leaves the search bar out, since its own search box is the page.
+// The header on every page: RRSRCH, the search bar, then Network, Agents and Account. Only the home page's landing
+// leaves the search bar out, since its own search box is the page. Search history lives in Account.
 export function TopBar({
-  isMobile, showSearch, query, onQueryChange, onSearch, searching, onHome,
-  history, onPickHistory, onClearHistory, onAgents, active,
+  isMobile, showSearch, query, onQueryChange, onSearch, searching, onHome, onAgents, onAccount, active,
 }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDoc = (e) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
-    };
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDoc);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
   return (
     <div style={{
       position: 'fixed',
@@ -2485,130 +2443,27 @@ export function TopBar({
         {isMobile ? null : 'Agents'}
       </button>
 
-      <div
-        ref={wrapRef}
-        style={{ flexShrink: 0, position: 'relative' }}
+      <button
+        type="button"
+        onClick={onAccount}
+        aria-label="Account"
+        style={{
+          flexShrink: 0,
+          background: active === 'account' ? 'rgba(255,255,255,0.08)' : 'transparent',
+          border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
+          color: '#aaa', padding: isMobile ? '10px 14px' : '10px 20px', cursor: 'pointer',
+          fontFamily: fonts.main, fontSize: 12, textTransform: 'uppercase', letterSpacing: '1px',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = '#aaa';
+          e.currentTarget.style.background = active === 'account' ? 'rgba(255,255,255,0.08)' : 'transparent';
+        }}
       >
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-haspopup="listbox"
-          onClick={() => setOpen((v) => !v)}
-          style={{
-            background: open ? 'rgba(255,255,255,0.1)' : 'transparent',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 24,
-            color: open ? '#fff' : '#aaa',
-            padding: isMobile ? '10px 14px' : '10px 20px',
-            cursor: 'pointer',
-            fontFamily: fonts.main,
-            fontSize: 12,
-            textTransform: 'uppercase',
-            letterSpacing: '1px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-          onMouseLeave={(e) => {
-            if (!open) {
-              e.currentTarget.style.color = '#aaa';
-              e.currentTarget.style.background = 'transparent';
-            }
-          }}
-        >
-          <Clock size={14} />
-          {isMobile ? null : 'History'}
-          {(history || []).length > 0 && (
-            <span style={{
-              fontFamily: fonts.mono, fontSize: 11, color: '#00ff88',
-              minWidth: 14, textAlign: 'center',
-            }}>
-              {history.length}
-            </span>
-          )}
-        </button>
-
-        {open && (
-          <div
-            role="listbox"
-            style={{
-              position: 'absolute',
-              top: 'calc(100% + 10px)',
-              right: 0,
-              width: isMobile ? 'min(92vw, 340px)' : 380,
-              maxHeight: 420,
-              overflowY: 'auto',
-              background: 'rgba(18,18,18,0.98)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: 14,
-              boxShadow: '0 16px 48px rgba(0,0,0,0.55)',
-              padding: 8,
-              zIndex: 20,
-            }}
-          >
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '8px 10px 10px',
-            }}>
-              <span style={{ fontSize: 12, color: '#888', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                Recent searches
-              </span>
-              {(history || []).length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => { onClearHistory?.(); }}
-                  style={{
-                    background: 'none', border: 'none', color: '#666', cursor: 'pointer',
-                    fontFamily: fonts.main, fontSize: 12, padding: 0,
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = '#ccc'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = '#666'; }}
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-
-            {(history || []).length === 0 ? (
-              <p style={{ margin: 0, padding: '16px 12px 20px', color: '#666', fontSize: 14, lineHeight: 1.5 }}>
-                No searches yet. Ask something and it will show up here.
-              </p>
-            ) : (
-              history.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  role="option"
-                  disabled={searching}
-                  onClick={() => {
-                    setOpen(false);
-                    onPickHistory?.(item);
-                  }}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    textAlign: 'left',
-                    background: 'transparent',
-                    border: 'none',
-                    borderRadius: 10,
-                    color: '#ddd',
-                    padding: '12px 12px',
-                    cursor: searching ? 'wait' : 'pointer',
-                    fontFamily: fonts.main,
-                    fontSize: 14,
-                    lineHeight: 1.45,
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.color = '#fff'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#ddd'; }}
-                >
-                  {item}
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </div>
+        <CircleUser size={14} />
+        {isMobile ? null : 'Account'}
+      </button>
     </div>
   );
 }
@@ -2639,7 +2494,7 @@ function readUserProfile() {
 }
 
 export default function SearchExperience({
-  isMobile, scrollContainerRef, onAgents, initialSearch, onInitialSearchDone,
+  isMobile, scrollContainerRef, onAgents, onAccount, initialSearch, onInitialSearchDone,
 }) {
   const [query, setQuery] = useState('');
   // landing | results
@@ -2883,10 +2738,8 @@ export default function SearchExperience({
         onSearch={runSearch}
         searching={searching || sideLoading}
         onHome={goHome}
-        history={history}
-        onPickHistory={(q) => runSearch(q)}
-        onClearHistory={() => setHistory(clearSearchHistory())}
         onAgents={onAgents}
+        onAccount={onAccount}
       />
 
       {mode === 'landing' && (
