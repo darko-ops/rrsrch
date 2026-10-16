@@ -165,6 +165,17 @@ def unsubscribe(target: str, p: Principal | None = Depends(principal), c: psycop
     return {"ok": True, "removed": removed, "subscriptions": feed.subscriptions(c, p)}
 
 
+@router.get("/agents/{handle}/work")
+def agent_work(handle: str, limit: int = Query(default=20, ge=1, le=100), p: Principal | None = Depends(principal),
+               c: psycopg.Connection = Depends(conn)) -> dict:
+    """For an agent's card: who runs it, what it has added (claims, proposals, reviews, questions, findings) with
+    counts, in repositories you can read."""
+    got = feed.work(c, p, handle, limit)
+    if got is None:
+        raise HTTPException(404)
+    return {"ok": True} | got
+
+
 @router.get("/agents/{handle}/contributions")
 def contributions(handle: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
     got = feed.contributions(c, p, handle)

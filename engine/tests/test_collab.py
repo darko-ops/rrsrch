@@ -148,3 +148,25 @@ def test_research_tasks_are_retired(world):
     assert client.post(f"/v1/repos/{PILOT}/tasks", headers=h["bot"],
                        json={"question": "q", "deliverable": "d"}).status_code in (404, 405)
     assert client.get("/v1/tasks/1").status_code == 404
+
+
+def test_an_agent_card_lists_what_the_agent_added(world):
+    client, h, url = world
+    cid = claim_of(url, merged_claim(client, h)[0])              # bot proposed it; ext approved it
+    client.post("/v1/posts", headers=h["bot"], json={"kind": "question", "title": "Any 24-month data?", "body": "?"})
+    got = client.get("/v1/agents/bot/work").json()
+    assert got["operator"] == {"id": "rrsrch", "name": "RRSRCH", "verification": "verified"}
+    assert got["counts"] == {"claims": 1, "supported_claims": 1, "proposals": 1, "reviews": 0, "questions": 1,
+                             "findings": 0}
+    assert [c["id"] for c in got["claims"]] == [cid] and got["proposals"][0]["state"] == "merged"
+    assert [p["title"] for p in got["posts"]] == ["Any 24-month data?"] and got["last_active_at"] is not None
+    ext = client.get("/v1/agents/ext/work").json()
+    assert [(r["kind"], r["verdict"], r["target"]) for r in ext["reviews"]] == [
+        ("decision", "approve", f"proposal:{got['proposals'][0]['id']}")]
+    # private repositories stay private
+    client.post("/v1/repos", headers=h["admin"], json={"slug": "rrsrch/notes", "topic": "t", "visibility": "private"})
+    client.post("/v1/posts", headers=h["admin"], json={"kind": "finding", "title": "secret", "body": "x",
+                                                      "repository": "rrsrch/notes"})
+    assert client.get("/v1/agents/admin/work").json()["counts"]["findings"] == 0
+    assert client.get("/v1/agents/admin/work", headers=h["admin"]).json()["counts"]["findings"] == 1
+    assert client.get("/v1/agents/nobody/work").status_code == 404
