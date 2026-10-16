@@ -8,19 +8,19 @@
 import React, { useEffect, useState } from 'react';
 // AgentsChrome first: it reads Dashboard's exports at load time, and Dashboard imports it back
 import { panelStyle, monoLabel } from './AgentsChrome';
-import { engine, useLoad, fonts, GREEN, AMBER, RED, BLUE, Btn, Chip, Note, Mono, Loading, inputStyle, short, when } from './Dashboard';
+import { engine, useLoad, fonts, GREEN, AMBER, RED, BLUE, Btn, Note, Mono, Loading, inputStyle, short, when } from './Dashboard';
 import { ProposedEvidence } from './CommitEvidence';
 
 const PURPLE = '#c9a0ff';
 export const TYPE = {
-  review: ['Review', BLUE], mention: ['Mention', PURPLE], task: ['Task due', AMBER], merged: ['Merged', GREEN],
+  review: ['Review', BLUE], mention: ['Mention', PURPLE], merged: ['Merged', GREEN],
   approved: ['Approved', GREEN], report: ['Report', AMBER], update: ['Update', '#888'],
 };
 const DONE = 'Done. Moved out of your unread list.';
 
 export function pageFor(target) {
   const [kind, id] = String(target || '').split(':');
-  return { post: `/posts/${id}`, claim: `/claims/${id}`, mr: '#/agents?tab=review', task: '#/agents?tab=tasks' }[kind] || null;
+  return { post: `/posts/${id}`, claim: `/claims/${id}`, mr: '#/agents?tab=review' }[kind] || null;
 }
 
 const typeLabel = (type) => {
@@ -103,35 +103,6 @@ function MentionPreview({ item, apiKey, onDone }) {
   );
 }
 
-function TaskPreview({ item, apiKey, onDone }) {
-  const id = Number(String(item.target).split(':')[1]);
-  const [task] = useLoad(() => engine(`/v1/tasks/${id}`, { key: apiKey }), [id, apiKey]);
-  const [err, setErr] = useState('');
-  const t = task.data?.task;
-  const more = async () => {
-    const r = await engine('/v1/comments', { key: apiKey, method: 'POST',
-      body: { target: `task:${id}`, kind: 'comment', body: 'Asking for more time on this task.' } });
-    if (r.ok) onDone(); else setErr(r.error);
-  };
-  if (task.loading) return <Loading what="task" />;
-  if (!t) return <Note tone="error">{task.error || 'Task not found.'}</Note>;
-  return (
-    <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <div style={{ fontSize: 13.5, color: '#ccc' }}>Deliverable: {t.deliverable}</div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <Chip color={BLUE}>{t.state.replace(/_/g, ' ')}</Chip>
-        {t.due_at && <Chip color={RED}>due {when(t.due_at)}</Chip>}
-        {Object.entries(t.budget || {}).map(([k, v]) => <Chip key={k} color={AMBER}>{v} ✦</Chip>)}
-      </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <Btn kind="primary" onClick={() => { window.location.hash = '/agents?tab=tasks'; }}>Submit response</Btn>
-        <Btn onClick={more}>Ask for more time</Btn>
-      </div>
-      {err && <Note tone="error">{err}</Note>}
-    </div>
-  );
-}
-
 function UpdatePreview({ item, apiKey, onDone }) {
   const target = item.repository ? `repo:${item.repository}` : item.target;
   const [err, setErr] = useState('');
@@ -176,7 +147,7 @@ export default function InboxPage({ apiKey, me, isMobile, onUnreadChange }) {
   const acted = () => { setDone(DONE); markRead([selected]); };
   const item = items.find((i) => i.id === selected);
   const page = item && pageFor(item.target);
-  const Preview = item && ({ review: ReviewPreview, mention: MentionPreview, task: TaskPreview }[item.type] || UpdatePreview);
+  const Preview = item && ({ review: ReviewPreview, mention: MentionPreview }[item.type] || UpdatePreview);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '360px minmax(0, 1fr)', border: '1px solid #232323',

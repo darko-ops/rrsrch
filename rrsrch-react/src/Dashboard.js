@@ -18,7 +18,6 @@ import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 // The pages are loaded lazily: each imports primitives from this file, so a static import here would be a cycle
 // that runs them before this module has defined what they use.
 const AtlasPage = React.lazy(() => import('./Atlas'));
-const TasksBoard = React.lazy(() => import('./TasksBoard'));
 const BountiesPage = React.lazy(() => import('./Bounties'));
 const InboxPage = React.lazy(() => import('./Inbox'));
 const MembersPanel = React.lazy(() => import('./Members'));
@@ -44,10 +43,6 @@ const STATE_COLOR = {
   draft: '#666', stale: '#a68cff', rejected: RED, superseded: '#666', retracted: RED,
 };
 const SCOPES = ['read', 'propose', 'review', 'maintain', 'administer', 'agents'];
-const TASK_MOVES = {
-  proposed: ['authorized', 'canceled'], authorized: ['assigned', 'canceled'], assigned: ['in_progress', 'canceled'],
-  in_progress: ['awaiting_review', 'failed', 'canceled'], awaiting_review: ['completed', 'failed', 'in_progress'],
-};
 
 // -- engine access --------------------------------------------------------------------------------------
 
@@ -547,7 +542,7 @@ function NodeDetail({ node, graph, apiKey, onSelect, onClose }) {
       )}
       {isClaim && (
         <a href={`/claims/${node.claim_id}`} style={{ color: '#ddd', fontSize: 13, textUnderlineOffset: 3 }}>
-          Open the claim page: discussion, reactions, challenges, reviews →
+          Open the claim page: discussion, objections, reviews →
         </a>
       )}
       {node.kind === 'source' && d?.source && (
@@ -915,128 +910,23 @@ function MergeRequests({ apiKey, repo, isMobile }) {
   );
 }
 
-function Tasks({ apiKey, repo, me, isMobile }) {
-  const [state, setState] = useState('');
-  const [list, reload] = useLoad(() => engine(`/v1/repos/${repo}/tasks?limit=200${state ? `&state=${state}` : ''}`, { key: apiKey }), [repo, state, apiKey]);
-  const [selected, setSelected] = useState(null);
-  const [draft, setDraft] = useState({ question: '', deliverable: '' });
-  const [msg, setMsg] = useState('');
-  useEffect(() => { setSelected(null); }, [repo, state]);
-  const create = async () => {
-    const r = await engine(`/v1/repos/${repo}/tasks`, { key: apiKey, method: 'POST', body: draft });
-    if (r.ok) { setDraft({ question: '', deliverable: '' }); setMsg(''); reload(); setSelected(r.data.task_id); } else setMsg(r.error);
-  };
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) minmax(0, 1.2fr)', gap: 16 }}>
-      <Panel title="Research tasks" right={
-        <select value={state} onChange={(e) => setState(e.target.value)} style={{ ...inputStyle, padding: '6px 10px' }}>
-          <option value="">all</option>
-          {['proposed', 'authorized', 'assigned', 'in_progress', 'awaiting_review', 'completed', 'failed', 'canceled', 'expired']
-            .map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-        </select>}>
-        {list.loading && <Loading what="tasks" />}
-        {list.error && <Note tone="error">{list.error}</Note>}
-        {list.data && list.data.items.length === 0 && <Note>No tasks.</Note>}
-        {list.data && list.data.items.map((t) => (
-          <button key={t.id} type="button" onClick={() => setSelected(t.id)} style={{
-            display: 'block', width: '100%', textAlign: 'left', background: selected === t.id ? '#161616' : 'transparent',
-            border: 'none', borderTop: '1px solid #1c1c1c', padding: '10px 6px', cursor: 'pointer', color: '#ddd', fontFamily: fonts.main,
-          }}>
-            <div style={{ fontSize: 14 }}>{short(t.question, 140)}</div>
-            <div style={{ fontSize: 12, color: '#777', marginTop: 3 }}>
-              #{t.id} · {t.state.replace('_', ' ')} · by {t.created_by}{t.assignee ? ` · ${t.assignee}` : ''}
-            </div>
-          </button>
-        ))}
-        {apiKey && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, marginTop: 14, borderTop: '1px solid #222', paddingTop: 14 }}>
-            <textarea rows={2} value={draft.question} onChange={(e) => setDraft({ ...draft, question: e.target.value })} placeholder="Question to investigate" style={{ ...inputStyle, resize: 'vertical' }} />
-            <input value={draft.deliverable} onChange={(e) => setDraft({ ...draft, deliverable: e.target.value })} placeholder="Deliverable that would answer it" style={inputStyle} />
-            <div><Btn kind="primary" disabled={!draft.question.trim() || !draft.deliverable.trim()} onClick={create}>Propose task</Btn></div>
-            {msg && <Note tone="error">{msg}</Note>}
-          </div>
-        )}
-      </Panel>
-      <Panel title={selected ? `Task #${selected}` : 'Details'}>
-        {selected ? <TaskDetail id={selected} apiKey={apiKey} me={me} onChanged={reload} /> : <Note>Select a task.</Note>}
-      </Panel>
-    </div>
-  );
-}
-
-function TaskDetail({ id, apiKey, me, onChanged }) {
-  const [state, reload] = useLoad(() => engine(`/v1/tasks/${id}`, { key: apiKey }), [id, apiKey]);
-  const [body, setBody] = useState('');
-  const [mr, setMr] = useState('');
-  const [msg, setMsg] = useState({ text: '', tone: 'muted' });
-  const act = async (path, payload, done) => {
-    const r = await engine(path, { key: apiKey, method: 'POST', body: payload });
-    setMsg(r.ok ? { text: done, tone: 'ok' } : { text: r.error, tone: 'error' });
-    if (r.ok) { reload(); onChanged(); }
-  };
-  if (state.loading) return <Loading what="task" />;
-  if (state.error) return <Note tone="error">{state.error}</Note>;
-  const t = state.data.task;
-  const moves = TASK_MOVES[t.state] || [];
-  const mine = me && t.assignee === me.handle;
-  return (
-    <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <p style={{ margin: 0, color: '#fff', fontSize: 15, lineHeight: 1.55 }}>{t.question}</p>
-      <div style={{ fontSize: 13, color: '#aaa' }}>Deliverable: {t.deliverable}</div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <Chip color={BLUE}>{t.state.replace('_', ' ')}</Chip><Chip>by {t.created_by}</Chip>
-        {t.assignee && <Chip>assignee {t.assignee}</Chip>}
-        {Object.entries(t.budget || {}).map(([k, v]) => <Chip key={k}>{k.replace(/_/g, ' ')} {v}</Chip>)}
-        {t.due_at && <Chip>due {when(t.due_at)}</Chip>}
-      </div>
-      {t.responses.map((r) => (
-        <div key={r.id} style={{ borderTop: '1px solid #1c1c1c', paddingTop: 8, fontSize: 14, color: '#ddd', whiteSpace: 'pre-wrap' }}>
-          <div style={{ fontSize: 12, color: '#777', marginBottom: 4 }}>{r.author} · {when(r.created_at)}{r.merge_request_id ? ` · MR #${r.merge_request_id}` : ''}</div>
-          {r.body}
-        </div>
-      ))}
-      {apiKey && moves.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {moves.map((to) => (
-            <Btn key={to} small kind={to === 'canceled' || to === 'failed' ? 'danger' : 'ghost'}
-              onClick={() => act(`/v1/tasks/${id}/transition`, { to }, `Task is now ${to.replace('_', ' ')}.`)}>
-              {to === 'assigned' && !t.assignee ? 'take it' : to.replace('_', ' ')}
-            </Btn>
-          ))}
-        </div>
-      )}
-      {apiKey && mine && ['assigned', 'in_progress'].includes(t.state) && (
-        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-          <textarea rows={3} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Your findings" style={{ ...inputStyle, resize: 'vertical' }} />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input value={mr} onChange={(e) => setMr(e.target.value.replace(/\D/g, ''))} placeholder="MR # (optional)" style={{ ...inputStyle, width: 140 }} />
-            <Btn kind="primary" disabled={!body.trim()} onClick={() => act(`/v1/tasks/${id}/responses`,
-              { body, merge_request_id: mr ? Number(mr) : null }, 'Response submitted.').then(() => { setBody(''); setMr(''); })}>Submit response</Btn>
-          </div>
-        </div>
-      )}
-      {msg.text && <Note tone={msg.tone}>{msg.text}</Note>}
-    </div>
-  );
-}
-
 // -- the page -------------------------------------------------------------------------------------------
 
 // -- the shell: a sidebar of pages (design handoff: agents pages, §1) ---------------------------------------
 
 const PAGES = {
-  agents: 'Agents', keys: 'Keys', review: 'Review', tasks: 'Tasks', bounties: 'Bounties', inbox: 'Inbox',
+  agents: 'Agents', keys: 'Keys', review: 'Review', bounties: 'Bounties', inbox: 'Inbox',
   atlas: 'Atlas', account: 'Account',
 };
 const GROUPS = [
   ['Your agents', ['agents', 'keys']],
-  ['Review', ['review', 'tasks', 'bounties', 'inbox']],
+  ['Review', ['review', 'bounties', 'inbox']],
   ['Network', ['atlas']],
 ];
 // the review queue and merge requests were two pages for one job; links to either open the one Review page
-const LEGACY_TABS = { queue: 'review', merge: 'review' };
+const LEGACY_TABS = { queue: 'review', merge: 'review', tasks: 'review' };   // tasks retired (docs/SIMPLIFY.md)
 // pages kept but out of the sidebar (docs/SIMPLIFY.md): links still open them
-const SIMPLIFIED_AWAY = ['tasks', 'atlas'];
+const SIMPLIFIED_AWAY = ['atlas'];
 
 function hashParams() {
   return new URLSearchParams(window.location.hash.split('?')[1] || '');
@@ -1263,8 +1153,6 @@ export default function Dashboard({ isMobile, initialTab }) {
     );
   } else if (tab === 'bounties') {
     page = <BountiesPage apiKey={acting} me={me} isMobile={isMobile} focus={link.get('bounty')} {...repoProps} />;
-  } else if (tab === 'tasks') {
-    page = <TasksBoard apiKey={acting} me={me} isMobile={isMobile} {...repoProps} />;
   } else if (tab === 'inbox') {
     page = <InboxPage apiKey={acting} me={me} isMobile={isMobile}
       onUnreadChange={(n) => setCounts((c) => ({ ...(c || {}), inbox_unread: n }))} />;
@@ -1285,7 +1173,7 @@ export default function Dashboard({ isMobile, initialTab }) {
           && me?.org_role === 'admin') ? [] : ['bounties'])].filter((id) => id !== tab)} />
       <main style={{ minWidth: 0 }}>
         <React.Suspense fallback={<Loading what="the page" />}>{page}</React.Suspense>
-        {repos.error && ['review', 'tasks', 'atlas'].includes(tab) && <Note tone="error">{repos.error}</Note>}
+        {repos.error && ['review', 'atlas'].includes(tab) && <Note tone="error">{repos.error}</Note>}
       </main>
     </div>
   );
@@ -1294,7 +1182,7 @@ export default function Dashboard({ isMobile, initialTab }) {
 export {
   layoutAtlas, TrialQueue, engine, readStored, writeStored, actingKey, SIGN_IN, KEY_STORAGE, fonts, GREEN, AMBER, RED,
   BLUE, STATE_COLOR, Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
-  // for the redesigned Agents pages (Atlas.js, TasksBoard.js, Inbox.js, AccountPages.js)
+  // for the redesigned Agents pages (Atlas.js, Inbox.js, AccountPages.js)
   Field, CopyText, IssueKeyForm, NewKeyNotice, KeysList, AgentsTab, COLUMNS, ROW, EDGE_COLOR, edgePath, NodeDetail,
-  ClaimQueue, MergeRequests, MergeRequestDetail, Tasks, TaskDetail, TASK_MOVES, SCOPES, MCP_BASE,
+  ClaimQueue, MergeRequests, MergeRequestDetail, SCOPES, MCP_BASE,
 };
