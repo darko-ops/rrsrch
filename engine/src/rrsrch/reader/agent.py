@@ -80,6 +80,12 @@ def relevant(question: str, title: str, abstract: str) -> bool:
     wanted = q.get("species") or frozenset({"human"})
     if paper.get("species") and not paper["species"] & wanted:
         return False
+    # an abstract naming several species is often an animal study that mentions patients in its background; for a
+    # question about people, unless the title says otherwise, any other species there is enough to skip it (a missed paper costs less than a
+    # wrong post)
+    if not q.get("species") and not paper.get("species"):
+        if profiles.CLINICAL.vocab.find(abstract, "species") - wanted:
+            return False
     up = profiles.CLINICAL.vocab.ancestors
     named = [(g, term) for g in ABOUT for term in q.get(g, ())]
     if named:

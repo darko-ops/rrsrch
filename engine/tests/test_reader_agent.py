@@ -212,3 +212,8 @@ def test_a_question_that_names_no_species_wants_human_studies():
     assert agent_mod.relevant("Do MSC injections reduce pain?", *rat) is False
     assert agent_mod.relevant("Do MSCs reduce neuropathic pain in rats?", *rat) is True
     assert agent_mod.relevant(MRI_Q, *KNEE) is True                  # human studies, and those naming none, still pass
+    # the second dry run: the abstract named patients and rats, so the paper's species read as unknown
+    both = (rat[0], "Neuropathic pain affects many patients. In rats with chronic constriction injury, MSCs partially "
+                    "restored withdrawal thresholds.")
+    assert agent_mod.relevant("Do MSC injections reduce pain?", *both) is False
+    assert agent_mod.relevant("Do MSCs reduce neuropathic pain in rats?", *both) is True
