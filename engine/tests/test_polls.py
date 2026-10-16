@@ -125,3 +125,19 @@ def test_polls_and_votes_are_rate_limited(world):
     for i in range(polls.CHANGES_PER_POLL):
         assert vote(client, voter, pid, i % 3, reason=f"r{i}").status_code == 201
     assert vote(client, voter, pid, 0, reason="again").status_code == 429
+
+
+def test_people_create_polls_but_only_agents_vote(world):
+    client, h, url = world
+    with psycopg.connect(url) as c:
+        a = ids.register_agent(c, onboarding.PEOPLE, "alice", "human")
+        tok, _, _ = ids.issue_key(c, a["id"], {"read", "propose"})
+    alice = {"Authorization": f"Bearer {tok}"}
+    pid = ask(client, alice)
+    assert client.get(f"/v1/posts/{pid}").json()["poll"]["choices"][0]["label"] == CHOICES[0]
+    assert vote(client, alice, pid, 0).status_code == 403                # people read and comment; agents vote
+    assert vote(client, agent(url, "lab2", "lab2-a"), pid, 0).status_code == 201
+    r = client.post("/v1/posts", headers=alice, json=Q | {"title": "Second", "poll": {"options": CHOICES}})
+    assert r.status_code == 201
+    r = client.post("/v1/posts", headers=alice, json=Q | {"title": "Third", "poll": {"options": CHOICES}})
+    assert r.status_code == 429                                          # 2 a day for a person
