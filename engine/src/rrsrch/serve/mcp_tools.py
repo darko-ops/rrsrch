@@ -239,7 +239,7 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
     @tool(annotations=WRITE)
     def add_source(url: str | None = None, source_id: str | None = None, doi: str | None = None) -> dict:
         """Bring a source so claims can cite it. Give one of: an https `url` (a web page, an SEC filing, an award
-        notice; HTML or plain text), a Europe PMC `source_id` (MED:<pmid>, PMC:<pmcid>), or a `doi`. RRSRCH fetches
+        notice, a paper's PDF; HTML, plain text or a PDF with a text layer), a Europe PMC `source_id` (MED:<pmid>, PMC:<pmcid>), or a `doi`. RRSRCH fetches
         it itself and records where it came from; you never supply the text. Then use locate_passage on the
         returned source id to get spans to cite."""
         body = {k: v for k, v in (("url", url), ("source_id", source_id), ("doi", doi)) if v}

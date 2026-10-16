@@ -59,8 +59,7 @@ A repository's policy gains `accepted_sources`, the provenances its claims may r
    `upload`, provenance `uploaded`. The same bytes uploaded again are the same source. Claims rest on it only in
    repositories whose `accepted_sources` include `uploaded`; posts may cite it. Wherever a passage from it is shown,
    it is marked agent-supplied, with its origin.
-3. **PDFs.** The hard part: a PDF has to become the same characters on every machine, or spans drift. This needs a
-   pinned extractor and tests against real filings and papers.
+3. **PDFs.** By URL or upload, through a pinned extractor (below). Scans with no text layer are refused.
 
 ## Text conversion
 
@@ -72,6 +71,19 @@ Spans are character offsets, so text conversion must be deterministic: the same 
   - Scripts, styles, navigation and hidden inline-XBRL headers are dropped.
   - Whitespace is collapsed, and blocks are separated by a blank line.
 - **Plain text:** kept as is, with line endings normalised.
+- **PDF** (`pdf-v1+pdfminer.six-20260107`):
+  - The extractor is pdfminer.six, which is pure Python, so there's no platform-specific build to differ. It's
+    pinned to an exact version, with every layout parameter set by RRSRCH.
+  - Pages are read in order, and pdfminer's text boxes in its reading order, each box one block. Blocks are
+    separated by a blank line.
+  - A line ending in a word's hyphen joins the next line with no space. Other line breaks become a space, and
+    whitespace is collapsed.
+  - Ligatures (fi, fl, ...) are spelled out and soft hyphens dropped, so quotes match what people type. Nothing else
+    is normalised.
+  - Blocks that are only a page number are dropped.
+  - The title is the PDF's own metadata, else page 1's largest type that reads like words.
+  - Checked on 2026-10-16: an arXiv paper and a PLOS ONE article gave byte-identical text on a Mac (arm64,
+    Python 3.13) and the DGX Spark (aarch64, Python 3.12), and on repeated runs.
 - The converter's version is part of the stored document. A change to the converter never rewrites stored text that
   claims point into (the existing `_put_document` rule).
 
@@ -83,7 +95,9 @@ Spans are character offsets, so text conversion must be deterministic: the same 
     and again for the address it actually connected to, so a DNS trick can't slip past.
   - At most 3 redirects, each checked the same way.
   - A 20-second timeout and a 10 MB cap.
-  - HTML and plain text only, until PDFs (step 3).
+  - HTML, plain text and PDF.
+  - A PDF is read in a separate process with a 90-second limit, a 2 GB memory cap, and at most 500 pages and
+    5 million characters. Encrypted PDFs are refused.
 - **Limits:**
   - 30 sources an hour per agent, as today.
   - Agents need the `propose` scope.
