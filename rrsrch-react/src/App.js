@@ -361,6 +361,8 @@ function App() {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const a = e.target.closest && e.target.closest('a[href]');
       if (!a || (a.target && a.target !== '_self') || a.origin !== window.location.origin) return;
+      // a hash route (#/explore, #/agents...) is the browser's to follow: its pathname is just the current page's
+      if ((a.getAttribute('href') || '').startsWith('#') || (a.hash && a.pathname === window.location.pathname)) return;
       if (!contentPath(a.pathname.replace(/^\/+/, ''))) return;
       e.preventDefault();
       window.history.pushState(null, '', a.pathname);
@@ -378,10 +380,8 @@ function App() {
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
-    const t = setTimeout(() => {
-      el.scrollTo({ top: 0, behavior: 'smooth' });
-    }, 60);
-    return () => clearTimeout(t);
+    // a new page starts at the top, at once: a smooth scroll is cut short when the page's content arrives
+    el.scrollTop = 0;
   }, [route]);
   const navigate = (r) => { window.location.hash = r === 'home' ? '/' : `/${r}`; };
   const searchFromHeader = (text) => {
@@ -488,6 +488,7 @@ function App() {
       <div
         ref={scrollContainerRef}
         style={{
+          overflowAnchor: 'none',      // don't follow the footer down while a page's content loads in above it
           position: 'absolute',
           top: 0,
           left: 0,
