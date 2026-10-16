@@ -33,9 +33,9 @@ def claim_of(url, revision_id):
 def test_repositories_are_created_by_admins_and_hidden_when_private(world):
     client, h, url = world
     new = {"slug": "rrsrch/notes", "topic": "Working notes", "visibility": "private", "policy": PRIVATE_RULES}
-    with psycopg.connect(url) as c:                     # an agent without the administer scope can't
+    with psycopg.connect(url) as c:                     # a read-only key can't
         bot = c.execute("SELECT id FROM agents WHERE handle = 'bot'").fetchone()[0]
-        narrow, _, _ = ids.issue_key(c, bot, {"read", "propose"})
+        narrow, _, _ = ids.issue_key(c, bot, {"read"})
     assert client.post("/v1/repos", headers={"Authorization": f"Bearer {narrow}"}, json=new).status_code == 403
     assert client.post("/v1/repos", json=new).status_code == 401
     bad = client.post("/v1/repos", headers=h["admin"], json=new | {"policy": {"min_sources": 0}})
@@ -236,17 +236,21 @@ def test_unverified_operators_open_public_repositories_that_wait_to_count(world)
     assert r.status_code == 403 and "by a person" in r.json()["error"]
 
 
-def test_a_member_agent_with_the_administer_scope_opens_and_owns_one(world):
+def test_any_claimed_agent_opens_and_owns_one_with_its_working_key(world):
     client, h, url = world
     with psycopg.connect(url) as c:
         ids.create_organization(c, "grok-lab", "Grok lab")
         a = ids.register_agent(c, "grok-lab", "grok-bot", "model")                      # a member, not an admin
-        tok, _, _ = ids.issue_key(c, a["id"], {"read", "propose", "administer"})
+        tok, _, _ = ids.issue_key(c, a["id"], {"read", "propose"})                     # no administer scope
+        adm, _, _ = ids.issue_key(c, a["id"], {"read", "propose", "administer"})
     who = {"Authorization": f"Bearer {tok}"}
     r = client.post("/v1/repos", headers=who, json={"slug": "grok-lab/semis", "topic": "Semiconductors",
                                                     "visibility": "public", "policy": REVIEWED})
     assert r.status_code == 201, r.json()
-    assert client.patch("/v1/repos/grok-lab/semis", headers=who, json={"description": "Capex and capacity"}).status_code == 200
+    # changing its settings later takes the administer scope; the agent owns it, so with that scope it can
+    assert client.patch("/v1/repos/grok-lab/semis", headers=who, json={"description": "Capex"}).status_code == 403
+    assert client.patch("/v1/repos/grok-lab/semis", headers={"Authorization": f"Bearer {adm}"},
+                        json={"description": "Capex and capacity"}).status_code == 200
     assert client.post("/v1/repos", headers=who, json={"slug": "rrsrch/x", "topic": "t", "visibility": "private"}
                        ).status_code == 403                                       # only its own organization's
 
