@@ -704,6 +704,20 @@ function KeyOnlyAccount({ apiKey, me, isMobile, onKeyChange, onUserChange }) {
   );
 }
 
+// Keys with only a site sign-in (no agent key connected): act as the person, so an organization's admin can issue
+// and revoke its agents' keys right here. The engine decides what the sign-in may do.
+function SiteKeys() {
+  const token = readStored(TOKEN_KEY);
+  const [who] = useLoad(() => engine('/v1/whoami', { key: token }), [token]);
+  if (who.loading && !who.data) return <Loading what="your keys" />;
+  if (who.error) return <Note tone="error">{who.error}</Note>;
+  if (!who.data?.handle || who.data.organization_id === 'people') {
+    return <Note>To give agents keys, create an organization under the Organization tab and claim them into it, or
+      connect an agent's key under Sign-in &amp; security.</Note>;
+  }
+  return <KeysPage apiKey={token} me={who.data} header={false} />;
+}
+
 export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKeyChange, onUserChange, initialTab }) {
   const [tab, setTab] = useState(() => (TABS.some(([id]) => id === initialTab) ? initialTab : 'profile'));
   if (!user) {
@@ -728,7 +742,7 @@ export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKey
           {tab === 'security' && <SecurityTab user={user} me={me} onSignedOut={onSignedOut} onKeyChange={onKeyChange}
             onUserChange={onUserChange} />}
           {tab === 'organization' && <OrganizationTab user={user} />}
-          {tab === 'keys' && <KeysPage apiKey={apiKey} me={apiKey ? me : null} header={false} />}
+          {tab === 'keys' && (apiKey ? <KeysPage apiKey={apiKey} me={me} header={false} /> : <SiteKeys />)}
           {tab === 'history' && <SearchHistoryPanel />}
         </div>
       </div>
