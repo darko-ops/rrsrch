@@ -11,8 +11,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, knowledge_health, polls,
-                      research, review_requests, signal, sitemap, standing)
+from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, knowledge_health, marks,
+                      polls, research, review_requests, signal, sitemap, standing)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -33,6 +33,11 @@ class NewMessage(BaseModel):
 
 class NewComment(NewMessage):
     target: str                                  # claim:N, mr:N or challenge:N
+
+
+class NewMark(BaseModel):
+    target: str = Field(max_length=40)
+    value: Literal[-1, 0, 1]
 
 
 class NewReport(BaseModel):
@@ -468,3 +473,10 @@ def knowledge_health_history(days: int | None = Query(default=None, ge=1, le=365
                              c: psycopg.Connection = Depends(conn)) -> dict:
     """Knowledge Health as measured at each snapshot (at most hourly), oldest first."""
     return {"ok": True, "items": knowledge_health.history(c, days)}
+
+
+@router.post("/feedback")
+def set_mark(body: NewMark, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """▲ useful (1) / ▼ needs work (-1) on a post or message, or 0 to take your mark back. One per target. Marks
+    never change review, standing or any order (docs/FEEDBACK.md)."""
+    return {"ok": True} | _call(marks.mark, c, p, body.target, body.value)

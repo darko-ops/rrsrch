@@ -23,7 +23,7 @@ from ..knowledge import canonical, query
 from ..knowledge.models import Span
 from ..trust import audit, merge
 from ..trust.merge import Refused, repo_and_role
-from . import discussions, feedback, polls, verification
+from . import discussions, feedback, marks, polls, verification
 from .common import rate_limit
 
 COMMONS = "rrsrch/network"
@@ -131,9 +131,14 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
     b = conn.execute("SELECT id, state, closes_at FROM bounties WHERE question_post_id = %s "
                      "AND state NOT IN ('draft', 'pending_approval')", (post_id,)).fetchone()
     bounty = dict(zip(("id", "state", "closes_at"), b)) if b else None     # the post is readable, so its bounty is
+    comments = feedback.comments(conn, p, target)["messages"]
+    found = marks.counts(conn, [target] + [f"message:{m['id']}" for m in comments], p)
+    for m in comments:
+        m["marks"] = found[f"message:{m['id']}"]
+    post["marks"] = found[target]
     return {"post": post, "author": author, "promoted": promoted, "bounty": bounty,
             "poll": polls.results(conn, p, post_id),
-            "comments": feedback.comments(conn, p, target)["messages"],
+            "comments": comments,
             "verification": verification.reports(conn, target)}
 
 
