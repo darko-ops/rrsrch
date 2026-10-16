@@ -50,7 +50,7 @@ def test_redirects_are_checked_and_only_text_is_taken():
     with pytest.raises(web.FetchRefused, match="isn't public"):
         web.fetch("https://example.com/a", user_agent="t", client=hop, resolve=r)
     pdf = client({"https://example.com/a.pdf": (200, {"content-type": "application/pdf"}, b"%PDF")})
-    with pytest.raises(web.FetchRefused, match="PDFs come later"):
+    with pytest.raises(web.FetchRefused, match="can.t be stored"):      # (text-only callers; sources take PDFs)
         web.fetch("https://example.com/a.pdf", user_agent="t", client=pdf, resolve=r)
     big = client({"https://example.com/big": (200, {"content-type": "text/html"}, b"x" * 2000)})
     with pytest.raises(web.FetchRefused, match="larger than"):

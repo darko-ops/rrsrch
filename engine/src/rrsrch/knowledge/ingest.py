@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 import psycopg
 
 from ..corpus import html as htmlmod
+from ..corpus import pdf as pdfmod
 from ..corpus import snapshot
 from ..identity.access import Principal
 from ..ledger import db
@@ -85,7 +86,7 @@ def add_url(conn: psycopg.Connection, p: Principal | None, url: str, *, client=N
     if resolve is not None:
         kw["resolve"] = resolve
     try:
-        got = web.fetch(canon, user_agent=SEC_USER_AGENT if kind == "sec" else USER_AGENT, **kw)
+        got = web.fetch(canon, user_agent=SEC_USER_AGENT if kind == "sec" else USER_AGENT, types=web.DOC_TYPES, **kw)
     except web.FetchRefused as e:
         raise Refused(422, str(e)) from e
     final = web.canonical(got.url)
@@ -94,8 +95,7 @@ def add_url(conn: psycopg.Connection, p: Principal | None, url: str, *, client=N
         have = conn.execute("SELECT id FROM sources WHERE id = %s OR url = %s", (sid, final)).fetchone()
         if have:
             return query.get_source(conn, have[0]), False
-    text = htmlmod.decode(got.body, got.charset)
-    title, body = htmlmod.to_text(text) if got.content_type != "text/plain" else ("", htmlmod.plain(text))
+    title, body, converter = _convert(got.body, got.content_type, got.charset)
     if len(body) < 40:
         raise Refused(422, "the page has no readable text to cite")
     title = title[:500] or final
@@ -110,11 +110,24 @@ def add_url(conn: psycopg.Connection, p: Principal | None, url: str, *, client=N
         db._put_document(conn, sid, "fulltext", body)
         audit.append(conn, "source.add", f"source:{sid}", actor_id=p.agent_id,
                      detail={"source_id": sid, "kind": kind, "url": final, "content_type": got.content_type,
-                             "content_sha256": digest, "converter": htmlmod.VERSION})
+                             "content_sha256": digest, "converter": converter})
     return query.get_source(conn, sid), True
 
 
-UPLOAD_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
+UPLOAD_TYPES = ("text/html", "application/xhtml+xml", "text/plain", "application/pdf")
+
+
+def _convert(content: bytes, ctype: str, charset: str | None) -> tuple[str, str, str]:
+    """(title, text, converter) of a document's bytes: HTML, plain text or PDF, the same every time."""
+    if ctype in web.PDF_TYPES:
+        try:
+            title, body = pdfmod.to_text(content)
+        except pdfmod.PDFRefused as e:
+            raise Refused(422, str(e)) from e
+        return title, body, pdfmod.VERSION
+    text = htmlmod.decode(content, charset)
+    title, body = htmlmod.to_text(text) if ctype != "text/plain" else ("", htmlmod.plain(text))
+    return title, body, htmlmod.VERSION
 
 
 def add_upload(conn: psycopg.Connection, p: Principal | None, content: bytes, content_type: str, origin: str,
@@ -126,8 +139,7 @@ def add_upload(conn: psycopg.Connection, p: Principal | None, content: bytes, co
     p = _can_add(p)
     ctype = (content_type or "").split(";")[0].strip().lower()
     if ctype not in UPLOAD_TYPES:
-        hint = " (PDFs come later; see docs/SOURCES.md)" if ctype == "application/pdf" else ""
-        raise Refused(422, f"{ctype or 'unknown content'} can't be stored yet{hint}")
+        raise Refused(422, f"{ctype or 'unknown content'} can't be stored: HTML, plain text and PDF can")
     if not content or len(content) > web.MAX_BYTES:
         raise Refused(422, f"an upload must be 1 byte to {web.MAX_BYTES // (1024 * 1024)} MB")
     origin = " ".join((origin or "").split())
@@ -138,8 +150,7 @@ def add_upload(conn: psycopg.Connection, p: Principal | None, content: bytes, co
     if conn.execute("SELECT 1 FROM sources WHERE id = %s", (sid,)).fetchone():
         return query.get_source(conn, sid), False
     _rate_limited(conn, p)
-    text = htmlmod.decode(content, "utf-8")
-    found_title, body = htmlmod.to_text(text) if ctype != "text/plain" else ("", htmlmod.plain(text))
+    found_title, body, converter = _convert(content, ctype, "utf-8")
     if len(body) < 40:
         raise Refused(422, "the document has no readable text to cite")
     title = " ".join((title or found_title or origin).split())[:500]
@@ -152,7 +163,7 @@ def add_upload(conn: psycopg.Connection, p: Principal | None, content: bytes, co
         db._put_document(conn, sid, "fulltext", body)
         audit.append(conn, "source.add", f"source:{sid}", actor_id=p.agent_id,
                      detail={"source_id": sid, "kind": "upload", "origin": origin, "content_type": ctype,
-                             "content_sha256": digest, "converter": htmlmod.VERSION})
+                             "content_sha256": digest, "converter": converter})
     return query.get_source(conn, sid), True
 
 

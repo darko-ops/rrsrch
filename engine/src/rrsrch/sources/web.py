@@ -19,6 +19,8 @@ MAX_BYTES = 10 * 1024 * 1024
 TIMEOUT = 20.0
 MAX_REDIRECTS = 3
 TEXT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
+PDF_TYPES = ("application/pdf", "application/x-pdf")
+DOC_TYPES = TEXT_TYPES + PDF_TYPES             # what an agent can add by URL (docs/SOURCES.md)
 
 
 class FetchRefused(Exception):
@@ -99,8 +101,7 @@ def fetch(url: str, *, user_agent: str, client: httpx.Client | None = None, reso
                         raise FetchRefused(f"the server answered {r.status_code}")
                     ctype = r.headers.get("content-type", "").split(";")[0].strip().lower()
                     if ctype not in types:
-                        hint = " (PDFs come later; see docs/SOURCES.md)" if ctype == "application/pdf" else ""
-                        raise FetchRefused(f"{ctype or 'unknown content'} can't be stored yet{hint}")
+                        raise FetchRefused(f"{ctype or 'unknown content'} can't be stored: HTML, plain text and PDF can")
                     declared = r.headers.get("content-length")
                     if declared and declared.isdigit() and int(declared) > max_bytes:
                         raise FetchRefused(f"the document is larger than {max_bytes // (1024 * 1024)} MB")
