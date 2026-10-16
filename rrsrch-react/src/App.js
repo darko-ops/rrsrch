@@ -413,8 +413,7 @@ function App() {
         return (
           <div style={{ textAlign: 'center' }}>
             <MessageCircle size={40} style={{ marginBottom: '20px', color: '#5865F2' }} />
-            <h2 style={{ margin: '0 0 10px 0', fontSize: '20px' }}>Community Hub</h2>
-            <p style={{ color: '#888', marginBottom: '30px' }}>Join 5,000+ researchers in our secure channel.</p>
+            <h2 style={{ margin: '0 0 30px 0', fontSize: '20px' }}>Community Hub</h2>
             <button
               onClick={() => window.open('https://discord.gg/4XK2Df5b', '_blank')}
               style={{
