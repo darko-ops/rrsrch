@@ -68,7 +68,7 @@ test('connecting a key on the Account page signs in as that agent, sending the k
 
   fireEvent.change(screen.getByPlaceholderText('rrsrch_…'), { target: { value: 'rrsrch_good' } });
   fireEvent.click(screen.getByText('Connect'));
-  expect(await screen.findByText('rrsrch · admin')).toBeInTheDocument();             // the sidebar, as demetri
+  expect(await screen.findByText('Acting as demetri')).toBeInTheDocument();         // Account, as demetri (no Agents sidebar)
   expect(localStorage.getItem('rrsrch_engine_key')).toBe('rrsrch_good');
   const keyed = calls.filter((c) => String(c.opts.headers?.Authorization || '').includes('rrsrch_'));
   expect(keyed.length).toBeGreaterThan(0);

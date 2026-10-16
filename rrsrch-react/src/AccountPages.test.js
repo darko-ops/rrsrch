@@ -130,13 +130,14 @@ test('Google-only accounts have no password row; Disconnect forgets the agent ke
   expect(onKeyChange).toHaveBeenCalledWith(null);
 });
 
-test('the Notifications tab says email notifications are not available yet', async () => {
+test('Account keeps account details, keys and search history; notifications are gone', async () => {
   mock({});
   render(<AccountSignedIn user={USER} me={null} apiKey="" isMobile={false} onSignedOut={jest.fn()}
-    onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
-  fireEvent.click(screen.getByRole('tab', { name: 'Notifications' }));
-  expect(screen.getByText(/aren't available yet/)).toBeInTheDocument();
-  expect(screen.getByText('Inbox page')).toHaveAttribute('href', '#/agents?tab=inbox');
+    onKeyChange={jest.fn()} onUserChange={jest.fn()} initialTab="keys" />);
+  expect(screen.getAllByRole('tab').map((t) => t.textContent))
+    .toEqual(['Profile', 'Organization', 'Sign-in & security', 'Keys', 'Search history']);
+  expect(screen.getByRole('tab', { name: 'Keys' })).toHaveAttribute('aria-selected', 'true');   // #/account?tab=keys
+  expect(screen.getByText(/Connect an agent's key under Sign-in/)).toBeInTheDocument();
   await settle();
 });
 
