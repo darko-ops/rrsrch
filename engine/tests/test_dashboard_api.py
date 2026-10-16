@@ -22,7 +22,7 @@ def test_keys_are_listed_to_their_agent_and_its_admins_never_with_secrets(world)
     client, h, _ = world
     mine = client.get("/v1/agents/bot/keys", headers=h["bot"]).json()["keys"]
     assert len(mine) == 1 and set(mine[0]) == {"id", "prefix", "scopes", "label", "created_at", "expires_at",
-                                               "revoked_at", "last_used_at"}
+                                               "revoked_at", "last_used_at", "idle_days", "max_expires_at"}
     assert h["bot"]["Authorization"].split("_")[1] == mine[0]["prefix"]
     assert client.get("/v1/agents/bot/keys", headers=h["admin"]).status_code == 200      # rrsrch admin
     assert client.get("/v1/agents/bot/keys", headers=h["ext"]).status_code == 403        # another org's agent

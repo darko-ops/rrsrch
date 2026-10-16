@@ -128,7 +128,7 @@ def test_keys_are_stored_hashed_and_bounded(env, db_url):
         stored = c.execute("SELECT prefix, secret_hash FROM api_keys ORDER BY id DESC LIMIT 1").fetchone()
     assert key.split("_")[1] == stored[0] and key.split("_", 2)[2] not in stored[1]
     assert client.post("/v1/agents/acme-bot/keys", headers=admin,
-                       json={"scopes": ["read"], "days": 91}).status_code == 400
+                       json={"scopes": ["read"], "days": 366}).status_code == 400
     assert client.post("/v1/agents/acme-bot/keys", headers=admin,
                        json={"scopes": ["root"]}).status_code == 400
 
@@ -148,3 +148,61 @@ def test_cli_bootstraps_an_admin_whose_key_works(db_url, monkeypatch, capsys):
     assert cli.main(["repo", "member", "rrsrch/msc-knee-oa", "lab-admin", "reviewer"]) == 0
     assert cli.main(["agent", "revoke", "lab-admin"]) == 0
     assert client.get("/v1/whoami", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+
+
+def _expiry(url, key_id):
+    with psycopg.connect(url) as c:
+        return c.execute("SELECT expires_at, idle_days, max_expires_at FROM api_keys WHERE id = %s", (key_id,)).fetchone()
+
+
+def test_keys_stay_alive_while_used_and_die_when_idle(env, db_url):
+    client, admin = env
+    client.post("/v1/agents", headers=admin, json={"handle": "acme-loop", "kind": "service"})
+    r = client.post("/v1/agents/acme-loop/keys", headers=admin, json={"scopes": ["read"]})
+    assert r.status_code == 201 and r.json()["idle_days"] == 90 and "while used" in r.json()["lifetime"]
+    key, kid = {"Authorization": f"Bearer {r.json()['key']}"}, r.json()["key_id"]
+    with psycopg.connect(db_url) as c:      # as if issued long ago and last used 80 days ago: 10 days left
+        c.execute("UPDATE api_keys SET created_at = now() - interval '200 days', "
+                  "expires_at = now() + interval '10 days' WHERE id = %s", (kid,))
+    assert client.get("/v1/whoami", headers=key).status_code == 200          # using it pushes the end out again
+    expires, idle, cap = _expiry(db_url, kid)
+    with psycopg.connect(db_url) as c:
+        left = c.execute("SELECT %s - now()", (expires,)).fetchone()[0]
+    assert idle == 90 and cap is None and left.days >= 89
+    with psycopg.connect(db_url) as c:      # 90 days with no use: gone
+        c.execute("UPDATE api_keys SET expires_at = now() - interval '1 second' WHERE id = %s", (kid,))
+    assert client.get("/v1/whoami", headers=key).status_code == 401
+
+    fixed = client.post("/v1/agents/acme-loop/keys", headers=admin, json={"scopes": ["read"], "days": 7}).json()
+    assert fixed["idle_days"] is None and fixed["lifetime"] == "fixed: 7 days"
+    before = _expiry(db_url, fixed["key_id"])[0]
+    client.get("/v1/whoami", headers={"Authorization": f"Bearer {fixed['key']}"})
+    assert _expiry(db_url, fixed["key_id"])[0] == before                      # a fixed key doesn't slide
+
+
+def test_an_unclaimed_agents_key_slides_only_until_30_days_after_signing_up(env, db_url):
+    client, admin = env
+    r = client.post("/v1/agents/register", json={"handle": "drifter", "kind": "model", "model": "m",
+                                                 "description": "a test agent"})
+    assert r.status_code == 201, r.json()
+    key, code = {"Authorization": f"Bearer {r.json()['key']}"}, r.json()["claim"]["code"]
+    with psycopg.connect(db_url) as c:
+        kid = c.execute("SELECT k.id FROM api_keys k JOIN agents a ON a.id = k.agent_id "
+                        "WHERE a.handle = 'drifter'").fetchone()[0]
+    expires, idle, cap = _expiry(db_url, kid)
+    assert idle == 30 and cap is not None and expires <= cap
+    with psycopg.connect(db_url) as c:      # signed up 29 days ago: use can't carry it past day 30
+        c.execute("UPDATE agents SET created_at = now() - interval '29 days' WHERE handle = 'drifter'")
+        c.execute("UPDATE api_keys SET created_at = now() - interval '29 days', max_expires_at = now() + interval '1 day', "
+                  "expires_at = now() + interval '1 day' WHERE id = %s", (kid,))
+    assert client.get("/v1/whoami", headers=key).status_code == 200
+    expires, _, cap = _expiry(db_url, kid)
+    assert expires == cap
+
+    # claiming takes the cap away: from then on it lives while used, like any operator's key
+    assert client.post("/v1/agents/claim", headers=admin, json={"code": code}).status_code in (200, 201)
+    client.get("/v1/whoami", headers=key)
+    expires, idle, cap = _expiry(db_url, kid)
+    with psycopg.connect(db_url) as c:
+        left = c.execute("SELECT %s - now()", (expires,)).fetchone()[0]
+    assert cap is None and idle == 30 and left.days >= 29

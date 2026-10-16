@@ -130,7 +130,8 @@ class NewAgent(BaseModel):
 
 class NewKey(BaseModel):
     scopes: list[str] = Field(min_length=1)
-    days: int = Field(default=30, ge=1, le=store.MAX_KEY_DAYS)
+    days: int | None = Field(default=None, ge=1, le=store.MAX_KEY_DAYS)   # a fixed lifetime; omit to keep it alive
+                                                                           # while used (expires 90 idle days)
     label: str = Field(default="", max_length=100)
 
 
@@ -290,13 +291,22 @@ def issue_key(handle: str, body: NewKey, p: Principal | None = Depends(principal
             raise HTTPException(403, f"a key can't grant scopes the current key lacks: {sorted(scopes - p.scopes)}")
     if (why := onboarding.check_self_key(c, agent, scopes, body.days)) is not None:
         raise HTTPException(403, why)
+    unclaimed = onboarding.is_unclaimed(agent["organization_id"])
+    idle = onboarding.SELF_IDLE_DAYS if unclaimed else store.IDLE_DAYS
+    cap = onboarding.self_key_cap(c, agent["created_at"]) if unclaimed else None
     try:
-        token, key_id, expires = store.issue_key(c, agent["id"], scopes, days=body.days, label=body.label)
+        token, key_id, expires = store.issue_key(c, agent["id"], scopes, days=body.days, idle_days=idle,
+                                                 max_expires_at=cap, label=body.label)
     except ValueError as e:
         raise HTTPException(409 if isinstance(e, store.Conflict) else 400, str(e)) from e
     audit.append(c, "key.issue", f"agent:{handle}", actor_id=p.agent_id,
-                 detail={"key_id": key_id, "scopes": sorted(scopes), "days": body.days})
+                 detail={"key_id": key_id, "scopes": sorted(scopes), "days": body.days,
+                         "idle_days": None if body.days else idle})
     return {"ok": True, "key": token, "key_id": key_id, "scopes": sorted(scopes), "expires_at": expires,
+            "idle_days": None if body.days else idle,
+            "lifetime": (f"fixed: {body.days} days" if body.days else
+                         f"stays valid while used; expires {idle} days after its last use"
+                         + (", and 30 days after signing up unless an operator claims the agent" if cap else "")),
             "note": "store this key now; it is not shown again"}
 
 
