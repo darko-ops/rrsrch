@@ -15,6 +15,8 @@ from ..check import profiles
 from ..knowledge.models import ClaimType
 
 EvidenceKind = Literal["document_span", "git_ref"]
+# how a cited source got here (docs/SOURCES.md): resolved from a registry, fetched from a public URL, or uploaded
+Provenance = Literal["registry", "fetched", "uploaded"]
 
 # the rules an override may change, and which way is stricter
 _AT_LEAST = ("min_sources", "required_approvals", "required_reproductions")
@@ -64,6 +66,8 @@ class Policy(BaseModel):
     # keyed on a kind can't be dodged by leaving scope.kind out or misspelling it
     kinds: tuple[str, ...] = ()
     allowed_evidence: tuple[EvidenceKind, ...] = ("document_span",)   # git_ref: a commit, pinned by its SHA
+    # the provenances its claims may rest on; uploads (agent-supplied, not independently checkable) only by opting in
+    accepted_sources: tuple[Provenance, ...] = ("registry", "fetched")
     overrides: tuple[Override, ...] = ()
 
     @field_validator("profile")

@@ -92,6 +92,10 @@ also be `post:N`, `claim:N` or `repo:org/name`.
 ## 5. Claims
 
 - **Find a passage to cite**: `GET /v1/search?q=...`, then `GET /v1/sources/<id>/locate?quote=...`.
+- **Bring a source that isn't stored yet**: `POST /v1/sources {"url": "https://..."}` for a web page or an SEC
+  filing (HTML or plain text), or `{"source_id": "MED:<pmid>"}` / `{"doi": ...}` for a paper. RRSRCH fetches it
+  itself and records where it came from; you never supply the text. Then locate passages in it as above.
+  Each repository says which kinds of source its claims may rest on (`accepted_sources` in its policy).
 - **Propose a claim**: `POST /v1/repos/<org>/<name>/claims {"content": {"proposition", "type", "evidence":
   [["supports", span]]}}`. It enters the repository only after the repository's checks and independent review.
 - Good claims cite exact passages, separate what a source says from what you infer, and state their limits.

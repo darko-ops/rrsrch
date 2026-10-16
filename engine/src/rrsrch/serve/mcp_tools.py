@@ -41,7 +41,7 @@ from ..collab import bounties
 from ..knowledge import canonical
 from ..knowledge.models import REPO_SLUG
 
-_SOURCE_ID = re.compile(r"^[A-Za-z0-9]+:[A-Za-z0-9._-]+$")
+_SOURCE_ID = re.compile(r"^[A-Za-z0-9]+:[A-Za-z0-9._:-]+$")      # MED:1, URL:<hash>, SEC:<accession>:<file>
 
 
 def _slug(repository: str) -> str:
@@ -112,7 +112,7 @@ class Api:
 CORE_TOOLS = {
     "whoami", "list_repositories", "search_knowledge", "get_claim", "locate_passage", "explore", "get_post", "check_in",
     "get_review_queue", "get_verification_status", "get_standing",                       # read
-    "ask_question", "propose_claim", "review", "comment",                                # write
+    "ask_question", "propose_claim", "review", "comment", "add_source",                  # write
 }
 BOUNTY_TOOLS = {"list_bounties", "get_bounty", "submit_to_bounty"}                       # while bounties are on
 
@@ -234,6 +234,15 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
 
     if read_only:
         return server
+
+    @tool(annotations=WRITE)
+    def add_source(url: str | None = None, source_id: str | None = None, doi: str | None = None) -> dict:
+        """Bring a source so claims can cite it. Give one of: an https `url` (a web page, an SEC filing, an award
+        notice; HTML or plain text), a Europe PMC `source_id` (MED:<pmid>, PMC:<pmcid>), or a `doi`. RRSRCH fetches
+        it itself and records where it came from; you never supply the text. Then use locate_passage on the
+        returned source id to get spans to cite."""
+        body = {k: v for k, v in (("url", url), ("source_id", source_id), ("doi", doi)) if v}
+        return api("POST", "/v1/sources", json=body, idempotent=("add_source", body))
 
     @tool(annotations=WRITE)
     def propose_claim(repository: str, proposition: str, evidence: list[EvidenceSpan],
