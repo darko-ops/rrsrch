@@ -7,6 +7,7 @@ Everything runs as user services on Spark (`systemctl --user`, with lingering on
 | `rrsrch-postgres` | The ledger: Postgres 16 + pgvector, data in `~/rrsrch-pg/data`, listening on `127.0.0.1:5434` only |
 | `rrsrch-serve` | The engine API on `127.0.0.1:8787`, published by Tailscale Funnel (below) |
 | `rrsrch-reader` | Claim extraction over the corpus; commits per chunk, restarts 20 s after a crash, stops when done |
+| `rrsrch-reader-agent` | The reader as a standing agent (`rrsrch read agent`): every 30 minutes it takes unanswered questions, searches the ledger couldn't answer and new papers in each repository's topic, adds papers through the API and proposes claims for review (below) |
 | `rrsrch-indexnow.timer` | Every 10 minutes, sends the IndexNow queue (`rrsrch indexnow --once`); installed by `deploy.sh` |
 
 Settings live in `~/.config/rrsrch/engine.env` (see `engine.env.example`). Backups are below.
@@ -108,6 +109,27 @@ If Spark is lost, this brings the engine back from the latest off-site backup:
 6. **Republish:** run `tailscale funnel --bg 8787`. If the hostname changed, update `RRSRCH_ENGINE_URL` in
    Vercel and redeploy.
 7. **Restart backups:** reinstall the cron line above, and put back `r2.env` and `backup-pubkey.asc`.
+
+## The reader agent
+
+`rrsrch-reader-agent` runs `reader/agent.py`. It works through the public API like any outside agent, with its own
+key, so its claims are proposals that need an independent approval and a maintainer's merge; it can't approve its
+own. Each cycle it reads up to 6 papers and opens up to 10 proposals, and the engine caps every agent at 20
+proposals a day and 40 waiting for review. Papers outside every repository's topic become findings in the commons.
+What it has done is kept in `~/.local/state/rrsrch/reader-agent.json`, so a restart doesn't repeat work.
+
+One-time setup: issue the reader a key with only the scopes it needs, into a file only you can read (the key is
+printed once; nothing else stores it):
+
+```bash
+umask 077; set -a; . ~/.config/rrsrch/engine.env; set +a
+printf 'RRSRCH_API_KEY=%s\n' "$(cd ~/rrsrch-engine && .venv/bin/python -m rrsrch.cli agent key rrsrch-reader \
+  --scope read --scope propose --days 365 | tail -n 1)" > ~/.config/rrsrch/reader-agent.env
+install -m 644 ~/rrsrch-engine/deploy/spark/rrsrch-reader-agent.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now rrsrch-reader-agent
+```
+
+Logs: `journalctl --user -u rrsrch-reader-agent -f`. One cycle by hand: `rrsrch read agent --once`.
 
 ## Deploying
 

@@ -136,6 +136,65 @@ def wait_for_answers(conn: psycopg.Connection, pause=time.sleep, poll: float = 1
         waited += poll
 
 
+@dataclass
+class Candidate:
+    """A claim that passed the reader's rules against its own passage: found verbatim, and no wider than it."""
+    claim: str
+    quote: str
+    start: int
+    end: int
+    fields: dict
+    scope: dict
+    self_check: dict
+
+
+@dataclass
+class Rejection:
+    quote: str | None
+    claim: str | None
+    reason: str
+    detail: str
+
+
+def read_chunk(llm: LLM, title: str, text: str, ch: Chunk, context: dict) -> tuple[int, list[Candidate], list[Rejection]]:
+    """Ask the model for one chunk's findings and keep only what passes the rules. Touches no database.
+    Returns how many items the model gave, the candidates, and the rejections with their reasons."""
+    try:
+        reply = llm.json_chat(SYSTEM, USER.format(title=title, text=ch.text))
+        items = reply.get("claims", [])
+        if not isinstance(items, list):
+            raise ValueError("'claims' is not a list")
+    except (ValueError, KeyError) as e:
+        return 0, [], [Rejection(None, None, "bad_reply", str(e)[:300])]
+    found: list[Candidate] = []
+    rejected: list[Rejection] = []
+    for it in items:
+        quote = str((it or {}).get("quote") or "")
+        claim = " ".join(str((it or {}).get("claim") or "").split())
+        if not claim:
+            rejected.append(Rejection(quote, claim, "empty_claim", ""))
+            continue
+        span = spans.locate(quote, text, ch.start, ch.end)
+        if span is None:
+            rejected.append(Rejection(quote, claim, "quote_not_found", "quote is not in the text verbatim"))
+            continue
+        passage = text[span[0]:span[1]]
+        cf = fieldmod.extract(claim)
+        if not (cf.numbers or cf.findings or any(cf.entities.values())):
+            rejected.append(Rejection(quote, claim, "nothing_checkable", "claim has no number, direction or named entity"))
+            continue
+        # the claim may not say more than its own passage: same gate the writer faces,
+        # minus the report's population (a claim can be about anyone; scope is checked at use)
+        v = gate.check(claim, [gate.CitedClaim("passage", passage, context)], report_scope={}, sentence_fields=cf)
+        if not v.passed:
+            rejected.append(Rejection(quote, claim, f"gate:{v.rule}", v.detail))
+            continue
+        found.append(Candidate(claim, passage, span[0], span[1], cf.to_json(),
+                               {g: sorted(cf.scope.get(g) or context.get(g, ())) for g in ("species", "joint", "condition")},
+                               v.to_json()))
+    return len(items), found, rejected
+
+
 def read_document(conn: psycopg.Connection, llm: LLM, doc: dict, context: dict, rep: ReadReport,
                   wait=wait_for_answers) -> None:
     extractor = f"{llm.model}|{PROMPT_VERSION}"
@@ -146,42 +205,13 @@ def read_document(conn: psycopg.Connection, llm: LLM, doc: dict, context: dict, 
             rep.chunks_skipped += 1
             continue
         wait(conn)
-        try:
-            reply = llm.json_chat(SYSTEM, USER.format(title=doc["title"], text=ch.text))
-            items = reply.get("claims", [])
-            if not isinstance(items, list):
-                raise ValueError("'claims' is not a list")
-        except (ValueError, KeyError) as e:
-            with conn.transaction():
-                _reject(conn, doc["id"], doc["sha256"], None, None, "bad_reply", str(e)[:300], extractor, rep)
-            continue
+        n_items, found, rejected = read_chunk(llm, doc["title"], doc["text"], ch, context)
         with conn.transaction():
-            n = 0
-            for it in items:
-                quote = str((it or {}).get("quote") or "")
-                claim = " ".join(str((it or {}).get("claim") or "").split())
-                if not claim:
-                    _reject(conn, doc["id"], doc["sha256"], quote, claim, "empty_claim", "", extractor, rep)
-                    continue
-                span = spans.locate(quote, doc["text"], ch.start, ch.end)
-                if span is None:
-                    _reject(conn, doc["id"], doc["sha256"], quote, claim, "quote_not_found",
-                            "quote is not in the text verbatim", extractor, rep)
-                    continue
-                passage = doc["text"][span[0]:span[1]]
-                cf = fieldmod.extract(claim)
-                if not (cf.numbers or cf.findings or any(cf.entities.values())):
-                    _reject(conn, doc["id"], doc["sha256"], quote, claim, "nothing_checkable",
-                            "claim has no number, direction or named entity", extractor, rep)
-                    continue
-                # the claim may not say more than its own passage: same gate the writer faces,
-                # minus the report's population (a claim can be about anyone; scope is checked at use)
-                v = gate.check(claim, [gate.CitedClaim("passage", passage, context)], report_scope={},
-                               sentence_fields=cf)
-                if not v.passed:
-                    _reject(conn, doc["id"], doc["sha256"], quote, claim, f"gate:{v.rule}", v.detail,
-                            extractor, rep)
-                    continue
+            for r in rejected:
+                _reject(conn, doc["id"], doc["sha256"], r.quote, r.claim, r.reason, r.detail, extractor, rep)
+            if rejected and rejected[0].reason == "bad_reply":
+                continue
+            for c in found:
                 # passed the reader's rules against its own passage: structurally valid, not yet reviewed
                 claim_id = conn.execute(
                     "INSERT INTO claims (document_id, doc_sha256, span_start, span_end, text, fields, "
@@ -189,17 +219,14 @@ def read_document(conn: psycopg.Connection, llm: LLM, doc: dict, context: dict, 
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, "
                     "(SELECT id FROM repositories WHERE slug = %s), 'empirical', 'structurally_valid', "
                     "(SELECT id FROM agents WHERE handle = %s)) RETURNING id",
-                    (doc["id"], doc["sha256"], span[0], span[1], claim, json.dumps(cf.to_json()),
-                     json.dumps({g: sorted(cf.scope.get(g) or context.get(g, ())) for g in
-                                 ("species", "joint", "condition")}),
-                     extractor, json.dumps(v.to_json()), store.PILOT_REPO, store.READER_AGENT)).fetchone()[0]
+                    (doc["id"], doc["sha256"], c.start, c.end, c.claim, json.dumps(c.fields), json.dumps(c.scope),
+                     extractor, json.dumps(c.self_check), store.PILOT_REPO, store.READER_AGENT)).fetchone()[0]
                 store.record_claim(conn, claim_id)
-                n += 1
             conn.execute("INSERT INTO read_chunks (document_id, chunk_sha, extractor, span_start, span_end, "
                          "n_claims, n_items) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                         (doc["id"], ch.hash, extractor, ch.start, ch.end, n, len(items)))
+                         (doc["id"], ch.hash, extractor, ch.start, ch.end, len(found), n_items))
         rep.chunks_read += 1
-        rep.claims += n
+        rep.claims += len(found)
 
 
 def read_corpus(conn: psycopg.Connection, llm: LLM, source_ids: list[str] | None = None,

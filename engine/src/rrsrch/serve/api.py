@@ -169,10 +169,12 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
         try:
             with connect() as conn:
                 n = conn.execute("SELECT count(*) FROM claims").fetchone()[0]
+                busy = conn.execute("SELECT count(*) FROM answer_jobs WHERE status IN ('queued', 'running')").fetchone()[0]
         except Exception as e:  # noqa: BLE001
             return _error(503, str(e)[:200])
+        # answers_in_progress: the model is shared, so background readers hold off while visitors wait
         return JSONResponse({"ok": True, "claims": n, "model": os.environ.get("RRSRCH_READER_MODEL"),
-                             "backup": backup_status()})
+                             "answers_in_progress": busy, "backup": backup_status()})
 
     def _submit(question: str, request: Request, p: Principal | None):
         client, agent = client_of(request, p)

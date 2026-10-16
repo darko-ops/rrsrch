@@ -81,6 +81,33 @@ def _trial_fields(raw: bytes) -> dict:
     }
 
 
+def put_source(conn, source_id: str, r: dict, fulltext_xml: bytes | None, raw: bytes,
+               fallback_title: str = "") -> dict[str, str]:
+    """Store one Europe PMC record and its documents (title, abstract, and the open full text if there is one).
+    `raw` is the snapshot the record was read from; its hash is kept. Returns the texts stored, by part."""
+    parts = {"title": r.get("title") or fallback_title,
+             "abstract": text.abstract_text(r.get("abstractText")),
+             "fulltext": text.fulltext_body(fulltext_xml) if fulltext_xml else ""}
+    conn.execute(
+        "INSERT INTO sources (id, pmid, pmcid, doi, title, pub_year, journal, pub_types, "
+        "has_full_text, license, snapshot_sha256) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (id) DO UPDATE SET pmid = EXCLUDED.pmid, pmcid = EXCLUDED.pmcid, "
+        "doi = EXCLUDED.doi, title = EXCLUDED.title, pub_year = EXCLUDED.pub_year, "
+        "journal = EXCLUDED.journal, pub_types = EXCLUDED.pub_types, "
+        "has_full_text = EXCLUDED.has_full_text, license = EXCLUDED.license, "
+        "snapshot_sha256 = EXCLUDED.snapshot_sha256, loaded_at = now()",
+        (source_id, r.get("pmid"), r.get("pmcid"), r.get("doi"), parts["title"],
+         int(r["pubYear"]) if r.get("pubYear") else None,
+         (r.get("journalInfo") or {}).get("journal", {}).get("title"),
+         (r.get("pubTypeList") or {}).get("pubType", []),
+         bool(parts["fulltext"]), r.get("license"), snapshot.sha256(raw)))
+    for part, body in parts.items():
+        if body:
+            _put_document(conn, source_id, part, body)
+    return parts
+
+
 def load_corpus(conn: psycopg.Connection, manifest: dict) -> LoadReport:
     rep = LoadReport()
     with conn.transaction():
@@ -99,29 +126,12 @@ def load_corpus(conn: psycopg.Connection, manifest: dict) -> LoadReport:
                 rep.missing_snapshots.append(s["id"])
                 continue
             raw = rec_path.read_bytes()
-            r = json.loads(raw)
             ft_path = d / "fulltext.xml"
-            parts = {"title": r.get("title") or s["title"],
-                     "abstract": text.abstract_text(r.get("abstractText")),
-                     "fulltext": text.fulltext_body(ft_path.read_bytes()) if ft_path.exists() else ""}
-            conn.execute(
-                "INSERT INTO sources (id, pmid, pmcid, doi, title, pub_year, journal, pub_types, "
-                "has_full_text, license, snapshot_sha256) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (id) DO UPDATE SET pmid = EXCLUDED.pmid, pmcid = EXCLUDED.pmcid, "
-                "doi = EXCLUDED.doi, title = EXCLUDED.title, pub_year = EXCLUDED.pub_year, "
-                "journal = EXCLUDED.journal, pub_types = EXCLUDED.pub_types, "
-                "has_full_text = EXCLUDED.has_full_text, license = EXCLUDED.license, "
-                "snapshot_sha256 = EXCLUDED.snapshot_sha256, loaded_at = now()",
-                (s["id"], r.get("pmid"), r.get("pmcid"), r.get("doi"), parts["title"],
-                 int(r["pubYear"]) if r.get("pubYear") else None,
-                 (r.get("journalInfo") or {}).get("journal", {}).get("title"),
-                 (r.get("pubTypeList") or {}).get("pubType", []),
-                 bool(parts["fulltext"]), r.get("license"), snapshot.sha256(raw)))
+            parts = put_source(conn, s["id"], json.loads(raw), ft_path.read_bytes() if ft_path.exists() else None,
+                               raw, fallback_title=s["title"])
             rep.sources += 1
             for part, body in parts.items():
                 if body:
-                    _put_document(conn, s["id"], part, body)
                     rep.documents[part] = rep.documents.get(part, 0) + 1
             texts[s["id"]] = parts
             for pmid in s["included_by"]:

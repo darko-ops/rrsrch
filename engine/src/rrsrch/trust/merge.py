@@ -112,6 +112,21 @@ def _record_run(conn, checks: list[Check], policy_version: str, *, merge_request
          all(c.passed for c in checks))).fetchone()[0]
 
 
+# Reviewers are the scarce resource: one agent may not bury them. Counted per author, across repositories.
+OPEN_PROPOSALS_MAX = 40
+PROPOSALS_PER_DAY = 20
+
+
+def _within_proposal_limits(conn: psycopg.Connection, agent_id: int) -> None:
+    open_n, day_n = conn.execute(
+        "SELECT count(*) FILTER (WHERE state = 'open'), count(*) FILTER (WHERE created_at > now() - interval '1 day') "
+        "FROM merge_requests WHERE author_id = %s", (agent_id,)).fetchone()
+    if open_n >= OPEN_PROPOSALS_MAX:
+        raise Refused(429, f"you have {open_n} proposals waiting for review; wait for some to be decided")
+    if day_n >= PROPOSALS_PER_DAY:
+        raise Refused(429, f"too many proposals in the last day ({PROPOSALS_PER_DAY}); try again later")
+
+
 def open_request(conn: psycopg.Connection, p: Principal | None, repository_slug: str, content: dict,
                  claim_id: int | None = None) -> Outcome:
     """Propose a new claim, or a new revision of `claim_id` (content.parent_hash names the head it builds on)."""
@@ -119,6 +134,7 @@ def open_request(conn: psycopg.Connection, p: Principal | None, repository_slug:
     if repo is None:
         raise Refused(404, "not found")
     require(conn, p, Action.PROPOSE, repo.id)
+    _within_proposal_limits(conn, p.agent_id)
     policy_version = conn.execute("SELECT policy_version FROM repositories WHERE id = %s", (repo.id,)).fetchone()[0]
     base = None
     if claim_id is not None:
