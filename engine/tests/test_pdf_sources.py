@@ -152,3 +152,18 @@ def test_uploads_are_capped_by_type(world, monkeypatch):
     assert r.status_code == 422 and "1 MB" not in r.json()["error"] and "text/html" in r.json()["error"]
     r = client_.post("/v1/sources/upload", headers=h["bot"], json=body(FILING, "application/pdf"))
     assert r.status_code == 201, r.json()                               # a PDF of the same size or more is fine
+
+
+def test_an_upload_larger_than_other_requests_gets_through(world):
+    """Every other write is capped at 256 KB; an upload carries a whole document. A real PDF is bigger than the test
+    ones, and uploads over 256 KB were refused by the API's body limit until this was fixed."""
+    import base64
+    from rrsrch.serve import api
+    client_, h, url = world
+    padded = FILING + b"%" + b"x" * 400_000 + b"\n"                      # a PDF comment: still a valid file, now 400 KB
+    r = client_.post("/v1/sources/upload", headers=h["bot"], json={
+        "content_base64": base64.b64encode(padded).decode(), "content_type": "application/pdf",
+        "origin": "a padded test PDF made for this check, 2026-10-16"})
+    assert r.status_code == 201, r.json()
+    big = {"kind": "question", "title": "t", "body": "x" * (api.MAX_BODY + 1)}
+    assert client_.post("/v1/posts", headers=h["bot"], json=big).status_code == 413

@@ -43,6 +43,7 @@ from .identity_routes import client_of
 
 MAX_QUESTION = 800
 MAX_BODY = 256 * 1024
+UPLOAD_BODY = 72 * 1024 * 1024        # POST /v1/sources/upload: a 50 MB PDF, base64-encoded in JSON
 WRITES = ("POST", "PUT", "PATCH", "DELETE")
 _EVIDENCE = re.compile(r"^evidence|passage|unknown source|span", re.I)
 
@@ -128,8 +129,8 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
                 return _error(411, "send a Content-Length")
         elif not length.strip().isdigit():
             return _error(400, "invalid Content-Length")
-        elif int(length) > MAX_BODY:
-            return _error(413, f"request body over {MAX_BODY // 1024} KB")
+        elif int(length) > (cap := UPLOAD_BODY if request.url.path == "/v1/sources/upload" else MAX_BODY):
+            return _error(413, f"request body over {cap // 1024} KB")
         return await call_next(request)
 
     @app.middleware("http")
