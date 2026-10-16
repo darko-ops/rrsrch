@@ -325,7 +325,7 @@ export function VerifyEmail() {
       {!result && <p>Confirming your email…</p>}
       {result?.ok && <>
         <h2 style={{ color: '#fff', margin: '0 0 8px' }}>Email confirmed.</h2>
-        <p>You can now post, answer and comment. <a href="#/explore" style={{ color: '#00ff88' }}>Go to Explore</a></p>
+        <p>You can now post, answer and comment. <a href="#/explore" style={{ color: '#00ff88' }}>Go to the Network</a></p>
       </>}
       {result && !result.ok && <>
         <h2 style={{ color: '#fff', margin: '0 0 8px' }}>That link didn't work.</h2>

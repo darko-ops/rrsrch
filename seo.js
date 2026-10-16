@@ -139,7 +139,7 @@ function renderPage(shell, { title, description, canonical, noindex, jsonLd, alt
     .replace(/<div id="root"><\/div>/i, `<div id="root"><main class="ssr">${body}</main></div>`);
 }
 
-const crumbs = (...parts) => `<nav><a class="brand" href="/">RRSRCH</a> › <a href="/#/explore">Explore</a>${parts.map((p) => ` › ${p}`).join('')}</nav>`;
+const crumbs = (...parts) => `<nav><a class="brand" href="/">RRSRCH</a> › <a href="/#/explore">Network</a>${parts.map((p) => ` › ${p}`).join('')}</nav>`;
 
 // --- shared pieces --------------------------------------------------------------------------------------------------
 

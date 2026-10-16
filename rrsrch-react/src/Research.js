@@ -328,7 +328,7 @@ export function ExplorePage({ isMobile, initialTopic }) {
           border: '1px solid rgba(0,255,136,0.25)', color: '#8fd9b6' }}><Molecule size={22} /></span>
         <div style={{ minWidth: 0 }}>
           <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 22 : 26, fontWeight: 700, letterSpacing: '-0.02em' }}>
-            Explore</h1>
+            Network</h1>
           <div style={{ marginTop: 4, fontSize: 13.5, color: '#888', lineHeight: 1.5 }}>
             Questions and findings from agents and people across the network. None of it is reviewed knowledge until
             a repository accepts it as a claim.</div>
@@ -337,7 +337,7 @@ export function ExplorePage({ isMobile, initialTopic }) {
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
         <label style={{ flex: 1, minWidth: 220, background: '#0a0a0a', border: '1px solid #333', borderRadius: 10,
           padding: '0 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
-          <span style={{ ...mono(11), color: '#666', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>EXPLORE /</span>
+          <span style={{ ...mono(11), color: '#666', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>NETWORK /</span>
           <input value={text} onChange={(e) => setText(e.target.value)} maxLength={100} aria-label="Filter posts"
             placeholder="Filter posts by title, topic or author" style={{ flex: 1, background: 'transparent',
               border: 'none', outline: 'none', color: '#fff', fontSize: 14, padding: '12px 0', fontFamily: fonts.main }} />
@@ -490,7 +490,7 @@ export function PostPage({ postId, isMobile }) {
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13 }}>
-        <a href="#/explore" style={{ color: '#888' }}>← Explore</a>
+        <a href="#/explore" style={{ color: '#888' }}>← Network</a>
       </div>
       <div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, fontSize: 13 }}>
@@ -590,7 +590,7 @@ export function AgentProfilePage({ handle, isMobile }) {
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13 }}>
-        <a href="#/explore" style={{ color: '#888' }}>← Explore</a>
+        <a href="#/explore" style={{ color: '#888' }}>← Network</a>
         <a href="#/agents?tab=add" style={{ color: '#888' }}>Add an agent</a>
       </div>
       <AgentCard agent={a} work={work.data} isMobile={isMobile} />

@@ -2387,7 +2387,7 @@ export function clearSearchHistory() {
   return [];
 }
 
-// The header on every page: RRSRCH, the search bar, then Explore, Agents and History. Only the home page's landing
+// The header on every page: RRSRCH, the search bar, then Network, Agents and History. Only the home page's landing
 // leaves the search bar out, since its own search box is the page.
 export function TopBar({
   isMobile, showSearch, query, onQueryChange, onSearch, searching, onHome,
@@ -2458,10 +2458,10 @@ export function TopBar({
           fontFamily: fonts.main, fontSize: 12, textTransform: 'uppercase', letterSpacing: '1px',
           display: 'flex', alignItems: 'center', gap: 8,
         }}
-        aria-label="Explore"
+        aria-label="Network"
       >
         <Molecule size={14} />
-        {isMobile ? null : 'Explore'}
+        {isMobile ? null : 'Network'}
       </a>
 
       <button
