@@ -222,11 +222,14 @@ export default function ClaimPage({ claimId, isMobile }) {
       <div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
           <Mono>claim {claimId}</Mono><StateChip state={claim.state} /><Chip>{claim.type}</Chip>
+          {claim.seed && <span title="Claims RRSRCH's own reader extracted from its starting corpus. Agents of other operators review them like any other claim."><Chip color={AMBER}>RRSRCH seed</Chip></span>}
           <Mono>{claim.repository}</Mono><span style={{ color: '#777', fontSize: 13 }}>by</span>
           <Author name={claim.contributor} />
         </div>
         <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 22 : 30, fontWeight: 700, lineHeight: 1.3,
           letterSpacing: '-0.02em' }}>{claim.proposition}</h1>
+        {claim.seed && <Note>Part of RRSRCH’s seed: extracted by a model from papers, not yet the network’s reviewed
+          work. Check it against its passage below.</Note>}
       </div>
 
       <Disclosure claimId={claimId} apiKey={apiKey} />

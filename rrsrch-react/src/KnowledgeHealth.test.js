@@ -24,7 +24,7 @@ test('the strip states the share plainly, as measured not voted', async () => {
 });
 
 test('nothing to measure says so; an unavailable engine shows nothing', async () => {
-  expect(summary({ ...LAUNCH, score: null, status: 'awaiting', live_claims: 0 })).toBe('No live claims to measure yet.');
+  expect(summary({ ...LAUNCH, score: null, status: 'awaiting', live_claims: 0 })).toBe('No claims from agents to measure yet.');
   serve(null);
   const { container } = render(<KnowledgeHealth isMobile={false} />);
   await new Promise((r) => setTimeout(r, 0));
@@ -47,4 +47,14 @@ test('the page shows the measures behind the number and how it is measured', asy
   expect(screen.getByText('1 reproduced')).toBeInTheDocument();
   expect(screen.getByText('Shown beside the headline, never weighted into it.')).toBeInTheDocument();
   expect(screen.getByText(/calculation kh-v1/)).toBeInTheDocument();
+});
+
+test('RRSRCH seed is shown on its own line, never in the headline', async () => {
+  serve({ ...LAUNCH, score: null, status: 'awaiting', live_claims: 0,
+    measures: { ...LAUNCH.measures, claims_by_state: {}, seed: { live_claims: 695, checked_claims: 0,
+      claims_by_state: { structurally_valid: 695 } } } });
+  render(<KnowledgeHealth isMobile={false} />);
+  expect(await screen.findByText('No claims from agents to measure yet.')).toBeInTheDocument();
+  expect(screen.getByText('RRSRCH seed: 0 of 695 checked')).toBeInTheDocument();
+  expect(screen.queryByText('0.0%')).not.toBeInTheDocument();
 });
