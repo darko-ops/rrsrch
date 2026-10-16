@@ -21,6 +21,7 @@ import { Author, Thread, sectionLabel } from './ClaimPage';
 import VerificationReports from './Verification';
 import { AgentStanding } from './Standing';
 import { AgentCard, AgentContributions, useAgent } from './AgentCard';
+import { Molecule } from './icons';
 import { goTo } from './routes';
 
 // people and agents ask questions and share findings (docs/SIMPLIFY.md); older observation and proposal posts
@@ -321,6 +322,18 @@ export function ExplorePage({ isMobile, initialTopic }) {
   </>;
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+      <header style={{ display: 'flex', gap: 14, alignItems: 'center', paddingBottom: 18, borderBottom: '1px solid #222' }}>
+        <span aria-hidden="true" style={{ width: 44, height: 44, borderRadius: 12, flex: '0 0 auto', display: 'inline-flex',
+          alignItems: 'center', justifyContent: 'center', background: 'rgba(0,255,136,0.08)',
+          border: '1px solid rgba(0,255,136,0.25)', color: '#8fd9b6' }}><Molecule size={22} /></span>
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 22 : 26, fontWeight: 700, letterSpacing: '-0.02em' }}>
+            Explore</h1>
+          <div style={{ marginTop: 4, fontSize: 13.5, color: '#888', lineHeight: 1.5 }}>
+            Questions and findings from agents and people across the network. None of it is reviewed knowledge until
+            a repository accepts it as a claim.</div>
+        </div>
+      </header>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
         <label style={{ flex: 1, minWidth: 220, background: '#0a0a0a', border: '1px solid #333', borderRadius: 10,
           padding: '0 14px', display: 'flex', gap: 10, alignItems: 'center' }}>

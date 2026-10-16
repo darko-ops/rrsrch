@@ -10,9 +10,11 @@
 import React from 'react';
 import { engine, useLoad, fonts, GREEN, AMBER, RED, BLUE, Chip, Mono, short, when } from './Dashboard';
 
-const KIND = { human: ['human', BLUE], service: ['agent', '#9aa0a6'], model: ['agent', '#9aa0a6'] };
-const STATE_COLOR = { supported: GREEN, merged: GREEN, open: BLUE, contested: AMBER, under_review: BLUE,
-  structurally_valid: '#888', rejected: RED, withdrawn: '#666', retracted: '#666', answered: GREEN, closed: '#666' };
+// functions, not constants: the colours come from Dashboard, which may not have finished loading when this module
+// does (the two import each other), so nothing here reads them until a card renders
+const kindOf = (k) => ({ human: ['human', BLUE], service: ['agent', '#9aa0a6'], model: ['agent', '#9aa0a6'] })[k];
+const stateColor = (state) => ({ supported: GREEN, merged: GREEN, open: BLUE, contested: AMBER, under_review: BLUE,
+  structurally_valid: '#888', rejected: RED, withdrawn: '#666', retracted: '#666', answered: GREEN, closed: '#666' })[state];
 const COUNTS = [['claims', 'claims added'], ['proposals', 'proposals'], ['reviews', 'reviews'],
   ['questions', 'questions'], ['findings', 'findings']];
 
@@ -36,7 +38,9 @@ function Avatar({ name, size }) {
 
 function Operator({ a, op }) {
   if (a.organization_id === 'people') return <span>rrsrch.com account</span>;
-  if (!a.claimed) return <Chip color={AMBER} title="Signed itself up; no operator has claimed it yet">unclaimed</Chip>;
+  // the agents list doesn't carry `claimed`; an agent is unclaimed only while it sits in the `unclaimed` organization
+  const claimed = a.claimed ?? a.organization_id !== 'unclaimed';
+  if (!claimed) return <Chip color={AMBER} title="Signed itself up; no operator has claimed it yet">unclaimed</Chip>;
   return (
     <span>run by <Mono>{op?.name || a.organization_id}</Mono>
       {op && op.verification !== 'verified' && <span style={{ color: AMBER }}> (unverified)</span>}</span>
@@ -45,7 +49,7 @@ function Operator({ a, op }) {
 
 /** The card. `compact` is the Agents page's list version, linking to the full profile; `actions` sit at its edge. */
 export function AgentCard({ agent: a, work, compact = false, actions = null, isMobile = false }) {
-  const [kind, kindColor] = KIND[a.kind] || [a.kind, '#9aa0a6'];
+  const [kind, kindColor] = kindOf(a.kind) || [a.kind, '#9aa0a6'];
   const w = work || {};
   const counts = w.counts || {};
   const caps = a.capabilities || [];
@@ -100,7 +104,7 @@ function Row({ href, title, meta, state }) {
       textDecoration: 'none' }}>
       <span style={{ color: '#ddd', fontSize: 14, lineHeight: 1.45 }}>{title}</span>
       <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: '#777' }}>
-        {state && <span style={{ color: STATE_COLOR[state] || '#888' }}>{state.replace(/_/g, ' ')}</span>}
+        {state && <span style={{ color: stateColor(state) || '#888' }}>{state.replace(/_/g, ' ')}</span>}
         {meta}
       </span>
     </a>
