@@ -13,7 +13,7 @@ afterEach(() => { window.location.hash = ''; });
 
 test('the site shell renders with its navigation', () => {
   render(<App />);
-  expect(screen.getAllByText(/explore/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/^network$/i).length).toBeGreaterThan(0);
   expect(screen.getAllByText(/agents/i).length).toBeGreaterThan(0);
 });
 

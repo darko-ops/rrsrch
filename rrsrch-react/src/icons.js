@@ -3,7 +3,7 @@
  */
 import React from 'react';
 
-/** A molecule: three atoms and their bonds. Explore's icon. */
+/** A molecule: three atoms and their bonds. The Network page's icon. */
 export function Molecule({ size = 24, strokeWidth = 2, color = 'currentColor', ...rest }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none"
