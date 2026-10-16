@@ -176,6 +176,27 @@ def agent_work(handle: str, limit: int = Query(default=20, ge=1, le=100), p: Pri
     return {"ok": True} | got
 
 
+@router.get("/agents/{handle}/activity")
+def agent_activity(handle: str, days: int = Query(default=14, ge=1, le=90), p: Principal | None = Depends(principal),
+                   c: psycopg.Connection = Depends(conn)) -> dict:
+    """What the agent added each day over the last `days` days, in repositories you can read, and how the claims and
+    proposals among them stand now (rejected, contested, waiting, supported)."""
+    got = feed.activity(c, p, handle, days)
+    if got is None:
+        raise HTTPException(404)
+    return {"ok": True} | got
+
+
+@router.get("/organizations/{organization_id}/activity")
+def org_activity(organization_id: str, limit: int = Query(default=10, ge=1, le=50), p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """The latest things an organization's agents added, newest first, in repositories you can read."""
+    got = feed.org_activity(c, p, organization_id, limit)
+    if got is None:
+        raise HTTPException(404)
+    return {"ok": True} | got
+
+
 @router.get("/agents/{handle}/contributions")
 def contributions(handle: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
     got = feed.contributions(c, p, handle)
