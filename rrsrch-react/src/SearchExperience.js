@@ -277,9 +277,12 @@ function SearchBox({
           display: 'flex',
           alignItems: 'center',
           gap: 12,
+          // a fixed height, so the Search button appearing never moves the header around it
+          boxSizing: 'border-box',
+          height: compact ? (isMobile ? 40 : 44) : (isMobile ? 48 : 52),
           padding: compact
-            ? (isMobile ? '9px 14px' : '10px 18px')
-            : (isMobile ? '12px 16px' : '14px 20px'),
+            ? (isMobile ? '0 6px 0 14px' : '0 6px 0 18px')
+            : (isMobile ? '0 8px 0 16px' : '0 8px 0 20px'),
           background: 'rgba(255,255,255,0.06)',
           border: '1px solid rgba(255,255,255,0.16)',
           borderRadius: compact ? 22 : 26,
@@ -319,7 +322,7 @@ function SearchBox({
               border: `1px solid ${searching ? 'rgba(255,255,255,0.15)' : 'rgba(0,255,136,0.4)'}`,
               borderRadius: 20,
               color: searching ? '#888' : '#00ff88',
-              padding: '8px 14px',
+              padding: '7px 14px',
               cursor: searching ? 'wait' : 'pointer',
               fontFamily: fonts.main,
               fontSize: 11,
@@ -2360,7 +2363,7 @@ function SearchResultsPage({
 const HISTORY_KEY = 'rrsrch_search_history';
 const PROFILE_KEY = 'rrsrch_user_profile';
 
-function readSearchHistory() {
+export function readSearchHistory() {
   try {
     const raw = localStorage.getItem(HISTORY_KEY) || sessionStorage.getItem(HISTORY_KEY);
     const list = raw ? JSON.parse(raw) : [];
@@ -2376,7 +2379,7 @@ function pushSearchHistory(q) {
   return next;
 }
 
-function clearSearchHistory() {
+export function clearSearchHistory() {
   try {
     localStorage.removeItem(HISTORY_KEY);
     sessionStorage.removeItem(HISTORY_KEY);
@@ -2384,9 +2387,11 @@ function clearSearchHistory() {
   return [];
 }
 
-function TopBar({
+// The header on every page: RRSRCH, the search bar, then Explore, Agents and History. Only the home page's landing
+// leaves the search bar out, since its own search box is the page.
+export function TopBar({
   isMobile, showSearch, query, onQueryChange, onSearch, searching, onHome,
-  history, onPickHistory, onClearHistory, onAgents,
+  history, onPickHistory, onClearHistory, onAgents, active,
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -2448,7 +2453,7 @@ function TopBar({
         href="#/explore"
         style={{
           marginLeft: showSearch ? 0 : 'auto', flexShrink: 0, textDecoration: 'none',
-          background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
+          background: active === 'explore' ? 'rgba(255,255,255,0.08)' : 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
           color: '#aaa', padding: isMobile ? '10px 14px' : '10px 20px',
           fontFamily: fonts.main, fontSize: 12, textTransform: 'uppercase', letterSpacing: '1px',
           display: 'flex', alignItems: 'center', gap: 8,
@@ -2462,15 +2467,19 @@ function TopBar({
       <button
         type="button"
         onClick={onAgents}
+        aria-label="Agents"
         style={{
           flexShrink: 0,
-          background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
+          background: active === 'agents' ? 'rgba(255,255,255,0.08)' : 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
           color: '#aaa', padding: isMobile ? '10px 14px' : '10px 20px', cursor: 'pointer',
           fontFamily: fonts.main, fontSize: 12, textTransform: 'uppercase', letterSpacing: '1px',
           display: 'flex', alignItems: 'center', gap: 8,
         }}
         onMouseEnter={(e) => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = '#aaa'; e.currentTarget.style.background = 'transparent'; }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = '#aaa';
+          e.currentTarget.style.background = active === 'agents' ? 'rgba(255,255,255,0.08)' : 'transparent';
+        }}
       >
         <Bot size={14} />
         {isMobile ? null : 'Agents'}
@@ -2629,7 +2638,9 @@ function readUserProfile() {
   return {};
 }
 
-export default function SearchExperience({ isMobile, scrollContainerRef, onAgents }) {
+export default function SearchExperience({
+  isMobile, scrollContainerRef, onAgents, initialSearch, onInitialSearchDone,
+}) {
   const [query, setQuery] = useState('');
   // landing | results
   const [mode, setMode] = useState('landing');
@@ -2850,6 +2861,14 @@ export default function SearchExperience({ isMobile, scrollContainerRef, onAgent
     const q = typeof qOrItem === 'string' ? qOrItem : qOrItem?.q;
     if (q) runSearch(q);
   };
+
+  // A search typed in the header on another page lands here and runs once.
+  useEffect(() => {
+    if (!initialSearch) return;
+    onInitialSearchDone?.();
+    runSearch(initialSearch.q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSearch]);
 
   const inResults = mode === 'results';
   const sideLoading = web?.loading || literature?.loading;

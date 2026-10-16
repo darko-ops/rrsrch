@@ -2,10 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Sphere, Stars, Grid } from '@react-three/drei';
 import * as THREE from 'three';
-import { MessageCircle, X, Bot } from 'lucide-react';
-import { Molecule } from './icons';
+import { MessageCircle, X } from 'lucide-react';
 import { contentPath, currentRoute } from './routes';
-import SearchExperience from './SearchExperience';
+import SearchExperience, { TopBar, readSearchHistory, clearSearchHistory } from './SearchExperience';
 import Dashboard from './Dashboard';
 import ClaimPage from './ClaimPage';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
@@ -348,6 +347,10 @@ function App() {
   // #/explore, #/agents (the dashboard), #/account, #/verify; anything else is home. Old hash links to content
   // (#/claims/3, #/posts/3, #/agent/HANDLE) are redirected to the real path.
   const [route, setRoute] = useState(currentRoute);
+  // The header's search bar on pages other than home: typing goes here; submitting opens the results at home.
+  const [headerQuery, setHeaderQuery] = useState('');
+  const [pendingSearch, setPendingSearch] = useState(null);
+  const [searchHistory, setSearchHistory] = useState(() => readSearchHistory());
   const contentRef = useRef(null);
   useEffect(() => {
     const onChange = () => setRoute(currentRoute());
@@ -379,6 +382,14 @@ function App() {
     return () => clearTimeout(t);
   }, [route]);
   const navigate = (r) => { window.location.hash = r === 'home' ? '/' : `/${r}`; };
+  useEffect(() => { setSearchHistory(readSearchHistory()); }, [route]);   // searches made at home since
+  const searchFromHeader = (text) => {
+    const q = String(text || '').trim();
+    if (!q) return;
+    setPendingSearch({ q });   // a fresh object, so the same question asked twice still runs
+    setHeaderQuery('');
+    navigate('home');
+  };
 
   // Handle window resize for mobile detection
   useEffect(() => {
@@ -483,39 +494,26 @@ function App() {
       >
         {route === 'home' && (
           <SearchExperience isMobile={isMobile} scrollContainerRef={scrollContainerRef}
-            onAgents={() => navigate('agents')} />
+            onAgents={() => navigate('agents')} initialSearch={pendingSearch}
+            onInitialSearchDone={() => setPendingSearch(null)} />
         )}
 
         {route !== 'home' && (
-          <div style={{
-            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10,
-            display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '14px',
-            padding: isMobile ? '12px 16px' : '24px 56px',
-            background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)',
-            borderBottom: '1px solid rgba(255,255,255,0.06)',
-          }}>
-            <button onClick={() => navigate('home')} style={{
-              background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer',
-              fontFamily: theme.fonts.main, fontWeight: 800, fontSize: '16px',
-              letterSpacing: '-0.05em', padding: '8px 6px'
-            }}>RRSRCH</button>
-            {!isMobile && (                                  // on a phone the logo is the way home
-              <button onClick={() => navigate('home')} style={{
-                background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px',
-                color: '#aaa', cursor: 'pointer', fontFamily: theme.fonts.main, fontSize: '12px',
-                textTransform: 'uppercase', letterSpacing: '1px', padding: '10px 20px',
-              }}>Search</button>
-            )}
-            {[['explore', 'Explore', Molecule], ['agents', 'Agents', Bot]].map(([r, l, Icon]) => (
-              <button key={r} onClick={() => navigate(r)} aria-label={l} style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                background: route === r || (r === 'explore' && /^(posts|questions|agents|topics|claims)\//.test(route)) ? 'rgba(255,255,255,0.08)' : 'transparent',
-                border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px',
-                color: '#aaa', cursor: 'pointer', fontFamily: theme.fonts.main, fontSize: '12px',
-                textTransform: 'uppercase', letterSpacing: '1px', padding: isMobile ? '10px 14px' : '10px 20px',
-              }}><Icon size={14} />{l}</button>
-            ))}
-          </div>
+          <TopBar
+            isMobile={isMobile}
+            showSearch
+            query={headerQuery}
+            onQueryChange={setHeaderQuery}
+            onSearch={searchFromHeader}
+            searching={false}
+            onHome={() => navigate('home')}
+            history={searchHistory}
+            onPickHistory={searchFromHeader}
+            onClearHistory={() => setSearchHistory(clearSearchHistory())}
+            onAgents={() => navigate('agents')}
+            active={route === 'agents' || route === 'account' ? 'agents'
+              : /^(explore|posts|questions|agents|topics|claims)(\/|$)/.test(route) ? 'explore' : null}
+          />
         )}
 
         {route !== 'home' && (
