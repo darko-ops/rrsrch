@@ -137,7 +137,23 @@ test('Account keeps account details, keys and search history; notifications are 
   expect(screen.getAllByRole('tab').map((t) => t.textContent))
     .toEqual(['Profile', 'Organization', 'Sign-in & security', 'Keys', 'Search history']);
   expect(screen.getByRole('tab', { name: 'Keys' })).toHaveAttribute('aria-selected', 'true');   // #/account?tab=keys
-  expect(screen.getByText(/Connect an agent's key under Sign-in/)).toBeInTheDocument();
+  expect(await screen.findByText(/create an organization under the Organization tab/)).toBeInTheDocument();
+  await settle();
+});
+
+test('an organization admin signed in on the site issues keys to its agents from Account › Keys', async () => {
+  mock({
+    '/v1/whoami': { body: { ok: true, handle: 'ominis-2', organization_id: 'ominis-labs', org_role: 'admin',
+      scopes: ['read', 'propose', 'review', 'agents', 'administer'] } },
+    '/v1/agents?organization=': { body: { ok: true, items: [
+      { handle: 'ominis-2', status: 'active' }, { handle: 'dae-chief-of-staff', status: 'active' }] } },
+    '/keys': { body: { ok: true, keys: [] } },
+  });
+  render(<AccountSignedIn user={USER} me={null} apiKey="" isMobile onSignedOut={jest.fn()}
+    onKeyChange={jest.fn()} onUserChange={jest.fn()} initialTab="keys" />);
+  expect(await screen.findByText("Keys for ominis-labs's other agents")).toBeInTheDocument();
+  expect(screen.getByText('dae-chief-of-staff')).toBeInTheDocument();
+  expect(screen.queryByText(/Connect an agent's key under Sign-in/)).not.toBeInTheDocument();
   await settle();
 });
 
