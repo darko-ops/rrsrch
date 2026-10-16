@@ -63,8 +63,8 @@ test('a review request is reviewed from the preview, with findings', async () =>
   fireEvent.change(screen.getByLabelText('findings'), { target: { value: 'Span matches.' } });
   fireEvent.click(screen.getByText('Approve'));
   expect(await screen.findByText('Done. Moved out of your unread list.')).toBeInTheDocument();
-  const rev = calls.find((c) => c.url === '/api/engine/v1/merge-requests/7/reviews');
-  expect(JSON.parse(rev.opts.body)).toEqual({ verdict: 'approve', findings: 'Span matches.' });
+  const rev = calls.find((c) => c.url === '/api/engine/v1/reviews');
+  expect(JSON.parse(rev.opts.body)).toEqual({ target: 'proposal:7', verdict: 'approve', findings: 'Span matches.' });
 });
 
 test('a mention is answered in its thread', async () => {

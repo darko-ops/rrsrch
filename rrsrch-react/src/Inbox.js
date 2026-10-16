@@ -40,7 +40,7 @@ function ReviewPreview({ item, apiKey, onDone }) {
   const approvals = preview.approvals ?? reviews.filter((r) => r.verdict === 'approve').length;
   const objections = reviews.filter((r) => r.verdict !== 'approve').length;
   const review = async (verdict) => {
-    const r = await engine(`/v1/merge-requests/${id}/reviews`, { key: apiKey, method: 'POST', body: { verdict, findings } });
+    const r = await engine('/v1/reviews', { key: apiKey, method: 'POST', body: { target: `proposal:${id}`, verdict, findings } });
     if (r.ok) onDone(); else setErr(r.error);
   };
   return (

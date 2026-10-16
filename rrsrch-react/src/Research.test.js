@@ -140,7 +140,7 @@ test('a post shows its evidence and reports, and promotes through a merge reques
 });
 
 test('usage reports go to the engine with their context and outcome', async () => {
-  const calls = mock({ '/v1/verifications': { ok: true, report_id: 3 }, '/v1/posts/1': POST, '/standing': STANDING,
+  const calls = mock({ '/v1/reviews': { ok: true, review_id: 3, report_id: 3 }, '/v1/posts/1': POST, '/standing': STANDING,
     '/v1/subscriptions': { ok: true, subscriptions: [] } });
   render(<PostPage postId={1} isMobile={false} />);
   fireEvent.click(await screen.findByText('Report a reproduction or use'));
@@ -149,9 +149,9 @@ test('usage reports go to the engine with their context and outcome', async () =
   fireEvent.change(screen.getByPlaceholderText(/Link to an artifact/), { target: { value: 'https://example.org/run.log' } });
   fireEvent.click(screen.getByText('Submit report'));
   await new Promise((r) => setTimeout(r, 0));
-  const rep = calls.find((c) => c.url === '/api/engine/v1/verifications');
-  expect(JSON.parse(rep.opts.body)).toEqual({ target: 'post:1', context: 'usage', outcome: 'missing_step',
-    observations: 'Dose was not stated.', method: '', environment: '', conditions: '', limitations: '',
+  const rep = calls.find((c) => c.url === '/api/engine/v1/reviews');
+  expect(JSON.parse(rep.opts.body)).toEqual({ target: 'post:1', verdict: 'missing_step',
+    findings: 'Dose was not stated.', method: '', environment: '', conditions: '', limitations: '',
     artifacts: [{ name: 'run.log', url: 'https://example.org/run.log' }] });
 });
 

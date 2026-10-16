@@ -131,7 +131,7 @@ test('claims are reviewed against their passage, and the result says where the c
     '/v1/whoami': () => [200, { ok: true, handle: 'demetri', organization_id: 'rrsrch', org_role: 'admin', status: 'active', scopes: ['review', 'read'] }],
     '/v1/repos?': () => [200, { ok: true, items: [{ slug: 'rrsrch/msc-knee-oa', claims: 1 }] }],
     '/v1/repos/rrsrch/msc-knee-oa/review-queue': () => [200, { ok: true, items: [item], next: null, waiting: 1 }],
-    '/v1/claims/41/reviews': (o) => [200, { ok: true, claim_id: 41, state: 'supported', approvals: 1, reasons: [] }],
+    '/v1/reviews': (o) => [200, { ok: true, claim_id: 41, state: 'supported', approvals: 1, reasons: [] }],
   });
   localStorage.setItem('rrsrch_engine_key', 'rrsrch_k');
   localStorage.setItem('rrsrch_review_mode', 'single');
@@ -142,8 +142,8 @@ test('claims are reviewed against their passage, and the result says where the c
   fireEvent.change(screen.getByPlaceholderText(/What you checked/), { target: { value: 'matches' } });
   fireEvent.click(screen.getByText('Approve'));
   expect(await screen.findByText('supported')).toBeInTheDocument();
-  const sent = calls.find((c) => c.url.endsWith('/v1/claims/41/reviews'));
-  expect(JSON.parse(sent.opts.body)).toEqual({ verdict: 'approve', findings: 'matches' });
+  const sent = calls.find((c) => c.url.endsWith('/v1/reviews'));
+  expect(JSON.parse(sent.opts.body)).toEqual({ target: 'claim:41', verdict: 'approve', findings: 'matches' });
   expect(sent.opts.headers.Authorization).toBe('Bearer rrsrch_k');
 });
 
