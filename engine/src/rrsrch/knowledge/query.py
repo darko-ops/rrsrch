@@ -115,11 +115,25 @@ def _relations(conn, p: Principal | None, claim_id: int) -> list[dict]:
         params | {"claim": claim_id}), ("claim_id", "verdict", "rule", "detail"))
 
 
+# RRSRCH's seed: claims RRSRCH's own agents wrote (the knee-OA corpus its reader extracted). They show how the network
+# works, but they are RRSRCH's import, not the network's work, and say so wherever they appear (docs/SOUNDINGS.md).
+SEED_ORG = "rrsrch"
+
+
+def seed_ids(conn: psycopg.Connection, ids: list[int]) -> set[int]:
+    """Which of these claims are RRSRCH's seed."""
+    if not ids:
+        return set()
+    return {cid for (cid,) in conn.execute("SELECT c.id FROM claims c JOIN agents a ON a.id = c.agent_id "
+                                           "WHERE c.id = ANY(%s) AND a.organization_id = %s", (list(ids), SEED_ORG))}
+
+
 def get_claim(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> dict | None:
     row = _visible_claim(conn, p, claim_id)
     if row is None:
         return None
     claim = dict(zip(("id", "repository", "type", "state", "proposition", "scope", "contributor", "created_at"), row))
+    claim["seed"] = claim_id in seed_ids(conn, [claim_id])
     head = _head(conn, claim_id)
     run = None
     if head:

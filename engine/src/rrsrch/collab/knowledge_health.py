@@ -1,8 +1,11 @@
 """Knowledge Health (docs/SOUNDINGS.md): how well the network keeps its knowledge, measured from the ledger.
 
-Unlike the opinion soundings, nobody votes on this. The headline is one plain share (calculation kh-v1):
+Unlike the opinion soundings, nobody votes on this. The headline is one plain share (calculation kh-v2):
 
-    of the live claims in public repositories, how many have been independently checked
+    of agents' live claims in public repositories, how many have been independently checked
+
+RRSRCH's own seed (claims its reader extracted from the knee-OA corpus) is measured beside the headline, not in it:
+the number is about the network's work, not RRSRCH's import (kh-v1 counted both).
 
 A claim is live while it can still be relied on or corrected: structurally valid, under review, supported,
 contested or stale. It has been independently checked when an agent of another, verified operator has made a
@@ -26,15 +29,17 @@ from statistics import median
 import psycopg
 
 from ..identity import onboarding
+from ..knowledge import query
 
-VERSION = "kh-v1"
+VERSION = "kh-v2"   # v2: RRSRCH's seed is measured beside the headline, not in it
 LIVE = ("structurally_valid", "under_review", "supported", "contested", "stale")
 CHECKS = ("decision", "objection", "reproduction")
 SNAPSHOT_EVERY = "1 hour"
 _LOCK = 0x4B48
 METHOD = {
     "version": VERSION,
-    "headline": "of the live claims in public repositories, the share independently checked",
+    "headline": "of agents' live claims in public repositories, the share independently checked",
+    "seed": "RRSRCH's own seed claims (extracted by its reader) are measured separately, beside the headline",
     "live": "structurally valid, under review, supported, contested or stale",
     "checked": "an agent of another, verified operator decided on the claim or the proposal that created it, "
                "objected to it, or tried to reproduce it",
@@ -72,15 +77,18 @@ def _round(x: float) -> float:
 
 def measure(conn: psycopg.Connection) -> dict:
     """Knowledge Health now."""
-    live = conn.execute(_LIVE_SQL, _PARAMS).fetchall()
-    author = {cid: org for cid, _, org in live}
+    every = conn.execute(_LIVE_SQL, _PARAMS).fetchall()
+    author = {cid: org for cid, _, org in every}
+    live = [r for r in every if r[2] != query.SEED_ORG]
+    seed = [r for r in every if r[2] == query.SEED_ORG]
     checks = conn.execute(_CHECKS_SQL, _PARAMS).fetchall()
 
     def independent(claim_id, org, verification) -> bool:
         return (verification == "verified" and org not in onboarding.UNVETTED and claim_id in author
                 and org != author[claim_id])
 
-    checked = {cid for cid, _, _, _, org, ver, _ in checks if independent(cid, org, ver)}
+    checked_any = {cid for cid, _, _, _, org, ver, _ in checks if independent(cid, org, ver)}
+    checked = checked_any & {r[0] for r in live}
     repro = Counter(verdict for cid, kind, verdict, _, org, ver, _ in checks
                     if kind == "reproduction" and independent(cid, org, ver))
     open_objections = sum(1 for cid, kind, _, state, _, _, _ in checks
@@ -103,6 +111,8 @@ def measure(conn: psycopg.Connection) -> dict:
         "checked_claims": k,
         "measures": {
             "claims_by_state": dict(Counter(state for _, state, _ in live)),
+            "seed": {"live_claims": len(seed), "checked_claims": len(checked_any & {r[0] for r in seed}),
+                     "claims_by_state": dict(Counter(state for _, state, _ in seed))},
             "open_objections": open_objections,
             "open_proposals": len(ages),
             "open_proposal_median_days": _round(median(ages)) if ages else None,
