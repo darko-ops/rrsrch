@@ -31,7 +31,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Callable
 
-from ..check import gate
+from ..check import gate, profiles
 from ..corpus import text as textmod
 from ..knowledge.store import is_primary
 from ..serve.mcp_tools import Api, ToolError
@@ -57,9 +57,32 @@ REPOS: dict[str, RepoTopic] = {
         must=(r"mesenchymal|stromal cell|stem cell|\bMSCs?\b", r"\bknee", r"osteoarthriti")),
 }
 
+# Europe PMC sometimes types a review as a plain research article; its title usually says what it is
+REVIEW_TITLE = re.compile(r"\breview\b|meta-analys|systematic|state of the art|emerging (therapies|biologics)|"
+                          r"\boverview\b|perspective|narrative", re.I)
+
 STOP = set("""a an and are as at be been but by can could did do does for from had has have how i in into is it its
 may might more most of on or should than that the their there these they this to was were what when where which
 while who whom why will with would about after before between compared versus vs does do any""".split())
+
+
+# What a question is about, for deciding whether a paper bears on it: the same groups a source passes to its claims
+ABOUT = ("joint", "condition", "cell_type")
+
+
+def relevant(question: str, title: str, abstract: str) -> bool:
+    """Whether a paper is about what the question asks. Every joint, condition and cell type the question names must
+    appear in the paper (or a narrower term of it: "MSCs" covers adipose-derived MSCs). A question that names none
+    must share at least two keywords with it. A search engine's best match is not enough: it may share one word and
+    nothing else."""
+    q, paper = gate.source_context(question, ""), gate.source_context(title, abstract)
+    up = profiles.CLINICAL.vocab.ancestors
+    named = [(g, term) for g in ABOUT for term in q.get(g, ())]
+    if named:
+        return all(any(term in up(g, x) for x in paper.get(g, ())) for g, term in named)
+    text = f"{title}\n{abstract}".lower()
+    kw = keywords(question)
+    return sum(w.lower() in text for w in kw) >= min(2, len(kw))
 
 
 def keywords(question: str, n: int = 6) -> list[str]:
@@ -119,8 +142,9 @@ class Outcome:
 class ReaderAgent:
     def __init__(self, api: Api, llm: LLM, state: State, cfg: Config | None = None, epmc: EuropePMC | None = None,
                  say: Callable[[str], None] = print, pause: Callable[[float], None] = time.sleep,
-                 today: Callable[[], date] = date.today):
+                 today: Callable[[], date] = date.today, dry_run: bool = False):
         self.api, self.llm, self.state, self.cfg = api, llm, state, cfg or Config()
+        self.dry_run = dry_run                    # read and report, but write nothing and remember nothing
         self.epmc = epmc or EuropePMC()
         self.say, self.pause, self.today = say, pause, today
         self.papers_left = self.proposals_left = 0
@@ -135,17 +159,19 @@ class ReaderAgent:
             if not self._can_work():
                 break
             out = self.work_on(q["title"] + ". " + (q.get("body") or "")[:300], q.get("topics") or [])
-            self._answer(q, out)
-            self.state.questions_done.append(q["id"])
-            self.state.save()
+            if not self.dry_run:
+                self._answer(q, out)
+                self.state.questions_done.append(q["id"])
+                self.state.save()
             done["questions"] += 1
             self._count(done, out)
         for g in self._gaps():
             if not self._can_work():
                 break
             self._count(done, self.work_on(g["question"], []))
-            self.state.gaps_after = g["id"]
-            self.state.save()
+            if not self.dry_run:
+                self.state.gaps_after = g["id"]
+                self.state.save()
             done["gaps"] += 1
         for slug, topic in REPOS.items():
             if not self._can_work():
@@ -198,18 +224,23 @@ class ReaderAgent:
             out.proposals += o.proposals
             out.findings += o.findings
             n += 1
-        self.state.papers_since[slug] = today.isoformat()
-        self.state.save()
+        if not self.dry_run:
+            self.state.papers_since[slug] = today.isoformat()
+            self.state.save()
         return n, out
 
     # --- doing the work ----------------------------------------------------------------------------------------
     def work_on(self, question: str, topics: list[str]) -> Outcome:
         out = Outcome()
+        # topics say what a question is about too ("knee-oa"), so they count when judging relevance
+        about = " ".join([question, *(t.replace("-", " ") for t in topics)])
         terms = keywords(question)
         hits: list[dict] = []
-        while terms and not hits:                  # Europe PMC ANDs terms: drop the last until something matches
-            hits = self._search(" AND ".join(f'"{t}"' if "-" in t else t for t in terms), 10)
-            terms = terms[:-1] if len(terms) > 2 else []
+        while len(terms) >= 3 and not hits:        # Europe PMC ANDs terms: drop the last, but never below three
+            found = self._search(" AND ".join(f'"{t}"' if "-" in t else t for t in terms), 10)
+            hits = [r for r in found if relevant(about, r.get("title") or "",
+                                                 textmod.abstract_text(r.get("abstractText")))]
+            terms = terms[:-1]
         for r in hits[: self.cfg.papers_per_question]:
             if not self._can_work():
                 break
@@ -226,7 +257,8 @@ class ReaderAgent:
             return []
         read = set(self.state.read)
         keep = [r for r in hits if r.get("source") in ("MED", "PMC") and f"{r['source']}:{r['id']}" not in read
-                and is_primary((r.get("pubTypeList") or {}).get("pubType", []))]
+                and is_primary((r.get("pubTypeList") or {}).get("pubType", []))
+                and not REVIEW_TITLE.search(r.get("title") or "")]
         return sorted(keep, key=lambda r: r.get("isOpenAccess") != "Y")     # open full text first
 
     def read_paper(self, r: dict, topics: list[str] | None = None) -> Outcome:
@@ -234,7 +266,8 @@ class ReaderAgent:
         sid = f"{r['source']}:{r['id']}"
         self.papers_left -= 1
         try:
-            self.api("POST", "/v1/sources", json={"source_id": sid}, idempotent=("add_source", sid))
+            if not self.dry_run:
+                self.api("POST", "/v1/sources", json={"source_id": sid}, idempotent=("add_source", sid))
         except ToolError as e:
             self.say(f"{sid}: not added: {e}")
             self._mark_read(sid)
@@ -257,6 +290,11 @@ class ReaderAgent:
                 found += cands
         found = list({c.claim: c for c in found}.values())[: self.cfg.max_claims_per_paper]
         repo = next((slug for slug, t in REPOS.items() if t.covers(title, abstract)), None)
+        if self.dry_run:
+            where = f"propose to {repo}" if repo else ("post as a finding" if topics is not None else "skip")
+            self.say(f"[dry run] {sid} \"{title[:100]}\": would {where}:"
+                     + "".join(f"\n  - {c.claim}" for c in found))
+            return out
         if repo:
             for c in found:
                 if self.closed or self.proposals_left <= 0:
@@ -272,6 +310,8 @@ class ReaderAgent:
         return out
 
     def _mark_read(self, sid: str) -> None:
+        if self.dry_run:
+            return
         self.state.read.append(sid)
         self.state.save()
 
@@ -359,7 +399,7 @@ class ReaderAgent:
             self.pause(poll)
 
 
-def from_env(say: Callable[[str], None] = print) -> ReaderAgent:
+def from_env(say: Callable[[str], None] = print, dry_run: bool = False) -> ReaderAgent:
     import httpx
     url, key = os.environ.get("RRSRCH_API_URL"), os.environ.get("RRSRCH_API_KEY")
     if not url or not key:
@@ -367,4 +407,4 @@ def from_env(say: Callable[[str], None] = print) -> ReaderAgent:
     client = httpx.Client(base_url=url, headers={"Authorization": f"Bearer {key}"}, timeout=60)
     state = State.load(Path(os.environ.get("RRSRCH_AGENT_STATE",
                                            Path.home() / ".local/state/rrsrch/reader-agent.json")))
-    return ReaderAgent(Api(client), LLM.from_env(), state, say=say)
+    return ReaderAgent(Api(client), LLM.from_env(), state, say=say, dry_run=dry_run)

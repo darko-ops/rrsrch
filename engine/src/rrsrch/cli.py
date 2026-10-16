@@ -236,8 +236,8 @@ def cmd_read_run(args) -> int:
 def cmd_read_agent(args) -> int:
     """The reader as a standing agent: finds its own work and proposes claims through the API (reader/agent.py)."""
     from .reader.agent import from_env
-    agent = from_env()
-    if args.once:
+    agent = from_env(dry_run=args.dry_run)
+    if args.once or args.dry_run:
         agent.cycle()
     else:
         agent.run_forever()
@@ -624,6 +624,8 @@ def main(argv: list[str] | None = None) -> int:
     rr.set_defaults(fn=cmd_read_run)
     ra = read.add_parser("agent", help="run the reader as a standing agent that proposes claims through the API")
     ra.add_argument("--once", action="store_true", help="one cycle, then exit")
+    ra.add_argument("--dry-run", action="store_true",
+                    help="one cycle that reads and prints what it would propose or post, writing nothing")
     ra.set_defaults(fn=cmd_read_agent)
     read.add_parser("stats").set_defaults(fn=cmd_read_stats)
     g = sub.add_parser("gate", help="check a sentence against ledger claims")

@@ -163,3 +163,43 @@ def test_the_agent_stops_proposing_when_the_engine_says_enough(world, monkeypatc
     assert done["proposals"] == 0 and a.closed is True
     assert done["new_papers"] == 1            # it stopped there; the second paper waits for the next cycle
     assert a.state.read == ["MED:2"] and "rrsrch/msc-knee-oa" not in a.state.papers_since
+
+
+MRI_Q = "Do clinical gains from MSC injections show up on MRI? knee oa msc imaging"
+VOCAL = ("An open phase I/IIa study evaluating safety, patient-reported outcomes and voice function after surgery, local "
+         "administration of mesenchymal stromal cells and voice training in patients with vocal fold scarring",
+         "Eight patients with vocal fold scarring received autologous bone marrow MSCs. Voice Handicap Index scores "
+         "decreased by 25.9 points at 12 months.")
+KNEE = ("Intra-articular mesenchymal stem cells for knee osteoarthritis: cartilage on MRI at 12 months",
+        "In 60 patients with knee osteoarthritis, MSC injection improved WOMAC and MRI cartilage volume at 12 months.")
+
+
+def test_a_paper_must_be_about_what_the_question_asks():
+    # the first live cycle read a vocal fold study for a knee question; it shares "MSC" and nothing that matters
+    assert agent_mod.relevant(MRI_Q, *VOCAL) is False
+    assert agent_mod.relevant(MRI_Q, *KNEE) is True
+    assert agent_mod.relevant("Does PRP help tennis elbow pain?", *KNEE) is False
+
+
+def test_reviews_typed_as_research_articles_are_skipped():
+    titles = ["Emerging Biologics in Lumbar Disc Degeneration: PRP, Stem Cell Therapy, and Pharmacotherapy",
+              "Mesenchymal stem cells for knee osteoarthritis: a systematic review", "A narrative review of MSCs"]
+    assert all(agent_mod.REVIEW_TITLE.search(t) for t in titles)
+    assert not agent_mod.REVIEW_TITLE.search(KNEE[0])
+
+
+def test_a_dry_run_reads_but_writes_nothing(world, monkeypatch, tmp_path):
+    client, h, url = world
+    fake = use_epmc(monkeypatch, record())
+    client.post("/v1/posts", headers=h["ext"], json={"kind": "question", "title": "Do MSCs beat hyaluronic acid?",
+                                                     "body": "For knee osteoarthritis, at 12 months.", "topics": ["knee-oa"]})
+    said = []
+    a = make_agent(client, h, tmp_path, fake)
+    a.dry_run, a.say = True, said.append
+    a.cycle()
+    assert any("would propose to rrsrch/msc-knee-oa" in s and CLAIM in s for s in said)
+    with psycopg.connect(url) as conn:
+        assert conn.execute("SELECT count(*) FROM merge_requests").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM sources WHERE id = 'MED:2'").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM messages").fetchone()[0] == 0
+    assert not (tmp_path / "state.json").exists()
