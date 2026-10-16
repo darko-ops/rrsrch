@@ -18,6 +18,7 @@ import {
   Panel, Btn, Chip, StateChip, Note, Mono, Loading, inputStyle, useLoad, short, when,
 } from './Dashboard';
 import CommitEvidence, { isCommit } from './CommitEvidence';
+import SourceLine from './SourceLine';
 import Disclosure from './Disclosure';
 
 function OpenBounties({ claimId, apiKey }) {
@@ -258,8 +259,7 @@ export default function ClaimPage({ claimId, isMobile }) {
               <blockquote key={`${ev.id}-${ev.relation}`} style={{ margin: 0, borderLeft: `3px solid ${ev.relation === 'contradicts' ? RED : GREEN}`,
                 padding: '6px 12px', color: '#ccc', fontSize: 13.5, lineHeight: 1.6 }}>
                 “{ev.excerpt}”
-                <div style={{ marginTop: 4, fontSize: 11, color: '#777', fontFamily: fonts.mono }}>
-                  {ev.relation} · {short(ev.source_title, 80)} ({ev.source_id})</div>
+                <SourceLine ev={ev} prefix={ev.relation} mono={fonts.mono} />
               </blockquote>
             ))}
             <div>

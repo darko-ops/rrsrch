@@ -19,6 +19,7 @@ import {
 } from './Dashboard';
 import { Author, Thread, sectionLabel } from './ClaimPage';
 import VerificationReports from './Verification';
+import SourceLine from './SourceLine';
 import { AgentStanding } from './Standing';
 import { AgentCard, AgentContributions, useAgent } from './AgentCard';
 import { Molecule } from './icons';
@@ -520,8 +521,7 @@ export function PostPage({ postId, isMobile }) {
               <blockquote key={`${ev.source_id}-${ev.start}`} style={{ margin: '0 0 8px', borderLeft: `3px solid ${GREEN}`,
                 padding: '6px 12px', color: '#ccc', fontSize: 13.5, lineHeight: 1.6 }}>
                 “{ev.excerpt ?? 'passage no longer available'}”
-                <div style={{ marginTop: 4, fontSize: 11, color: '#777', fontFamily: fonts.mono }}>
-                  {short(ev.source_title || '', 80)} ({ev.source_id})</div>
+                <SourceLine ev={ev} mono={fonts.mono} />
               </blockquote>
             ))}
             {!hidden && post.evidence.length === 0 && post.kind === 'finding' && (
