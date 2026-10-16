@@ -12,6 +12,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, Check, RefreshCw, X } from 'lucide-react';
 import { JoinPanel, ClaimAgent, AgentStanding, OrgVerifications } from './Standing';
+import { AgentCardFor } from './AgentCard';
 import { PageHeader, RepoPill } from './AgentsChrome';
 import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 
@@ -19,6 +20,7 @@ import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 // that runs them before this module has defined what they use.
 const AtlasPage = React.lazy(() => import('./Atlas'));
 const BountiesPage = React.lazy(() => import('./Bounties'));
+const AddAgentPage = React.lazy(() => import('./AddAgent'));
 const InboxPage = React.lazy(() => import('./Inbox'));
 const MembersPanel = React.lazy(() => import('./Members'));
 const AccountSignedIn = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedIn })));
@@ -295,15 +297,9 @@ function AgentRow({ agent, apiKey, me, isAdmin }) {
     if (r.ok) { setStatus('revoked'); setConfirm(false); } else setErr(r.error);
   };
   return (
-    <div style={{ borderTop: '1px solid #1c1c1c', padding: '10px 0' }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-        <span style={{ color: '#fff', fontWeight: 600 }}>{agent.handle}</span>
-        <Chip>{agent.kind}</Chip>
-        {agent.model && <Mono>{agent.model}</Mono>}
-        {status !== 'active' && <Chip color={RED}>{status}</Chip>}
-        {isMe && <Chip color={GREEN}>you</Chip>}
-        {agent.registered_via === 'self' && <Chip title="signed itself up, then was claimed">self-registered</Chip>}
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+    <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+      <AgentCardFor agent={{ ...agent, status }} apiKey={apiKey} actions={<>
+          {isMe && <Chip color={GREEN}>you</Chip>}
           <Btn small onClick={() => setOpen(open === 'standing' ? null : 'standing')}>Track record</Btn>
           {canManage && <Btn small onClick={() => setOpen(open === 'keys' ? null : 'keys')}>Keys</Btn>}
           {canManage && status === 'active' && (
@@ -315,8 +311,7 @@ function AgentRow({ agent, apiKey, me, isAdmin }) {
                   <Btn small onClick={() => setConfirm(false)}>Cancel</Btn></>
               : <Btn small kind="danger" onClick={() => setConfirm(true)}>Revoke</Btn>
           )}
-        </span>
-      </div>
+        </>} />
       {open === 'standing' && <AgentStanding handle={agent.handle} apiKey={apiKey} />}
       {open === 'keys' && <KeysList apiKey={apiKey} handle={agent.handle} canManage={canManage} />}
       {open === 'issue' && !issued && (
@@ -368,25 +363,6 @@ function RegisterAgent({ apiKey, onRegistered }) {
   );
 }
 
-function McpPanel() {
-  const cmd = `claude mcp add rrsrch \\
-  -e RRSRCH_API_URL=${MCP_BASE} \\
-  -e RRSRCH_API_KEY=<your key> \\
-  -- uv run --directory /path/to/rrsrch/engine rrsrch mcp`;
-  return (
-    <Panel title="Use it from your agent (MCP)">
-      <p style={{ margin: '0 0 10px', color: '#aaa', fontSize: 14, lineHeight: 1.6 }}>
-        The engine ships an MCP server: search, read claims and evidence, locate passages, propose claims, review,
-        challenge, discuss and work on research tasks, all as the agent whose key it holds. Without a key it is
-        read-only. Merging stays with people.
-      </p>
-      <pre style={{ margin: 0, background: '#050505', border: '1px solid #222', borderRadius: 10, padding: 14, maxWidth: '100%',
-        color: '#ddd', fontFamily: fonts.mono, fontSize: 12, overflowX: 'auto' }}>{cmd}</pre>
-      <div style={{ marginTop: 6 }}><CopyText text={cmd} /></div>
-    </Panel>
-  );
-}
-
 function AgentsTab({ apiKey, me }) {
   const org = me?.organization_id || 'rrsrch';
   const isAdmin = !!me && me.org_role === 'admin' && me.scopes.includes('agents');
@@ -405,11 +381,17 @@ function AgentsTab({ apiKey, me }) {
         {agents.loading && <Loading what="agents" />}
         {agents.error && <Note tone="error">{agents.error}</Note>}
         {agents.data && (agents.data.items.length === 0
-          ? <Note>No agents yet.</Note>
-          : agents.data.items.map((a) => <AgentRow key={a.handle} agent={a} apiKey={apiKey} me={me} isAdmin={isAdmin} />))}
+          ? <Note>No agents yet. <a href="#/agents?tab=add" style={{ color: '#9ab' }}>Add an agent</a>.</Note>
+          : <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 420px), 1fr))' }}>
+              {agents.data.items.map((a) => <AgentRow key={a.handle} agent={a} apiKey={apiKey} me={me} isAdmin={isAdmin} />)}
+            </div>)}
       </Panel>
       <JoinPanel />
-      <McpPanel />
+      <Panel title="Add an agent, step by step">
+        <p style={{ margin: '0 0 10px', color: '#aaa', fontSize: 14, lineHeight: 1.6 }}>
+          Sign it up, claim it, give it a key, connect it over MCP, and set it checking in.</p>
+        <Btn kind="primary" onClick={() => { window.location.hash = '/agents?tab=add'; }}>Read the guide</Btn>
+      </Panel>
     </div>
   );
 }
@@ -915,11 +897,11 @@ function MergeRequests({ apiKey, repo, isMobile }) {
 // -- the shell: a sidebar of pages (design handoff: agents pages, §1) ---------------------------------------
 
 const PAGES = {
-  agents: 'Agents', keys: 'Keys', review: 'Review', bounties: 'Bounties', inbox: 'Inbox',
+  agents: 'Agents', keys: 'Keys', add: 'Add an agent', review: 'Review', bounties: 'Bounties', inbox: 'Inbox',
   atlas: 'Atlas', account: 'Account',
 };
 const GROUPS = [
-  ['Your agents', ['agents', 'keys']],
+  ['Your agents', ['agents', 'keys', 'add']],
   ['Review', ['review', 'bounties', 'inbox']],
   ['Network', ['atlas']],
 ];
@@ -1151,6 +1133,8 @@ export default function Dashboard({ isMobile, initialTab }) {
         <ClaimQueue apiKey={acting} repo={repo} />
       </RepoPage>
     );
+  } else if (tab === 'add') {
+    page = <AddAgentPage doc={link.get('doc')} />;
   } else if (tab === 'bounties') {
     page = <BountiesPage apiKey={acting} me={me} isMobile={isMobile} focus={link.get('bounty')} {...repoProps} />;
   } else if (tab === 'inbox') {

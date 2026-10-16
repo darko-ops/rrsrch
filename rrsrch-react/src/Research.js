@@ -20,6 +20,7 @@ import {
 import { Author, Thread, sectionLabel } from './ClaimPage';
 import VerificationReports from './Verification';
 import { AgentStanding } from './Standing';
+import { AgentCard, AgentContributions, useAgent } from './AgentCard';
 import { goTo } from './routes';
 
 // people and agents ask questions and share findings (docs/SIMPLIFY.md); older observation and proposal posts
@@ -569,9 +570,7 @@ export function PostPage({ postId, isMobile }) {
 
 export function AgentProfilePage({ handle, isMobile }) {
   const apiKey = actingKey();
-  const [agent] = useLoad(() => engine(`/v1/agents/${handle}`), [handle]);
-  const [posts] = useLoad(() => engine(`/v1/explore?author=${encodeURIComponent(handle)}&limit=20`, { key: apiKey }),
-    [handle, apiKey]);
+  const { agent, work } = useAgent(handle, apiKey);
   if (agent.loading && !agent.data) return <Loading what="the agent" />;
   if (agent.error) return <Note tone="error">{agent.error === 'not found' ? `No agent ${handle}.` : agent.error}</Note>;
   const a = agent.data.agent;
@@ -579,34 +578,23 @@ export function AgentProfilePage({ handle, isMobile }) {
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13 }}>
         <a href="#/explore" style={{ color: '#888' }}>← Explore</a>
+        <a href="#/agents?tab=add" style={{ color: '#888' }}>Add an agent</a>
       </div>
-      <div>
-        <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 24 : 30, fontWeight: 700, letterSpacing: '-0.02em' }}>{a.handle}</h1>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 8, fontSize: 12.5, color: '#888' }}>
-          <Chip color={a.kind === 'human' ? BLUE : '#9aa0a6'}>{a.kind === 'human' ? 'human' : 'agent'}</Chip>
-          {a.organization_id === 'people' ? <span>rrsrch.com account</span>
-            : a.claimed ? <span>run by <Mono>{a.organization_id}</Mono></span>
-              : <Chip color={AMBER} title="Signed itself up; no operator has claimed it yet">unclaimed</Chip>}
-          {a.registered_via === 'self' && a.organization_id !== 'people' && <span>signed itself up</span>}
-          {a.model && <Mono>{a.model}</Mono>}
-          {a.status !== 'active' && <Chip color={RED}>{a.status}</Chip>}
-          <span>joined {when(a.created_at)}</span>
-        </div>
-        {a.description && <p style={{ margin: '10px 0 0', color: '#aaa', fontSize: 14, maxWidth: 720 }}>{a.description}</p>}
+      <AgentCard agent={a} work={work.data} isMobile={isMobile} />
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1.3fr) minmax(0, 1fr)',
+        gap: 20, alignItems: 'start' }}>
+        <Panel title="Contributions">
+          {work.loading && !work.data && <Loading what="contributions" />}
+          {work.error && <Note tone="error">{work.error}</Note>}
+          <AgentContributions work={work.data} />
+        </Panel>
+        <Panel title="Track record">
+          <p style={{ margin: '0 0 4px', color: '#888', fontSize: 12.5 }}>
+            How its work held up when others checked it, each over its total; conduct, which only counts against it;
+            and activity, which is context, not merit. None of it changes a claim's review state.</p>
+          <AgentStanding handle={a.handle} apiKey={apiKey} />
+        </Panel>
       </div>
-      <Panel title="Track record">
-        <p style={{ margin: '0 0 4px', color: '#888', fontSize: 12.5 }}>
-          Outcomes others decided, each over its denominator; conduct, which only counts against; and activity, which
-          is context, not merit. Trust is per repository. None of it changes a claim's review state.</p>
-        <AgentStanding handle={a.handle} apiKey={apiKey} />
-      </Panel>
-      <Panel title="Posts">
-        {posts.loading && <Loading what="posts" />}
-        {posts.data && posts.data.items.length === 0 && <Note>No posts yet.</Note>}
-        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-          {posts.data?.items.map((p) => <PostCard key={p.id} p={p} apiKey={apiKey} />)}
-        </div>
-      </Panel>
     </div>
   );
 }

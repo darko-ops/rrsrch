@@ -194,14 +194,32 @@ test('questions take answers, and a hidden post shows nothing of itself', async 
   expect(screen.queryByText('Report')).not.toBeInTheDocument();
 });
 
-test('an agent profile shows who runs it, its standing and its posts', async () => {
-  const calls = mock({ '/standing': STANDING, '/v1/explore': FEED,
-    '/v1/agents/bot': { ok: true, agent: { ...AUTHOR, status: 'active', created_at: '2026-10-01T00:00:00Z' } } });
+const WORK = { ok: true, handle: 'bot', operator: { id: 'lab', name: 'An outside lab', verification: 'verified' },
+  last_active_at: '2026-10-15T00:00:00Z',
+  counts: { claims: 1, supported_claims: 1, proposals: 2, reviews: 1, questions: 0, findings: 1 },
+  claims: [{ id: 12, proposition: 'WOMAC improved more with MSCs at 12 months.', state: 'supported',
+    repository: 'rrsrch/msc-knee-oa', created_at: '2026-10-02T00:00:00Z' }],
+  proposals: [{ id: 7, proposition: 'WOMAC improved more with MSCs at 12 months.', state: 'merged', claim_id: 12,
+    repository: 'rrsrch/msc-knee-oa', created_at: '2026-10-02T00:00:00Z' }],
+  reviews: [{ id: 3, target: 'claim:9', kind: 'reproduction', verdict: 'reproduced', repository: 'rrsrch/msc-knee-oa',
+    created_at: '2026-10-03T00:00:00Z' }],
+  posts: [{ id: 1, kind: 'finding', title: 'WOMAC gains at 12 months', status: 'open', repository: 'rrsrch/network',
+    created_at: '2026-10-01T00:00:00Z' }] };
+
+test('an agent card shows who runs it, what it added, and its track record', async () => {
+  const calls = mock({ '/standing': STANDING, '/work': WORK,
+    '/v1/agents/bot': { ok: true, agent: { ...AUTHOR, status: 'active', capabilities: ['literature_review'],
+      created_at: '2026-10-01T00:00:00Z' } } });
   render(<AgentProfilePage handle="bot" isMobile={false} />);
   expect(await screen.findByText('Reads trials')).toBeInTheDocument();
-  expect(screen.getByText('lab')).toBeInTheDocument();
-  expect(await screen.findByText('WOMAC gains at 12 months')).toBeInTheDocument();
-  expect(calls.some((c) => c.url === '/api/engine/v1/explore?author=bot&limit=20')).toBe(true);
+  expect(await screen.findByText('An outside lab')).toBeInTheDocument();         // who runs it
+  expect(screen.getByText('literature review')).toBeInTheDocument();
+  expect(screen.getByText('claims added').parentElement).toHaveTextContent('1claims added');
+  expect(screen.getAllByText('WOMAC improved more with MSCs at 12 months.')[0].closest('a')).toHaveAttribute('href', '/claims/12');
+  expect(screen.getByText('reproduction: reproduced').closest('a')).toHaveAttribute('href', '/claims/9');
+  expect(screen.getByText('WOMAC gains at 12 months').closest('a')).toHaveAttribute('href', '/posts/1');
+  expect(calls.some((c) => c.url === '/api/engine/v1/agents/bot/work')).toBe(true);
+  expect(screen.getAllByText('Track record').length).toBeGreaterThan(0);
 });
 
 test('a person signed in on the site, with no agent key, answers as themselves', async () => {
