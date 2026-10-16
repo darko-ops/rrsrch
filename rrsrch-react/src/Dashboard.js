@@ -198,6 +198,7 @@ function Mono({ children }) {
 
 function IssueKeyForm({ apiKey, handle, ownScopes, onIssued }) {
   const [scopes, setScopes] = useState(['read']);
+  const [fixed, setFixed] = useState(false);       // default: the key stays valid while it's used
   const [days, setDays] = useState(30);
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
@@ -205,7 +206,8 @@ function IssueKeyForm({ apiKey, handle, ownScopes, onIssued }) {
   const toggle = (s) => setScopes((cur) => (cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]));
   const submit = async () => {
     setBusy(true); setErr('');
-    const r = await engine(`/v1/agents/${handle}/keys`, { key: apiKey, method: 'POST', body: { scopes, days: Number(days), label } });
+    const body = { scopes, label, ...(fixed && { days: Number(days) }) };
+    const r = await engine(`/v1/agents/${handle}/keys`, { key: apiKey, method: 'POST', body });
     setBusy(false);
     if (r.ok) onIssued(r.data); else setErr(r.error);
   };
@@ -223,10 +225,19 @@ function IssueKeyForm({ apiKey, handle, ownScopes, onIssued }) {
         })}
       </div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <Field label="Days (≤ 90)">
-          <input type="number" min={1} max={90} value={days} onChange={(e) => setDays(e.target.value)}
-            style={{ ...inputStyle, width: 90 }} />
+        <Field label="Lifetime">
+          <select aria-label="Lifetime" value={fixed ? 'fixed' : 'used'} onChange={(e) => setFixed(e.target.value === 'fixed')}
+            style={{ ...inputStyle, width: 190 }}>
+            <option value="used">Valid while used</option>
+            <option value="fixed">Fixed number of days</option>
+          </select>
         </Field>
+        {fixed && (
+          <Field label="Days (≤ 365)">
+            <input type="number" min={1} max={365} value={days} onChange={(e) => setDays(e.target.value)}
+              style={{ ...inputStyle, width: 90 }} />
+          </Field>
+        )}
         <Field label="Label">
           <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. laptop MCP"
             style={{ ...inputStyle, width: 200 }} />
@@ -248,7 +259,7 @@ function NewKeyNotice({ issued, onDone }) {
         <code style={{ fontFamily: fonts.mono, fontSize: 12, color: '#fff', wordBreak: 'break-all' }}>{issued.key}</code>
         <CopyText text={issued.key} />
       </div>
-      <Note>Scopes {issued.scopes.join(', ')} · expires {when(issued.expires_at)}</Note>
+      <Note>Scopes {issued.scopes.join(', ')} · {issued.lifetime || `expires ${when(issued.expires_at)}`}</Note>
       <div style={{ marginTop: 10 }}><Btn small onClick={onDone}>I've stored it</Btn></div>
     </div>
   );
@@ -276,7 +287,8 @@ function KeysList({ apiKey, handle, canManage }) {
             {k.label && <span style={{ color: '#ccc' }}>{k.label}</span>}
             {k.scopes.map((s) => <Chip key={s}>{s}</Chip>)}
             <span style={{ color: '#666', fontSize: 12 }}>
-              {k.revoked_at ? `revoked ${when(k.revoked_at)}` : `expires ${when(k.expires_at)}`}
+              {k.revoked_at ? `revoked ${when(k.revoked_at)}`
+                : k.idle_days ? `valid while used · ends ${when(k.expires_at)} if unused` : `expires ${when(k.expires_at)}`}
               {k.last_used_at ? ` · used ${when(k.last_used_at)}` : ' · never used'}
             </span>
             {!dead && canManage && <span style={{ marginLeft: 'auto' }}><Btn small kind="danger" onClick={() => revoke(k.id)}>Revoke</Btn></span>}
