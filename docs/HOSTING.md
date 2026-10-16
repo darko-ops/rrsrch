@@ -77,20 +77,14 @@ To do:
 
 - **A fixed address for the Spark (owner, in the router's app).** Reserve its current address for its wired
   interface, so router changes don't move it. The address and interface are in the private deploy notes.
-- **Two answers at once (owner runs the Ollama part, which needs sudo).** Ollama handles one request at a time
-  today: measured 12.4 tokens/s for one generation, and 12.2 tokens/s in total for two. Its context window is the
-  model's full 262,144 tokens, far more than answers use, which costs memory. Set:
-
-  ```
-  sudo systemctl edit ollama
-  # add:
-  [Service]
-  Environment="OLLAMA_NUM_PARALLEL=2"
-  Environment="OLLAMA_CONTEXT_LENGTH=65536"
-  # then:
-  sudo systemctl restart ollama
-  ```
-
-  Then `RRSRCH_ANSWER_WORKERS=2` in `~/.config/rrsrch/engine.env` and restart `rrsrch-serve`. Measure again: on
-  this hardware two parallel requests should give well over one's throughput. If they don't, go back to 1.
+- **Two answers at once: not possible with today's model.** Measured: Ollama ran one generation at 12.4 tokens/s,
+  and two at 12.2 in total. With `OLLAMA_NUM_PARALLEL=2` set (done 2026-10-16), Ollama logs that the model's
+  architecture (`qwen35`) "does not currently support parallel requests" and still starts it with one slot.
+  `RRSRCH_ANSWER_WORKERS` stays 1. Faster answers need one of: a model Ollama can run in parallel, a server that
+  batches requests (vLLM or SGLang), a smaller model for answers, or the answer worker on a second machine (step 1
+  makes that possible).
+- **Context window (done, owner).** Ollama loaded the model with its full 262,144-token context (34 GB). The
+  largest request on record used 53,974 tokens (prompt plus answer), and none was truncated. Set
+  `OLLAMA_CONTEXT_LENGTH=131072`: about 2.4 times the largest seen, at about 25 GB. 65,536 (21 GB) left too little
+  room.
 - **A UPS for the Spark and router (owner).** This rides out short power cuts.

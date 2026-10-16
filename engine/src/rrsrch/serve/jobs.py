@@ -2,9 +2,9 @@
 
 One worker by default, because a model server that takes one request at a time
 answers one question at a time; more would only make every answer slower. When
-the model server runs requests in parallel (Ollama's OLLAMA_NUM_PARALLEL), set
-RRSRCH_ANSWER_WORKERS to the same number: answers then run side by side
-(docs/HOSTING.md, "Hardening on the Spark"). The reader shares that model and gives way while any
+the model server runs requests in parallel (Ollama's OLLAMA_NUM_PARALLEL, for
+models that support it; today's qwen35 model doesn't), set RRSRCH_ANSWER_WORKERS
+to the same number: answers then run side by side (docs/HOSTING.md). The reader shares that model and gives way while any
 answer is waiting or running (rrsrch.reader.extract.wait_for_answers). The same question asked again while its job is
 waiting or running, or within `fresh_for` seconds of finishing, gets that job
 instead of a new one: the cache and the de-duplication are the same rule.
