@@ -41,34 +41,12 @@ def test_comments_thread_with_replies_and_mentions(world):
     assert stray.status_code == 400                                          # replies stay in their thread
 
 
-def test_reactions_count_but_never_change_review_state(world):
+def test_reactions_are_retired(world):
     client, h, url = world
     cid = claim_of(url, merged_claim(client, h)[0])
-    t = f"claim:{cid}"
-    with psycopg.connect(url) as c:
-        before = c.execute("SELECT state FROM claims WHERE id = %s", (cid,)).fetchone()[0]
-        audits = c.execute("SELECT count(*) FROM audit_events").fetchone()[0]
-    for who in ("bot", "ext", "admin"):
-        r = client.post("/v1/reactions", headers=h[who], json={"target": t, "kind": "useful"})
-        assert r.status_code == 200
-    again = client.post("/v1/reactions", headers=h["ext"], json={"target": t, "kind": "useful"}).json()
-    assert again["counts"]["useful"] == 3 and again["mine"] == ["useful"]     # reacting twice counts once
-    gone = client.delete("/v1/reactions", headers=h["ext"], params={"target": t, "kind": "useful"}).json()
-    assert gone["counts"]["useful"] == 2 and gone["mine"] == []
-    assert client.post("/v1/reactions", json={"target": t, "kind": "useful"}).status_code == 401
-    assert client.post("/v1/reactions", headers=h["ext"], json={"target": t, "kind": "true"}).status_code == 400
-    with psycopg.connect(url) as c:
-        assert c.execute("SELECT state FROM claims WHERE id = %s", (cid,)).fetchone()[0] == before
-        assert c.execute("SELECT count(*) FROM audit_events").fetchone()[0] == audits   # nothing formal happened
-
-
-def test_reactions_are_rate_limited(world, monkeypatch):
-    client, h, url = world
-    monkeypatch.setattr(feedback, "REACTIONS_PER_MINUTE", 2)
-    cid = claim_of(url, merged_claim(client, h)[0])
-    codes = [client.post("/v1/reactions", headers=h["ext"], json={"target": f"claim:{cid}", "kind": k}).status_code
-             for k in ("useful", "interesting", "needs_clarification")]
-    assert codes == [200, 200, 429]
+    assert client.post("/v1/reactions", headers=h["ext"], json={"target": f"claim:{cid}", "kind": "useful"}
+                       ).status_code in (404, 405)                     # discussion is one comment thread (0028)
+    assert "reactions" not in client.get(f"/v1/claims/{cid}/feedback").json()["informal"]
 
 
 def test_challenges_record_the_revision_and_the_author_can_respond(world):
@@ -108,12 +86,11 @@ def test_reports_go_to_maintainers_who_can_hide_or_dismiss(world):
 def test_feedback_view_keeps_formal_and_informal_apart_and_private_stays_private(world):
     client, h, url = world
     cid = claim_of(url, merged_claim(client, h)[0])
-    client.post("/v1/reactions", headers=h["ext"], json={"target": f"claim:{cid}", "kind": "interesting"})
     client.post("/v1/comments", headers=h["ext"], json={"target": f"claim:{cid}", "body": "Nice."})
     fb = client.get(f"/v1/claims/{cid}/feedback").json()
     assert set(fb) >= {"claim", "formal", "informal"}
     assert fb["formal"]["state"] == "supported" and fb["formal"]["verification"]["passed"] is True
-    assert fb["informal"]["reactions"]["counts"]["interesting"] == 1 and len(fb["informal"]["comments"]) == 1
+    assert len(fb["informal"]["comments"]) == 1
     assert "never change" in fb["informal"]["note"]
 
     client.post("/v1/repos", headers=h["admin"], json={"slug": "rrsrch/notes", "topic": "t", "visibility": "private",
@@ -123,5 +100,4 @@ def test_feedback_view_keeps_formal_and_informal_apart_and_private_stays_private
                   "WHERE id = %s", (cid,))
     assert client.get(f"/v1/claims/{cid}/feedback").status_code == 404
     assert client.get("/v1/comments", params={"target": f"claim:{cid}"}).status_code == 404
-    assert client.post("/v1/reactions", headers=h["ext"], json={"target": f"claim:{cid}", "kind": "useful"}).status_code == 404
     assert client.get(f"/v1/claims/{cid}/feedback", headers=h["admin"]).status_code == 200

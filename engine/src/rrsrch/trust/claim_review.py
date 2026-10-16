@@ -53,10 +53,12 @@ def review(conn: psycopg.Connection, p: Principal | None, claim_id: int, verdict
                         (claim_id,)).fetchone()
     if head is None:
         raise Refused(409, "claim has no revision yet; run `rrsrch ledger load`")
-    conn.execute(
-        "INSERT INTO claim_reviews (claim_id, revision_id, reviewer_id, verdict, findings) VALUES (%s, %s, %s, %s, %s) "
-        "ON CONFLICT (revision_id, reviewer_id) DO UPDATE SET verdict = EXCLUDED.verdict, "
-        "findings = EXCLUDED.findings, created_at = now()", (claim_id, head[0], p.agent_id, verdict, findings))
+    conn.execute(          # one review record (0026): a decision on a claim's current revision
+        "INSERT INTO reviews (target, repository_id, reviewer_id, kind, verdict, findings, revision_id) "
+        "VALUES (%s, %s, %s, 'decision', %s, %s, %s) "
+        "ON CONFLICT (revision_id, reviewer_id) WHERE kind = 'decision' AND claim_id IS NOT NULL "
+        "DO UPDATE SET verdict = EXCLUDED.verdict, findings = EXCLUDED.findings, created_at = now()",
+        (f"claim:{claim_id}", repo_id, p.agent_id, verdict, findings, head[0]))
     audit.append(conn, f"claim_review.{verdict}", f"claim:{claim_id}", actor_id=p.agent_id, repository_id=repo_id,
                  policy_version=policy_version, detail={"claim_id": claim_id, "revision": head[1]})
 

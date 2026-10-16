@@ -1,13 +1,13 @@
-"""Feedback on knowledge, phase 1 (docs/FEEDBACK.md): reactions, comments, reports, and one view of it all.
+"""Feedback on knowledge, phase 1 (docs/FEEDBACK.md): comments, reports, and one view of it all.
 
 Two kinds of feedback, kept apart on purpose:
 
   formal     review state, verification runs, reviews and challenges. Decided by the trust engine and the
              repository's policy; changes what a claim is.
-  informal   reactions and comments. Helps people find, discuss and improve knowledge; never read by the
-             trust engine, so it can't change a claim's state. Popularity is not evidence.
+  informal   one comment thread. Helps people discuss and improve knowledge; never read by the trust engine,
+             so it can't change a claim's state. (Reactions retired with migration 0028: docs/SIMPLIFY.md.)
 
-Targets are "claim:N", "mr:N", "challenge:N" and, for reactions and reports, "message:N". Every target belongs
+Targets are "claim:N", "mr:N", "challenge:N" and, for reports, "message:N". Every target belongs
 to a repository, and every read and write is checked against that repository like everything else.
 """
 from __future__ import annotations
@@ -26,9 +26,7 @@ from . import discussions
 from .common import rate_limit
 
 TARGET = re.compile(r"^(claim|mr|challenge|message|post):([0-9]+)$")
-REACTIONS = ("useful", "interesting", "needs_clarification", "needs_work")
 REPORT_REASONS = ("spam", "abuse", "prompt_injection", "off_topic", "other")
-REACTIONS_PER_MINUTE = 60
 REPORTS_PER_HOUR = 20
 
 
@@ -91,38 +89,6 @@ def _signed_in(p: Principal | None) -> Principal:
     return p
 
 
-# reactions
-
-def react(conn: psycopg.Connection, p: Principal | None, target: str, kind: str, on: bool = True) -> dict:
-    """Add (or with on=False remove) your reaction. Any signed-in agent that can read the target may react."""
-    p = _signed_in(p)
-    if kind not in REACTIONS:
-        raise Refused(400, f"reaction must be one of {', '.join(REACTIONS)}")
-    repo_id = _readable(conn, p, target)
-    if on:
-        rate_limit(conn, "SELECT count(*) FROM reactions WHERE agent_id = %s AND created_at > now() - interval '1 minute'",
-                   (p.agent_id,), REACTIONS_PER_MINUTE, "reactions in the last minute")
-        conn.execute("INSERT INTO reactions (target, repository_id, agent_id, kind) VALUES (%s, %s, %s, %s) "
-                     "ON CONFLICT DO NOTHING", (target, repo_id, p.agent_id, kind))
-    else:
-        conn.execute("DELETE FROM reactions WHERE target = %s AND agent_id = %s AND kind = %s",
-                     (target, p.agent_id, kind))
-    return reaction_counts(conn, [target], p)[target]
-
-
-def reaction_counts(conn: psycopg.Connection, targets: list[str], p: Principal | None) -> dict[str, dict]:
-    """{target: {"counts": {kind: n}, "mine": [kinds]}} for targets the caller has already been allowed to read."""
-    out = {t: {"counts": {k: 0 for k in REACTIONS}, "mine": []} for t in targets}
-    for t, kind, n in conn.execute("SELECT target, kind, count(*) FROM reactions WHERE target = ANY(%s) GROUP BY 1, 2",
-                                   (targets,)):
-        out[t]["counts"][kind] = n
-    if p is not None:
-        for t, kind in conn.execute("SELECT target, kind FROM reactions WHERE target = ANY(%s) AND agent_id = %s",
-                                    (targets, p.agent_id)):
-            out[t]["mine"].append(kind)
-    return out
-
-
 # comments: one thread per claim, merge request or challenge, built on discussions
 
 def _thread_id(conn, repo_id: int, target: str, create_for: Principal | None = None) -> int | None:
@@ -160,9 +126,6 @@ def comments(conn: psycopg.Connection, p: Principal | None, target: str) -> dict
     for m in msgs:
         if m["moderation"] == "hidden" and not moderator:
             m["body"] = None
-    counts = reaction_counts(conn, [f"message:{m['id']}" for m in msgs], p)
-    for m in msgs:
-        m["reactions"] = counts[f"message:{m['id']}"]
     return {"target": target, "discussion_id": did, "messages": msgs}
 
 
@@ -241,9 +204,7 @@ def claim_feedback(conn: psycopg.Connection, p: Principal | None, claim_id: int)
         "JOIN agents a ON a.id = v.reviewer_id JOIN claim_revisions rv ON rv.id = v.revision_id "
         "WHERE v.claim_id = %s ORDER BY v.id", (claim_id,))]
     chs = challenges_mod.list_for_claim(conn, claim_id)
-    counts = reaction_counts(conn, [target] + [f"challenge:{c['id']}" for c in chs], p)
     for c in chs:
-        c["reactions"] = counts[f"challenge:{c['id']}"]
         c["responses"] = comments(conn, p, f"challenge:{c['id']}")["messages"]
     return {
         "claim": claim,
@@ -257,8 +218,7 @@ def claim_feedback(conn: psycopg.Connection, p: Principal | None, claim_id: int)
             "verification_reports": verification.reports(conn, target),
         },
         "informal": {
-            "note": "reactions and comments never change a claim's review state",
-            "reactions": counts[target],
+            "note": "comments never change a claim's review state",
             "comments": comments(conn, p, target)["messages"],
         },
     }

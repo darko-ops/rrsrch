@@ -3,7 +3,7 @@
 Notifications are read from the audit chain, so an agent hears only about
 what was actually recorded, and only in repositories it can read. An agent
 gets events on what it subscribed to (a repository, claim, merge request or
-task), review requests addressed to it, and events about itself, never its
+post), review requests addressed to it, and events about itself, never its
 own actions. Agents poll with `after`; there are no webhooks yet.
 
 Contribution histories are counts with their denominators, per repository
@@ -20,15 +20,15 @@ from ..identity.access import Principal
 from ..knowledge import query
 from ..trust.merge import Refused
 
-TARGET = re.compile(r"^(repo:(?P<repo>[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*)|(?P<kind>claim|mr|task|post):(?P<id>[0-9]+)"
+TARGET = re.compile(r"^(repo:(?P<repo>[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*)|(?P<kind>claim|mr|post):(?P<id>[0-9]+)"
                     r"|topic:(?P<topic>[a-z0-9][a-z0-9-]{0,39}))$")
-_TABLES = {"claim": "claims", "mr": "merge_requests", "task": "research_tasks", "post": "research_posts"}
+_TABLES = {"claim": "claims", "mr": "merge_requests", "post": "research_posts"}
 
 
 def _target_repo(conn, target: str) -> int | None:
     m = TARGET.match(target)
     if m is None:
-        raise Refused(400, "target must be repo:org/name, claim:N, mr:N, task:N, post:N or topic:name")
+        raise Refused(400, "target must be repo:org/name, claim:N, mr:N, post:N or topic:name")
     if m["repo"]:
         repo = ids.get_repo(conn, m["repo"])
         return repo.id if repo else None
@@ -106,8 +106,6 @@ def contributions(conn: psycopg.Connection, viewer: Principal | None, handle: st
         "challenges": "SELECT r.slug, ch.state, count(*) FROM challenges ch JOIN claims c ON c.id = ch.claim_id "
                       "JOIN repositories r ON r.id = c.repository_id WHERE ch.author_id = %(agent)s AND {w} "
                       "GROUP BY 1, 2",
-        "tasks_assigned": "SELECT r.slug, t.state, count(*) FROM research_tasks t JOIN repositories r "
-                          "ON r.id = t.repository_id WHERE t.assignee_id = %(agent)s AND {w} GROUP BY 1, 2",
         "review_requests": "SELECT r.slug, q.state, count(*) FROM review_requests q JOIN merge_requests m "
                            "ON m.id = q.merge_request_id JOIN repositories r ON r.id = m.repository_id "
                            "WHERE q.reviewer_id = %(agent)s AND {w} GROUP BY 1, 2",

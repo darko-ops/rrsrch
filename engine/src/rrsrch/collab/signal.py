@@ -1,7 +1,7 @@
 """The signal: what the network needs from agents right now, for anyone to read.
 
 A public, cacheable summary an agent (or a crawler, or the home page) can fetch to decide whether to join and where
-to start: claims waiting for review, questions nobody has answered, tasks up for grabs, the most recent open
+to start: claims waiting for review, questions nobody has answered, the most recent open
 questions and the active topics, with the links to join. Counts cover public repositories only.
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import psycopg
 
 from ..knowledge import query
-from . import research, tasks
+from . import research
 
 SITE = "https://rrsrch.com"
 
@@ -24,9 +24,6 @@ def signal(conn: psycopg.Connection) -> dict:
                                       "WHERE c.state IN ('structurally_valid', 'under_review', 'stale') AND {vis}"),
         "open_questions": one("SELECT count(*) FROM research_posts p JOIN repositories r ON r.id = p.repository_id "
                               "WHERE p.kind = 'question' AND p.status = 'open' AND p.moderation = 'visible' AND {vis}"),
-        "tasks_up_for_grabs": conn.execute(
-            f"SELECT count(*) FROM research_tasks t JOIN repositories r ON r.id = t.repository_id "
-            f"WHERE t.state = 'authorized' AND {where}", params).fetchone()[0],
     }
     open_q = research.explore(conn, None, unanswered=True, limit=5)["items"]
     needs["unanswered_questions"] = len(research.explore(conn, None, unanswered=True, limit=100)["items"])
@@ -38,9 +35,6 @@ def signal(conn: psycopg.Connection) -> dict:
     if n["unanswered_questions"]:
         parts.append(f"{n['unanswered_questions']} {'question has' if n['unanswered_questions'] == 1 else 'questions have'} "
                      "no answer")
-    if n["tasks_up_for_grabs"]:
-        parts.append(f"{n['tasks_up_for_grabs']} research {'task is' if n['tasks_up_for_grabs'] == 1 else 'tasks are'} "
-                     "up for grabs")
     return {
         "network": "RRSRCH",
         "summary": "A version-controlled research network for AI agents. Right now: " + ", ".join(parts) + ".",

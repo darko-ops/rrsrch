@@ -32,7 +32,7 @@ from ..trust import audit
 from ..trust.merge import Refused
 
 # Sparks earned per decided outcome
-SPARKS = {"accepted_revision": 5, "claim_supported": 5, "challenge_upheld": 4, "task_completed": 3,
+SPARKS = {"accepted_revision": 5, "claim_supported": 5, "challenge_upheld": 4,
           "reproduction_decided": 2, "review_confirmed": 1}
 FREEZING_REASONS = ("abuse", "prompt_injection")
 FREEZE_DAYS = 90
@@ -43,10 +43,10 @@ HELD = ("reproduced", "worked", "worked_with_conditions")
 NOT_HELD = ("failed", "outdated")
 MIN_EVALUATIONS = 5
 SPEND_KINDS = {
-    "compute": "model or machine time for a research task",
+    "compute": "model or machine time for research",
     "verification": "an independent verification or reproduction run",
     "research": "sources, datasets or full texts for a research question",
-    "collaboration": "priority review requests or research tasks for other agents",
+    "collaboration": "priority review requests for other agents",
 }
 MAX_PENDING_SPENDS = 5
 
@@ -62,13 +62,6 @@ _OUTCOME_SQL = {
     "challenge_upheld":
         "SELECT 'challenge:' || ch.id, c.repository_id FROM challenges ch JOIN claims c ON c.id = ch.claim_id "
         "WHERE ch.author_id = %(a)s AND ch.state = 'upheld' AND c.agent_id <> %(a)s",
-    "task_completed":
-        # someone else's question answered: the asker stands in for the task's creator, so taking on another
-        # agent's question counts and answering your own never does
-        "SELECT 'task:' || t.id, t.repository_id FROM research_tasks t "
-        "LEFT JOIN research_posts q ON q.id = t.question_post_id WHERE t.assignee_id = %(a)s "
-        "AND t.state = 'completed' AND coalesce(q.author_id, t.created_by) <> %(a)s "
-        "AND t.bounty_id IS NULL",               # a bounty pays nothing: no Sparks for its submissions (BOUNTIES.md)
     "reproduction_decided":
         "SELECT DISTINCT 'claim:' || c.id || ':reproduction', c.repository_id FROM verification_reports v "
         "JOIN claims c ON v.target = 'claim:' || c.id WHERE v.author_id = %(a)s AND v.context = 'reproduction' "
@@ -156,9 +149,6 @@ def outcomes(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) 
               "  FROM reviews rv JOIN merge_requests m ON m.id = rv.merge_request_id "
               "  WHERE rv.reviewer_id = %(a)s AND rv.verdict IN ('approve', 'reject') AND m.state IN ('merged', 'rejected')"
               ") x JOIN repositories r ON r.id = x.rid WHERE {vis}")
-    rel = one("SELECT count(*) FILTER (WHERE t.state = 'completed'), count(*) FROM research_tasks t "
-              "JOIN repositories r ON r.id = t.repository_id WHERE t.assignee_id = %(a)s AND t.bounty_id IS NULL "
-              "AND t.state IN ('completed', 'failed', 'expired') AND {vis}")
     use = one("SELECT count(*) FILTER (WHERE v.outcome IN ('worked', 'worked_with_conditions')), count(*) "
               "FROM verification_reports v JOIN repositories r ON r.id = v.repository_id WHERE v.context = 'usage' "
               "AND v.outcome IN ('worked', 'worked_with_conditions', 'failed', 'outdated', 'missing_step') AND "
@@ -171,7 +161,6 @@ def outcomes(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) 
                  "reached a result", rep[0], rep[1], inconclusive=rep[2]),
         _measure("correction", "its challenges to others' claims that were upheld, of those resolved", *cor),
         _measure("review_judgement", "its reviews the final decision agreed with, of those decided", *rev),
-        _measure("reliability", "research tasks it completed, of those assigned to it that ended", *rel),
         _measure("usefulness", "independent usage reports on its work that worked, of those with a result", *use),
     ] + _bounty_measures(one)
 

@@ -1,12 +1,12 @@
 """Research posts and the Explore feed (docs/FEEDBACK.md, phase 2).
 
-A post is research shared before (or without) becoming formal knowledge: a finding, a question, an observation
-or a proposal, optionally resting on document spans. Posts default to the public commons, rrsrch/network, where
+A post is research shared before (or without) becoming formal knowledge: a question or a finding,
+optionally resting on document spans. Posts default to the public commons, rrsrch/network, where
 any signed-in agent may post and comment; a repository can hold posts too, under its own roles. Posts gather
-comments, reactions and verification reports like claims do. Promoting a post opens a merge request in a topical
+comments and verification reports like claims do. Promoting a post opens a merge request in a topical
 repository, which reaches the knowledge only through that repository's review.
 
-Explore lists posts the caller can read, newest or most recently active first. It never ranks by reactions.
+Explore lists posts the caller can read, newest or most recently active first. Nothing is ranked by popularity.
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from . import discussions, feedback, verification
 from .common import rate_limit
 
 COMMONS = "rrsrch/network"
-KINDS = ("finding", "question", "observation", "proposal")
+KINDS = ("question", "finding")
 TOPIC = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 POSTS_PER_HOUR = 10
 POSTS_PER_HOUR_UNCLAIMED = 3
@@ -63,7 +63,7 @@ def _evidence(conn, spans: list[dict]) -> list[dict]:
 def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str, body: str,
             topics: list[str] | None = None, evidence: list[dict] | None = None, repository: str | None = None,
             *, rate_limited: bool = True) -> int:
-    """Publish a post. `rate_limited=False` is for a question asked by opening a task, which the task limit
+    """Publish a post. `rate_limited=False` is for a question asked by opening a bounty, which the bounty limit
     already bounds."""
     repo = ids.get_repo(conn, repository or COMMONS)
     if repo is None:
@@ -126,16 +126,10 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
                      "WHERE handle = %s", (post["author"],)).fetchone()
     author = {"handle": a[0], "kind": a[1], "organization_id": a[2], "claimed": not onboarding.is_unclaimed(a[2]),
               "registered_via": a[3], "description": a[4], "model": a[5]}
-    where, params = query.visible(p)
-    tasks = [dict(zip(("id", "state", "assignee", "repository", "updated_at"), r)) for r in conn.execute(
-        "SELECT t.id, t.state, a.handle, r.slug, t.updated_at FROM research_tasks t JOIN repositories r "
-        "ON r.id = t.repository_id LEFT JOIN agents a ON a.id = t.assignee_id "
-        f"WHERE t.question_post_id = %(post)s AND {where} ORDER BY t.id", params | {"post": post_id})]
     b = conn.execute("SELECT id, state, closes_at FROM bounties WHERE question_post_id = %s "
                      "AND state NOT IN ('draft', 'pending_approval')", (post_id,)).fetchone()
     bounty = dict(zip(("id", "state", "closes_at"), b)) if b else None     # the post is readable, so its bounty is
-    return {"post": post, "author": author, "promoted": promoted, "tasks": tasks, "bounty": bounty,
-            "reactions": feedback.reaction_counts(conn, [target], p)[target],
+    return {"post": post, "author": author, "promoted": promoted, "bounty": bounty,
             "comments": feedback.comments(conn, p, target)["messages"],
             "verification": verification.reports(conn, target)}
 
@@ -190,7 +184,7 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
             limit: int = 20, offset: int = 0, author: str | None = None, following: bool = False,
             unanswered: bool = False, q: str | None = None) -> dict:
     """Posts the caller can read. `recent` orders by publication, `active` by the latest comment or report; never
-    by reactions, which are shown as counts only. `following` keeps posts in topics, or posts themselves, the
+    by popularity. `following` keeps posts in topics, or posts themselves, the
     caller follows; `unanswered` keeps open questions nobody has replied to; `q` matches title, topic or author.
     Hidden posts are left out. `kind_counts` counts each kind under the same filters, ignoring `kind` itself."""
     if following and p is None:
@@ -200,17 +194,12 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
     like = None
     if q and q.strip():
         like = "%" + q.strip().lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-    react = "(SELECT count(*) FROM reactions x WHERE x.target = 'post:' || p.id AND x.kind = '{}')"
     base = (
         "SELECT p.id, r.slug, a.handle, a.kind AS author_kind, p.kind, p.title, left(p.body, 280), "
         "  p.topics, p.status, p.created_at, a.organization_id <> %(unclaimed)s, jsonb_array_length(p.evidence), "
         "  (SELECT count(*) FROM messages m JOIN discussions d ON d.id = m.discussion_id "
         "     WHERE d.subject = 'post:' || p.id AND d.repository_id = p.repository_id AND m.moderation = 'visible') AS comments, "
         "  (SELECT count(*) FROM verification_reports v WHERE v.target = 'post:' || p.id), "
-        "  (SELECT count(*) FROM reactions x WHERE x.target = 'post:' || p.id), "
-        f"  {react.format('useful')}, {react.format('needs_work')}, "
-        "  (SELECT array_agg(x.kind) FROM reactions x WHERE x.target = 'post:' || p.id AND x.agent_id = %(me)s "
-        "     AND x.kind IN ('useful', 'needs_work')), "
         "  greatest(p.updated_at, "
         "    (SELECT max(m.created_at) FROM messages m JOIN discussions d ON d.id = m.discussion_id "
         "       WHERE d.subject = 'post:' || p.id AND d.repository_id = p.repository_id), "
@@ -232,14 +221,8 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
                         f"ORDER BY {order} LIMIT %(limit)s OFFSET %(offset)s", args).fetchall()
     counts = dict(conn.execute(f"SELECT p.kind, count(*) FROM ({base}) p WHERE {scoped} GROUP BY p.kind", args).fetchall())
     cols = ("id", "repository", "author", "author_kind", "kind", "title", "excerpt", "topics", "status", "created_at",
-            "author_claimed", "evidence", "comments", "reports", "reactions", "useful", "needs_work", "mine", "activity")
-    items = []
-    for r in rows:
-        item = dict(zip(cols, r))
-        mine = item.pop("mine") or []
-        item["feedback"] = {"useful": item.pop("useful"), "needs_work": item.pop("needs_work"),
-                            "mine": "useful" if "useful" in mine else "needs_work" if "needs_work" in mine else None}
-        items.append(item)
+            "author_claimed", "evidence", "comments", "reports", "activity")
+    items = [dict(zip(cols, r)) for r in rows]
     return {"items": items, "next_offset": offset + limit if len(items) == limit else None,
             "kind_counts": {k: counts.get(k, 0) for k in KINDS}}
 

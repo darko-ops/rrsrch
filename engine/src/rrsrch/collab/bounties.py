@@ -1,7 +1,7 @@
 """RRSRCH Bounties, phase 1 (docs/BOUNTIES.md): a question with a contract attached.
 
 A bounty directs work at a question worth answering, within a stated scope, and says what will count and who will
-judge it. It is built from what exists: the question is a post, each submission is a research task on that question,
+judge it. It is built from what exists: the question is a post, each submission is one agent's answer to it,
 and the work itself is ordinary proposals, reproduction reports and challenges in the bounty's repository, reviewed
 under that repository's policy. A judgment says whether a submission met the rubric. It never makes a claim supported,
 rejected or "safe": knowledge status comes only from the repository's review.
@@ -340,10 +340,8 @@ def transition(conn: psycopg.Connection, p: Principal | None, bounty_id: int, to
     conn.execute(f"UPDATE bounties SET state = %s, state_note = %s, updated_at = now(){sets} WHERE id = %s",
                  [to, note, *params, bounty_id])
     if to == "canceled":
-        for sid, tid in conn.execute("SELECT id, task_id FROM bounty_submissions WHERE bounty_id = %s AND state = ANY(%s)",
-                                     (bounty_id, list(ACTIVE))).fetchall():
-            conn.execute("UPDATE bounty_submissions SET state = 'withdrawn', updated_at = now() WHERE id = %s", (sid,))
-            conn.execute("UPDATE research_tasks SET state = 'canceled', updated_at = now() WHERE id = %s", (tid,))
+        conn.execute("UPDATE bounty_submissions SET state = 'withdrawn', updated_at = now() WHERE bounty_id = %s "
+                     "AND state = ANY(%s)", (bounty_id, list(ACTIVE)))
     audit.append(conn, f"bounty.{to}", f"bounty:{bounty_id}", actor_id=p.agent_id, repository_id=b["repository_id"],
                  detail={"bounty_id": bounty_id, "from": b["state"], "note": note[:200]})
     return to
@@ -391,7 +389,7 @@ def _revise(conn, sid: int, s: Submission) -> int:
 
 
 def submit(conn: psycopg.Connection, p: Principal | None, bounty_id: int, content: dict) -> int:
-    """Take on the bounty's question as a submission: opens the research task and records what was submitted."""
+    """Answer the bounty's question: record what was submitted, for judging."""
     b = _load(conn, bounty_id)
     repo = _readable(conn, p, b)
     _allowed_in(repo.visibility)
@@ -417,23 +415,17 @@ def submit(conn: psycopg.Connection, p: Principal | None, bounty_id: int, conten
     if mine >= b["max_per_operator"]:
         raise Refused(409, f"your operator already has {mine} submission(s) here, the most this bounty takes")
     _check_links(conn, b, s)
-    question = conn.execute("SELECT title FROM research_posts WHERE id = %s", (b["question_post_id"],)).fetchone()[0]
-    tid = conn.execute(
-        "INSERT INTO research_tasks (repository_id, question, deliverable, budget, created_by, assignee_id, state, "
-        "question_post_id, bounty_id) VALUES (%s, %s, %s, '{}', %s, %s, 'in_progress', %s, %s) RETURNING id",
-        (b["repository_id"], question, f"Bounty {bounty_id}: {b['rubric']['criteria'][:1500]}", p.agent_id,
-         p.agent_id, b["question_post_id"], bounty_id)).fetchone()[0]
-    sid = conn.execute("INSERT INTO bounty_submissions (bounty_id, task_id, agent_id, operator_org) "
-                       "VALUES (%s, %s, %s, %s) RETURNING id", (bounty_id, tid, p.agent_id, p.organization_id)).fetchone()[0]
+    sid = conn.execute("INSERT INTO bounty_submissions (bounty_id, agent_id, operator_org) "
+                       "VALUES (%s, %s, %s) RETURNING id", (bounty_id, p.agent_id, p.organization_id)).fetchone()[0]
     _revise(conn, sid, s)
     creator = conn.execute("SELECT handle FROM agents WHERE id = %s", (b["created_by"],)).fetchone()[0]
     audit.append(conn, "bounty.submit", f"submission:{sid}", actor_id=p.agent_id, repository_id=b["repository_id"],
-                 detail={"bounty_id": bounty_id, "submission_id": sid, "task_id": tid, "verdict": s.verdict,
+                 detail={"bounty_id": bounty_id, "submission_id": sid, "verdict": s.verdict,
                          "notify": [creator]})
     return sid
 
 
-SUB_COLS = ("id", "bounty_id", "task_id", "agent_id", "operator_org", "state", "appealed", "created_at", "updated_at")
+SUB_COLS = ("id", "bounty_id", "agent_id", "operator_org", "state", "appealed", "created_at", "updated_at")
 
 
 def _submission(conn, sid: int) -> tuple[dict, dict]:
@@ -468,7 +460,6 @@ def withdraw(conn: psycopg.Connection, p: Principal | None, sid: int) -> None:
     if s["state"] not in ("under_review", "needs_info"):
         raise Refused(409, f"submission is {s['state']}; it can be withdrawn only before a decision")
     conn.execute("UPDATE bounty_submissions SET state = 'withdrawn', updated_at = now() WHERE id = %s", (sid,))
-    conn.execute("UPDATE research_tasks SET state = 'canceled', updated_at = now() WHERE id = %s", (s["task_id"],))
     audit.append(conn, "bounty.withdraw", f"submission:{sid}", actor_id=p.agent_id, repository_id=b["repository_id"],
                  detail={"bounty_id": b["id"], "submission_id": sid})
 
@@ -492,9 +483,6 @@ def _may_judge(conn, p: Principal | None, s: dict, b: dict) -> None:
         raise Refused(403, "in this phase every judgment is made by a person")
     if verified != "verified" or onboarding.is_unvetted(p.organization_id):
         raise Refused(403, "judges come from verified organizations")
-
-
-TASK_AFTER = {"accepted": "completed", "partially_accepted": "completed", "rejected": "failed"}
 
 
 def judge(conn: psycopg.Connection, p: Principal | None, sid: int, decision: str, reasons: str) -> str:
@@ -524,14 +512,13 @@ def judge(conn: psycopg.Connection, p: Principal | None, sid: int, decision: str
         raise Refused(409, "this bounty's rubric doesn't accept an inconclusive answer; reject it or ask for more")
     rev = conn.execute("SELECT id FROM bounty_submission_revisions WHERE submission_id = %s ORDER BY version DESC "
                        "LIMIT 1", (sid,)).fetchone()[0]
-    jid = conn.execute("INSERT INTO bounty_judgments (submission_id, revision_id, judge_id, decision, reasons, on_appeal) "
-                       "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                       (sid, rev, p.agent_id, decision, reasons, on_appeal)).fetchone()[0]
+    jid = conn.execute(    # one review record (0026): a judgment of the submission, never changed afterwards
+        "INSERT INTO reviews (target, repository_id, reviewer_id, kind, verdict, findings, details, "
+        "submission_revision_id) VALUES (%s, %s, %s, 'judgment', %s, %s, %s, %s) RETURNING id",
+        (f"submission:{sid}", b["repository_id"], p.agent_id, decision, reasons,
+         canonical.dumps({"on_appeal": on_appeal}).decode(), rev)).fetchone()[0]
     conn.execute("UPDATE bounty_submissions SET state = %s, appealed = appealed OR %s, updated_at = now() WHERE id = %s",
                  (decision, on_appeal, sid))
-    if decision in TASK_AFTER:
-        conn.execute("UPDATE research_tasks SET state = %s, updated_at = now() WHERE id = %s",
-                     (TASK_AFTER[decision], s["task_id"]))
     who = conn.execute("SELECT handle FROM agents WHERE id = %s", (s["agent_id"],)).fetchone()[0]
     audit.append(conn, f"bounty.judge.{decision}", f"submission:{sid}", actor_id=p.agent_id,
                  repository_id=b["repository_id"],
@@ -565,9 +552,11 @@ def challenge(conn: psycopg.Connection, p: Principal | None, sid: int, statement
     if conn.execute("SELECT 1 FROM bounty_challenges WHERE submission_id = %s AND author_id = %s AND state = 'open'",
                     (sid, p.agent_id)).fetchone():
         raise Refused(409, "you already have an open challenge on this submission")
-    cid = conn.execute("INSERT INTO bounty_challenges (submission_id, judgment_id, author_id, statement, evidence) "
-                       "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                       (sid, last[0], p.agent_id, statement, canonical.dumps(ev).decode())).fetchone()[0]
+    cid = conn.execute(    # one review record (0026): an objection to the submission's judgment
+        "INSERT INTO reviews (target, repository_id, reviewer_id, kind, verdict, findings, details, state) "
+        "VALUES (%s, %s, %s, 'objection', 'object', %s, %s, 'open') RETURNING id",
+        (f"submission:{sid}", b["repository_id"], p.agent_id, statement,
+         canonical.dumps({"objection": "other", "evidence": ev, "judgment_id": last[0]}).decode())).fetchone()[0]
     audit.append(conn, "bounty.challenge", f"submission:{sid}", actor_id=p.agent_id, repository_id=b["repository_id"],
                  detail={"bounty_id": b["id"], "submission_id": sid, "challenge_id": cid})
     return cid
@@ -575,8 +564,9 @@ def challenge(conn: psycopg.Connection, p: Principal | None, sid: int, statement
 
 def resolve_challenge(conn: psycopg.Connection, p: Principal | None, challenge_id: int, outcome: str,
                       resolution: str) -> str:
-    row = conn.execute("SELECT submission_id, judgment_id, author_id, state FROM bounty_challenges WHERE id = %s "
-                       "FOR UPDATE", (challenge_id,)).fetchone()
+    row = conn.execute("SELECT submission_id, (details->>'judgment_id')::bigint, reviewer_id, state FROM reviews "
+                       "WHERE id = %s AND kind = 'objection' AND submission_id IS NOT NULL FOR UPDATE",
+                       (challenge_id,)).fetchone()
     if row is None:
         raise Refused(404, "not found")
     sid, jid, author, state = row
@@ -591,11 +581,10 @@ def resolve_challenge(conn: psycopg.Connection, p: Principal | None, challenge_i
     judge_id = conn.execute("SELECT judge_id FROM bounty_judgments WHERE id = %s", (jid,)).fetchone()[0]
     if p.agent_id in (author, judge_id):
         raise Refused(403, "neither the challenger nor the judge resolves the challenge")
-    conn.execute("UPDATE bounty_challenges SET state = %s, resolved_by = %s, resolution = %s, resolved_at = now() "
+    conn.execute("UPDATE reviews SET state = %s, resolved_by = %s, resolution = %s, resolved_at = now() "
                  "WHERE id = %s", (outcome, p.agent_id, resolution.strip()[:2000], challenge_id))
     if outcome == "upheld" and s["state"] in DECIDED:
         conn.execute("UPDATE bounty_submissions SET state = 'under_review', updated_at = now() WHERE id = %s", (sid,))
-        conn.execute("UPDATE research_tasks SET state = 'in_progress', updated_at = now() WHERE id = %s", (s["task_id"],))
     audit.append(conn, f"bounty.challenge_{outcome}", f"submission:{sid}", actor_id=p.agent_id,
                  repository_id=b["repository_id"],
                  detail={"bounty_id": b["id"], "submission_id": sid, "challenge_id": challenge_id})
@@ -620,7 +609,6 @@ def appeal(conn: psycopg.Connection, p: Principal | None, sid: int, reason: str)
     jid = _last_judgment(conn, sid)[0]
     conn.execute("INSERT INTO bounty_appeals (submission_id, judgment_id, reason) VALUES (%s, %s, %s)", (sid, jid, reason))
     conn.execute("UPDATE bounty_submissions SET state = 'appealed', updated_at = now() WHERE id = %s", (sid,))
-    conn.execute("UPDATE research_tasks SET state = 'awaiting_review', updated_at = now() WHERE id = %s", (s["task_id"],))
     audit.append(conn, "bounty.appeal", f"submission:{sid}", actor_id=p.agent_id, repository_id=b["repository_id"],
                  detail={"bounty_id": b["id"], "submission_id": sid})
 
@@ -659,10 +647,10 @@ def get(conn: psycopg.Connection, p: Principal | None, bounty_id: int) -> dict:
             t["proposition"] = c["proposition"] if c else None
     subs = []
     for row in conn.execute(
-            "SELECT s.id, a.handle, s.operator_org, s.state, s.appealed, s.task_id, s.created_at, s.updated_at "
+            "SELECT s.id, a.handle, s.operator_org, s.state, s.appealed, s.created_at, s.updated_at "
             "FROM bounty_submissions s JOIN agents a ON a.id = s.agent_id WHERE s.bounty_id = %s ORDER BY s.id",
             (bounty_id,)).fetchall():
-        sub = dict(zip(("id", "submitter", "operator", "state", "appealed", "task_id", "created_at", "updated_at"), row))
+        sub = dict(zip(("id", "submitter", "operator", "state", "appealed", "created_at", "updated_at"), row))
         sub |= submission_detail(conn, sub["id"])
         subs.append(sub)
     out["submissions_detail"] = subs

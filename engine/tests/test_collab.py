@@ -103,44 +103,6 @@ def test_review_requests_reach_the_reviewer(world):
     assert client.get("/v1/review-requests", headers=h["ext"]).json()["items"] == []
 
 
-def test_research_task_lifecycle(world):
-    client, h, _ = world
-    r = client.post(f"/v1/repos/{PILOT}/tasks", headers=h["bot"], json={
-        "question": "Does WOMAC benefit persist at 24 months?", "deliverable": "A supported claim or a stated gap.",
-        "budget": {"max_tool_calls": 200}})
-    assert r.status_code == 201
-    t = r.json()["task_id"]
-    move = lambda who, to, **kw: client.post(f"/v1/tasks/{t}/transition", headers=h[who], json={"to": to, **kw})  # noqa: E731
-    assert move("bot", "authorized").status_code == 403
-    assert move("admin", "authorized").status_code == 200
-    assert move("bot", "assigned").status_code == 200                    # takes it
-    assert move("ext", "in_progress").status_code == 403
-    assert move("bot", "in_progress").status_code == 200
-    assert move("bot", "awaiting_review").status_code == 409            # nothing handed in yet
-    mr = open_mr(client, h["bot"], {"repository": PILOT, "content": content()})
-    assert client.post(f"/v1/tasks/{t}/responses", headers=h["bot"],
-                       json={"body": "Proposed the 12-month finding; no 24-month data.", "merge_request_id": mr}).status_code == 201
-    assert move("bot", "awaiting_review").status_code == 200
-    assert move("bot", "completed").status_code == 403
-    assert move("admin", "completed").status_code == 200
-    task = client.get(f"/v1/tasks/{t}").json()["task"]
-    assert (task["state"], task["assignee"], task["responses"][0]["merge_request_id"]) == ("completed", "bot", mr)
-    assert task["budget"] == {"max_tool_calls": 200}
-    assert client.post(f"/v1/repos/{PILOT}/tasks", headers=h["bot"],
-                       json={"question": "q", "deliverable": "d", "budget": {"unlimited": True}}).status_code == 400
-
-
-def test_tasks_expire_and_are_bounded(world):
-    client, h, _ = world
-    past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    t = client.post(f"/v1/repos/{PILOT}/tasks", headers=h["bot"],
-                    json={"question": "q", "deliverable": "d", "due_at": past}).json()["task_id"]
-    assert client.get(f"/v1/tasks/{t}").json()["task"]["state"] == "expired"
-    codes = [client.post(f"/v1/repos/{PILOT}/tasks", headers=h["bot"],
-                         json={"question": f"q{i}", "deliverable": "d"}).status_code for i in range(21)]
-    assert codes.count(201) == 20 and codes[-1] == 429
-
-
 def test_derivations_are_recorded_and_cycles_refused(world):
     client, h, url = world
     a = claim_of(url, merged_claim(client, h)[0])
@@ -189,45 +151,8 @@ def test_contribution_histories_are_counts_with_denominators(world):
     assert client.get("/v1/agents/nobody/contributions").status_code == 404
 
 
-def test_a_task_answers_a_question(world):
-    client, h, url = world
-    # asking by opening a task: the question becomes a post in the task's repository
-    r = client.post(f"/v1/repos/{PILOT}/tasks", headers=h["bot"],
-                    json={"question": "Does the WOMAC benefit persist at 24 months?", "deliverable": "A claim or a gap."})
-    assert r.status_code == 201
-    qid = r.json()["question_post_id"]
-    q = client.get(f"/v1/posts/{qid}").json()
-    assert (q["post"]["kind"], q["post"]["repository"], q["post"]["status"]) == ("question", PILOT, "open")
-    assert [t["id"] for t in q["tasks"]] == [r.json()["task_id"]]
-    assert client.get(f"/v1/tasks/{r.json()['task_id']}").json()["task"]["question_post"]["id"] == qid
-
-    # taking on a question someone else asked in the commons
-    asked = client.post("/v1/posts", headers=h["ext"], json={"kind": "question", "title": "Is VAS pain lower at 6 months?",
-                                                             "body": "Asking."}).json()["post_id"]
-    finding = client.post("/v1/posts", headers=h["ext"], json={"kind": "finding", "title": "x",
-                                                               "body": "x"}).json()["post_id"]
-    take = lambda **b: client.post(f"/v1/repos/{PILOT}/tasks", headers=h["bot"], json={"deliverable": "d", **b})  # noqa: E731
-    assert take().status_code == 400                                            # which question?
-    assert take(question="q", question_post_id=asked).status_code == 400
-    assert take(question_post_id=finding).status_code == 400
-    r = take(question_post_id=asked)
-    assert r.status_code == 201 and r.json()["question_post_id"] == asked
-    t = r.json()["task_id"]
-    assert take(question_post_id=asked).status_code == 409                      # one unfinished task per question
-    assert client.get(f"/v1/tasks/{t}").json()["task"]["question"] == "Is VAS pain lower at 6 months?"
-
-    move = lambda who, to: client.post(f"/v1/tasks/{t}/transition", headers=h[who], json={"to": to})  # noqa: E731
-    for who, to in [("admin", "authorized"), ("bot", "assigned"), ("bot", "in_progress")]:
-        assert move(who, to).status_code == 200
-    client.post(f"/v1/tasks/{t}/responses", headers=h["bot"], json={"body": "Not reported in the trial."})
-    assert move("bot", "awaiting_review").status_code == 200
-    assert move("admin", "completed").status_code == 200
-    assert client.get(f"/v1/posts/{asked}").json()["post"]["status"] == "answered"
-    # answering someone else's question counts; the asker stands in for the task's creator
-    from rrsrch.collab import standing
-    with psycopg.connect(url) as c:
-        bot = c.execute("SELECT id FROM agents WHERE handle = 'bot'").fetchone()[0]
-        earned = {ref for kind, ref, _ in standing._outcomes(c, bot) if kind == "task_completed"}
-        actions = [a for (a,) in c.execute("SELECT action FROM audit_events WHERE target = %s ORDER BY id",
-                                           (f"post:{asked}",))]
-    assert earned == {f"task:{t}"} and actions[-1] == "post.answered"
+def test_research_tasks_are_retired(world):
+    client, h, _ = world
+    assert client.post(f"/v1/repos/{PILOT}/tasks", headers=h["bot"],
+                       json={"question": "q", "deliverable": "d"}).status_code in (404, 405)
+    assert client.get("/v1/tasks/1").status_code == 404

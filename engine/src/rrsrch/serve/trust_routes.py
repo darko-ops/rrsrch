@@ -20,7 +20,7 @@ from ..identity import access
 from ..identity import store as ids
 from ..identity.access import Action, Principal
 from ..knowledge import query
-from ..trust import claim_review, disclosure, merge
+from ..trust import claim_review, disclosure, merge, reviews
 from . import idempotency
 from .identity_routes import conn, principal
 
@@ -134,6 +134,13 @@ def review_anything(body: Review, p: Principal | None = Depends(principal),
                                                              body.findings)
     _call(merge.review, c, p, int(n), body.verdict, body.findings)
     return {"ok": True, "target": f"proposal:{n}", "merge_request_id": int(n), "verdict": body.verdict}
+
+
+@router.get("/reviews")
+def list_reviews(target: str, kind: Literal["decision", "objection", "reproduction", "usage", "judgment"] | None = None,
+                 p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Every review of a proposal, claim, post or bounty submission, of every kind, in one list."""
+    return {"ok": True, "target": target, "items": _call(reviews.list_for, c, p, target, kind)}
 
 
 @router.get("/repos/{owner}/{name}/needs-review")

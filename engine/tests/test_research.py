@@ -48,9 +48,8 @@ def test_posts_and_their_threads_take_feedback_from_anyone_signed_in(world):
     pid = post(client, h["bot"], kind="question", title="Does the effect hold past 24 months?", topics=["msc"])
     t = f"post:{pid}"
     assert client.post("/v1/comments", headers=h["ext"], json={"target": t, "body": "Not reported."}).status_code == 201
-    assert client.post("/v1/reactions", headers=h["ext"], json={"target": t, "kind": "useful"}).status_code == 200
     got = client.get(f"/v1/posts/{pid}").json()
-    assert [m["author"] for m in got["comments"]] == ["ext"] and got["reactions"]["counts"]["useful"] == 1
+    assert [m["author"] for m in got["comments"]] == ["ext"] and "reactions" not in got
     assert any(n["target"] == t for n in notes(client, h["bot"]))                  # the author hears of comments
 
     # following a topic: new posts on it reach you, others don't
@@ -61,15 +60,13 @@ def test_posts_and_their_threads_take_feedback_from_anyone_signed_in(world):
     assert "On MSCs" in titles and "Unrelated" not in titles
 
 
-def test_explore_orders_by_time_or_activity_never_by_reactions(world):
+def test_explore_orders_by_time_or_activity(world):
     client, h, url = world
     old = post(client, h["bot"], title="Older", topics=["msc"])
     new = post(client, h["ext"], title="Newer", kind="question")
-    for who in ("bot", "ext", "admin"):
-        client.post("/v1/reactions", headers=h[who], json={"target": f"post:{old}", "kind": "useful"})
     feed = client.get("/v1/explore").json()
-    assert [i["id"] for i in feed["items"]][:2] == [new, old]                     # reactions don't lift a post
-    assert feed["items"][1]["reactions"] == 3 and {"topic": "msc", "posts": 1} in feed["topics"]
+    assert [i["id"] for i in feed["items"]][:2] == [new, old]
+    assert {"topic": "msc", "posts": 1} in feed["topics"]
     client.post("/v1/comments", headers=h["ext"], json={"target": f"post:{old}", "body": "Replicated?"})
     active = client.get("/v1/explore", params={"sort": "active"}).json()["items"]
     assert active[0]["id"] == old and active[0]["comments"] == 1
@@ -247,18 +244,14 @@ def test_a_maintainer_hides_a_reported_post_from_everyone(world):
         assert audit.verify(c) == []
 
 
-def test_explore_carries_quick_feedback_kind_counts_and_a_text_filter(world):
+def test_explore_carries_kind_counts_and_a_text_filter(world):
     client, h, url = world
     f = post(client, h["bot"], title="WOMAC gains at 12 months", topics=["knee-oa"])
     q = post(client, h["ext"], kind="question", title="Which dose works?", topics=["dosing"])
-    post(client, h["ext"], kind="observation", title="Swelling after injection", topics=["safety"])
-    for who, kind in [("ext", "useful"), ("admin", "useful"), ("bot", "needs_work")]:
-        assert client.post("/v1/reactions", headers=h[who], json={"target": f"post:{f}", "kind": kind}).status_code == 200
+    assert client.post("/v1/posts", headers=h["ext"], json={"kind": "observation", "title": "x", "body": "y"}
+                       ).status_code in (400, 422)                    # a post is a question or a finding (0028)
     feed = client.get("/v1/explore", headers=h["admin"]).json()
-    item = {i["id"]: i for i in feed["items"]}[f]
-    assert item["feedback"] == {"useful": 2, "needs_work": 1, "mine": "useful"}
-    assert feed["kind_counts"] == {"finding": 1, "question": 1, "observation": 1, "proposal": 0}
-    assert [i["id"] for i in client.get("/v1/explore").json()["items"]][-1] == f  # feedback never lifts a post
+    assert feed["kind_counts"] == {"question": 1, "finding": 1}
     # kind counts ignore the kind filter but follow the others
     only_q = client.get("/v1/explore", params={"kind": "question"}).json()
     assert [i["id"] for i in only_q["items"]] == [q] and only_q["kind_counts"]["finding"] == 1

@@ -1,4 +1,4 @@
-"""Discussions: threads tied to a repository, claim, merge request or task (SPEC-v2 §8.2–8.5).
+"""Discussions: threads tied to a repository, claim or merge request (SPEC-v2 §8.2–8.5).
 
 Contributors post; observers read; maintainers can hide a message (its body
 is then withheld from everyone but maintainers, and the hiding is audited).
@@ -40,14 +40,14 @@ def _check_subject(conn, repository_id: int, subject: str) -> None:
     if subject == "repo":
         return
     kind, _, num = subject.partition(":")
-    table = {"claim": "claims", "mr": "merge_requests", "task": "research_tasks"}.get(kind)
+    table = {"claim": "claims", "mr": "merge_requests"}.get(kind)
     if kind == "challenge" and num.isdigit() and conn.execute(
             "SELECT 1 FROM challenges ch JOIN claims c ON c.id = ch.claim_id WHERE ch.id = %s AND c.repository_id = %s",
             (int(num), repository_id)).fetchone():
         return
     if table is None or not num.isdigit() or not conn.execute(
             f"SELECT 1 FROM {table} WHERE id = %s AND repository_id = %s", (int(num), repository_id)).fetchone():
-        raise Refused(400, f"subject {subject!r} is not in this repository (use repo, claim:N, mr:N or task:N)")
+        raise Refused(400, f"subject {subject!r} is not in this repository (use repo, claim:N or mr:N)")
 
 
 def _post(conn, p: Principal, discussion_id: int, repository_id: int, subject: str, kind: str, body: str,

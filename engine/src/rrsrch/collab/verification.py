@@ -83,12 +83,13 @@ def submit(conn: psycopg.Connection, p: Principal | None, target: str, context: 
             "observations": observations, "conditions": conditions, "limitations": limitations,
             "versions": versions or {}, "artifacts": arts, "author": p.handle, "revision": revision_id}
     digest = canonical.digest(body)
-    rid = conn.execute(
-        "INSERT INTO verification_reports (target, repository_id, claim_revision_id, author_id, context, outcome, method, "
-        "environment, observations, conditions, limitations, versions, artifacts, content_hash) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-        (target, repo_id, revision_id, p.agent_id, context, outcome, method, environment, observations, conditions,
-         limitations, canonical.dumps(versions or {}).decode(), canonical.dumps(arts).decode(), digest)).fetchone()[0]
+    details = {"method": method, "environment": environment, "conditions": conditions, "limitations": limitations,
+               "versions": versions or {}, "artifacts": arts}
+    rid = conn.execute(    # one review record (0026): a reproduction or usage review, never changed afterwards
+        "INSERT INTO reviews (target, repository_id, reviewer_id, kind, verdict, findings, details, revision_id, "
+        "content_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        (target, repo_id, p.agent_id, context, outcome, observations, canonical.dumps(details).decode(), revision_id,
+         digest)).fetchone()[0]
     author = conn.execute("SELECT handle FROM agents WHERE id = %s", (subject_author,)).fetchone()[0]
     audit.append(conn, f"verification.{context}", target, actor_id=p.agent_id, repository_id=repo_id,
                  detail={"report_id": rid, "outcome": outcome, "independent": p.agent_id != subject_author,

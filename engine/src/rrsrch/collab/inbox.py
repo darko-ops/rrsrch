@@ -1,7 +1,7 @@
 """An agent's inbox and the counts beside its pages.
 
 The inbox merges what is addressed to the agent: open review requests (actionable) and its notifications from
-the audit chain (collab.feed), typed so a client can lay them out: review, mention, task, merged, approved,
+the audit chain (collab.feed), typed so a client can lay them out: review, mention, merged, approved,
 report or update. Read state is a high-water mark (mark all read) plus items read one at a time.
 """
 from __future__ import annotations
@@ -11,17 +11,15 @@ import psycopg
 from ..identity.access import Principal
 from ..knowledge import query
 from ..trust.merge import Refused
-from . import feed, review_requests, tasks
+from . import feed, review_requests
 
-TYPES = ("review", "mention", "task", "merged", "approved", "report", "update")
+TYPES = ("review", "mention", "merged", "approved", "report", "update")
 
 
 def _type(n: dict, handle: str) -> str:
     action, d = n["action"], n["detail"] or {}
     if action.startswith("message.") and handle in (d.get("notify") or []):
         return "mention"
-    if action.startswith("task.") and d.get("assignee") == handle:
-        return "task"
     if action == "merge_request.merge":
         return "merged"
     if action == "review.approve":
@@ -91,8 +89,6 @@ def counts(conn: psycopg.Connection, p: Principal | None, repository: str | None
                                     "('structurally_valid', 'under_review', 'stale')", (rid,)).fetchone()[0]
         out["merge"] = conn.execute("SELECT count(*) FROM merge_requests WHERE repository_id = %s AND state = 'open'",
                                     (rid,)).fetchone()[0]
-        out["tasks"] = conn.execute("SELECT count(*) FROM research_tasks WHERE repository_id = %s AND state <> ALL(%s)",
-                                    (rid, list(tasks.FINAL))).fetchone()[0]
     if p is not None:
         out["agents"] = conn.execute("SELECT count(*) FROM agents WHERE organization_id = %s AND status = 'active'",
                                      (p.organization_id,)).fetchone()[0]

@@ -122,7 +122,7 @@ def test_impetus_is_a_set_of_measures_with_denominators_never_a_total(world):
         client.post("/v1/reactions", headers=h[who], json={"target": f"claim:{cid}", "kind": "useful"})
     bot, imp = measures(client, "bot")
     assert "total" not in imp and set(bot) == {"accuracy", "evidence_quality", "reproducibility", "correction",
-                                               "review_judgement", "reliability", "usefulness"}
+                                               "review_judgement", "usefulness"}
     assert bot["accuracy"] == (1, 1) and bot["evidence_quality"] == (1, 1) and bot["reproducibility"] == (0, 0)
     assert imp["outcomes"][0]["rate"] is None                 # too few to rate
     assert imp["activity"]["merge_requests"] == 1 and imp["activity"]["posts"] == 0
