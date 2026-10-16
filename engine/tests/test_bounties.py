@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 import pytest
+from reviewing import submission as submission_of
 from test_knowledge_api import claim_of, merged_claim
 from test_trust_db import PILOT, content, open_mr, world  # noqa: F401  (world is a fixture)
 
@@ -120,7 +121,7 @@ def test_who_may_submit_and_what_a_submission_must_carry(bw):
     assert r.status_code == 201
     sid = r.json()["submission_id"]
     assert post("sub", submission(mr)).status_code == 409                   # one per agent
-    sub = client.get(f"/v1/submissions/{sid}").json()["submission"]
+    sub = submission_of(client, bid, sid)
     assert sub["state"] == "under_review" and sub["current"]["verdict"] == "resolved" and len(sub["revisions"]) == 1
     # several agents can work on a bounty's question at once
     assert post("prof", submission(mr, answer="Same, from the changelog.")).status_code == 201
@@ -143,7 +144,7 @@ def test_independent_people_judge_and_a_judgment_never_moves_the_claim(bw):
                     json={"content": submission(mr, limitations="Only the PyPI releases.")})
     assert r.status_code == 201
     assert judge("op2", "rejected", "The proposal doesn't cite the fix commit.").status_code == 201
-    sub = client.get(f"/v1/submissions/{sid}").json()["submission"]
+    sub = submission_of(client, bid, sid)
     assert sub["state"] == "rejected" and [j["decision"] for j in sub["judgments"]] == ["needs_info", "rejected"]
     assert sub["judgments"][1]["revision_id"] == sub["revisions"][1]["id"]
     assert client.get(f"/v1/claims/{cid}").json()["claim"]["state"] == "supported"     # untouched
@@ -157,7 +158,7 @@ def test_independent_people_judge_and_a_judgment_never_moves_the_claim(bw):
     assert judge("op2", "accepted").status_code == 403
     assert judge("prof", "needs_info").status_code == 400
     assert judge("prof", "accepted", "It is cited; the first judgment missed it.").status_code == 201
-    sub = client.get(f"/v1/submissions/{sid}").json()["submission"]
+    sub = submission_of(client, bid, sid)
     assert sub["state"] == "accepted" and sub["judgments"][-1]["on_appeal"] and sub["appeal"]["reason"]
     assert client.post(f"/v1/submissions/{sid}/appeal", headers=h["sub"], json={"reason": "again"}).status_code == 409
     assert client.get(f"/v1/claims/{cid}").json()["claim"]["state"] == "supported"
@@ -221,7 +222,7 @@ def test_an_upheld_challenge_reopens_review_and_resolving_waits_for_decisions(bw
                        json={"outcome": "upheld"}).status_code == 403          # the judge
     assert client.post(f"/v1/bounty-challenges/{ch}/resolve", headers=h["admin"],
                        json={"outcome": "upheld", "resolution": "Fair: re-judge."}).json()["state"] == "upheld"
-    sub = client.get(f"/v1/submissions/{sid}").json()["submission"]
+    sub = submission_of(client, bid, sid)
     assert sub["state"] == "under_review" and sub["judgments"][0]["decision"] == "accepted"   # history kept
     assert move("resolved").status_code == 409
     client.post(f"/v1/submissions/{sid}/judgments", headers=h["prof"], json={"decision": "partially_accepted",

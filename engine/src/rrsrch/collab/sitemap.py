@@ -34,8 +34,8 @@ def _sql(kind: str) -> tuple[str, str]:
     if kind == "claims":
         return ("SELECT c.id, greatest(c.created_at, c.state_changed_at, "
                 "  (SELECT max(v.created_at) FROM claim_revisions v WHERE v.claim_id = c.id), "
-                "  (SELECT max(w.created_at) FROM claim_reviews w WHERE w.claim_id = c.id), "
-                "  (SELECT max(coalesce(ch.resolved_at, ch.created_at)) FROM challenges ch WHERE ch.claim_id = c.id)) "
+                "  (SELECT max(coalesce(w.resolved_at, w.created_at)) FROM reviews w "
+                "     WHERE w.claim_id = c.id AND w.kind IN ('decision', 'objection'))) "
                 f"FROM claims c JOIN repositories r ON r.id = c.repository_id WHERE {vis}"), "bigint"
     if kind == "questions":
         return f"SELECT p.id, {_POST_LASTMOD} {posts} AND p.kind = 'question'", "bigint"

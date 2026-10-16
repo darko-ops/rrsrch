@@ -2,6 +2,7 @@
 against a real Postgres over HTTP."""
 import psycopg
 import pytest
+from reviewing import notes, object_to, report, reports  # noqa: F401
 from test_claim_review import reader_claim, review, state_of
 from test_knowledge_api import PRIVATE_RULES, claim_of, merged_claim
 from test_trust_db import PILOT, QUOTE, SHA, TEXT, world  # noqa: F401  (world is a fixture)
@@ -18,10 +19,6 @@ def post(client, who, title="WOMAC gains at 12 months", kind="finding", **extra)
     r = client.post("/v1/posts", headers=who, json={"kind": kind, "title": title, "body": "See the trial.", **extra})
     assert r.status_code == 201, r.json()
     return r.json()["post_id"]
-
-
-def notes(client, who):
-    return client.get("/v1/notifications", headers=who).json()["items"]
 
 
 def test_any_signed_in_agent_posts_to_the_commons(world):
@@ -127,7 +124,7 @@ def test_promoting_a_post_opens_a_merge_request_that_review_decides(world):
         assert c.execute("SELECT source_post_id FROM merge_requests WHERE id = %s", (mr,)).fetchone()[0] == pid
         assert c.execute("SELECT count(*) FROM claims").fetchone()[0] == 0          # nothing merged yet
 
-    client.post(f"/v1/merge-requests/{mr}/reviews", headers=h["ext"], json={"verdict": "approve"})
+    client.post("/v1/reviews", headers=h["ext"], json={"target": f"proposal:{mr}", "verdict": "approve"})
     assert client.post(f"/v1/merge-requests/{mr}/merge", headers=h["admin"]).status_code == 200
     assert client.get(f"/v1/posts/{pid}").json()["promoted"]["claim_id"] is not None
 
@@ -152,15 +149,15 @@ def test_verification_reports_are_evidence_and_never_change_state(world):
     body = {"target": f"claim:{cid}", "context": "usage", "outcome": "worked_with_conditions",
             "observations": "Held for patients under 60.", "conditions": "age < 60",
             "versions": {"protocol": "v2"}, "artifacts": [{"name": "notebook", "url": "https://example.org/nb"}]}
-    r = client.post("/v1/verifications", headers=h["ext"], json=body)
+    r = report(client, h["ext"], **(body))
     assert r.status_code == 201 and r.json()["independent"] is True
-    own = client.post("/v1/verifications", headers=h["bot"], json=body | {"context": "reproduction",
-                                                                          "outcome": "reproduced"})
+    own = report(client, h["bot"], **(body | {"context": "reproduction",
+                                                                          "outcome": "reproduced"}))
     assert own.status_code == 201 and own.json()["independent"] is False        # bot wrote the claim
     for bad in ({"outcome": "reproduced"}, {"artifacts": [{"name": "x", "url": "http://insecure"}]},
                 {"artifacts": [{"url": "https://no.name"}]}, {"target": "mr:1"}):
-        assert client.post("/v1/verifications", headers=h["ext"], json=body | bad).status_code in (400, 422), bad
-    assert client.post("/v1/verifications", json=body).status_code == 401
+        assert report(client, h["ext"], **(body | bad)).status_code in (400, 422), bad
+    assert report(client, {}, **body).status_code == 401
 
     assert state_of(url, cid) == before
     fb = client.get(f"/v1/claims/{cid}/feedback").json()["formal"]["verification_reports"]
@@ -169,8 +166,7 @@ def test_verification_reports_are_evidence_and_never_change_state(world):
                                              "insufficient_evidence": 0, "independent": 0}
     assert fb["items"][1]["revision"] == 1 and fb["items"][1]["artifacts"][0]["url"] == "https://example.org/nb"
     assert any(n["action"] == "verification.usage" for n in notes(client, h["bot"]))
-    listed = client.get("/v1/verifications", params={"target": f"claim:{cid}"}).json()
-    assert len(listed["items"]) == 2
+    assert len(reports(client, f"claim:{cid}")) == 2
 
 
 def test_verification_reports_are_rate_limited(world, monkeypatch):
@@ -178,8 +174,8 @@ def test_verification_reports_are_rate_limited(world, monkeypatch):
     monkeypatch.setattr(verification, "REPORTS_PER_HOUR", 1)
     pid = post(client, h["bot"])
     body = {"target": f"post:{pid}", "context": "reproduction", "outcome": "inconclusive", "observations": "n=3"}
-    assert client.post("/v1/verifications", headers=h["ext"], json=body).status_code == 201
-    assert client.post("/v1/verifications", headers=h["ext"], json=body).status_code == 429
+    assert report(client, h["ext"], **(body)).status_code == 201
+    assert report(client, h["ext"], **(body)).status_code == 429
 
 
 def test_a_policy_can_require_independent_reproductions(world):
@@ -192,13 +188,13 @@ def test_a_policy_can_require_independent_reproductions(world):
     assert r["state"] == "under_review" and r["reasons"] == ["0 independent reproduction(s), policy needs 1"]
 
     rep = {"target": f"claim:{cid}", "context": "reproduction", "observations": "Same result on reanalysis."}
-    client.post("/v1/verifications", headers=h["admin"], json=rep | {"outcome": "reproduced"})
+    report(client, h["admin"], **(rep | {"outcome": "reproduced"}))
     assert state_of(url, cid) == "under_review"                                    # a report alone changes nothing
     assert review(client, h["ext"], cid, "approve").json()["state"] == "supported"
 
     other = reader_claim(url, text=QUOTE + " ")
-    client.post("/v1/verifications", headers=h["admin"], json=rep | {"target": f"claim:{other}", "outcome": "reproduced"})
-    client.post("/v1/verifications", headers=h["bot"], json=rep | {"target": f"claim:{other}", "outcome": "failed"})
+    report(client, h["admin"], **(rep | {"target": f"claim:{other}", "outcome": "reproduced"}))
+    report(client, h["bot"], **(rep | {"target": f"claim:{other}", "outcome": "failed"}))
     r = review(client, h["ext"], other, "approve").json()
     assert r["state"] == "under_review" and r["reasons"] == ["1 independent reproduction(s) failed"]
 

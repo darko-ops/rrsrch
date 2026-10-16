@@ -31,6 +31,14 @@ from ..knowledge import query
 from ..trust import audit
 from ..trust.merge import Refused
 
+# The kinds of review standing reads (one `reviews` table: trust/reviews.py), under the names these queries use.
+CLAIM_DECISIONS = ("(SELECT id, claim_id, revision_id, reviewer_id, verdict, findings, created_at FROM reviews "
+                   "WHERE kind = 'decision' AND claim_id IS NOT NULL)")
+OBJECTIONS = ("(SELECT id, claim_id, reviewer_id AS author_id, state, created_at, resolved_at FROM reviews "
+              "WHERE kind = 'objection' AND claim_id IS NOT NULL)")
+CHECKS = ("(SELECT id, target, repository_id, reviewer_id AS author_id, kind AS context, verdict AS outcome, "
+          "created_at FROM reviews WHERE kind IN ('reproduction', 'usage'))")
+
 # Sparks earned per decided outcome
 SPARKS = {"accepted_revision": 5, "claim_supported": 5, "challenge_upheld": 4,
           "reproduction_decided": 2, "review_confirmed": 1}
@@ -60,14 +68,14 @@ _OUTCOME_SQL = {
         "AND NOT EXISTS (SELECT 1 FROM merge_requests m JOIN claim_revisions v ON v.id = m.merged_revision_id "
         "                WHERE v.claim_id = c.id AND m.author_id = %(a)s)",
     "challenge_upheld":
-        "SELECT 'challenge:' || ch.id, c.repository_id FROM challenges ch JOIN claims c ON c.id = ch.claim_id "
+        "SELECT 'challenge:' || ch.id, c.repository_id FROM " + OBJECTIONS + " ch JOIN claims c ON c.id = ch.claim_id "
         "WHERE ch.author_id = %(a)s AND ch.state = 'upheld' AND c.agent_id <> %(a)s",
     "reproduction_decided":
-        "SELECT DISTINCT 'claim:' || c.id || ':reproduction', c.repository_id FROM verification_reports v "
+        "SELECT DISTINCT 'claim:' || c.id || ':reproduction', c.repository_id FROM " + CHECKS + " v "
         "JOIN claims c ON v.target = 'claim:' || c.id WHERE v.author_id = %(a)s AND v.context = 'reproduction' "
         "AND c.agent_id <> %(a)s AND c.state IN " + DECIDED,
     "review_confirmed":
-        "SELECT 'claim_review:' || cr.id, c.repository_id FROM claim_reviews cr JOIN claims c ON c.id = cr.claim_id "
+        "SELECT 'claim_review:' || cr.id, c.repository_id FROM " + CLAIM_DECISIONS + " cr JOIN claims c ON c.id = cr.claim_id "
         "WHERE cr.reviewer_id = %(a)s AND ((cr.verdict = 'approve' AND c.state = 'supported') "
         "  OR (cr.verdict = 'reject' AND c.state = 'rejected')) "
         "UNION ALL SELECT 'review:' || rv.id, m.repository_id FROM reviews rv JOIN merge_requests m "
@@ -114,7 +122,7 @@ def _authored(target_col: str) -> str:
             f"WHEN 'post' THEN (SELECT author_id FROM research_posts WHERE id = split_part({target_col}, ':', 2)::bigint) "
             f"WHEN 'message' THEN (SELECT author_id FROM messages WHERE id = split_part({target_col}, ':', 2)::bigint) "
             f"WHEN 'mr' THEN (SELECT author_id FROM merge_requests WHERE id = split_part({target_col}, ':', 2)::bigint) "
-            f"WHEN 'challenge' THEN (SELECT author_id FROM challenges WHERE id = split_part({target_col}, ':', 2)::bigint) "
+            f"WHEN 'challenge' THEN (SELECT reviewer_id FROM reviews WHERE id = split_part({target_col}, ':', 2)::bigint) "
             "END")
 
 
@@ -135,22 +143,22 @@ def outcomes(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) 
               "                    ORDER BY id LIMIT 1) first WHERE m.author_id = %(a)s AND {vis}")
     rep = one("SELECT count(*) FILTER (WHERE v.outcome = 'reproduced'), count(*) FILTER (WHERE v.outcome IN "
               "('reproduced', 'failed')), count(*) FILTER (WHERE v.outcome IN ('inconclusive', 'insufficient_evidence')) "
-              "FROM verification_reports v JOIN repositories r ON r.id = v.repository_id "
+              "FROM " + CHECKS + " v JOIN repositories r ON r.id = v.repository_id "
               "WHERE v.context = 'reproduction' AND " + _authored("v.target") + " = %(a)s AND "
               + _independent("v.author_id") + " AND {vis}")
-    cor = one("SELECT count(*) FILTER (WHERE ch.state = 'upheld'), count(*) FROM challenges ch JOIN claims c "
+    cor = one("SELECT count(*) FILTER (WHERE ch.state = 'upheld'), count(*) FROM " + OBJECTIONS + " ch JOIN claims c "
               "ON c.id = ch.claim_id JOIN repositories r ON r.id = c.repository_id WHERE ch.author_id = %(a)s "
               "AND c.agent_id <> %(a)s AND ch.state IN ('upheld', 'dismissed') AND {vis}")
     rev = one("SELECT count(*) FILTER (WHERE agreed), count(*) FROM ("
               "  SELECT (cr.verdict = 'approve') = (c.state = 'supported') agreed, c.repository_id rid "
-              "  FROM claim_reviews cr JOIN claims c ON c.id = cr.claim_id "
+              "  FROM " + CLAIM_DECISIONS + " cr JOIN claims c ON c.id = cr.claim_id "
               "  WHERE cr.reviewer_id = %(a)s AND c.state IN ('supported', 'rejected') "
               "  UNION ALL SELECT (rv.verdict = 'approve') = (m.state = 'merged'), m.repository_id "
               "  FROM reviews rv JOIN merge_requests m ON m.id = rv.merge_request_id "
               "  WHERE rv.reviewer_id = %(a)s AND rv.verdict IN ('approve', 'reject') AND m.state IN ('merged', 'rejected')"
               ") x JOIN repositories r ON r.id = x.rid WHERE {vis}")
     use = one("SELECT count(*) FILTER (WHERE v.outcome IN ('worked', 'worked_with_conditions')), count(*) "
-              "FROM verification_reports v JOIN repositories r ON r.id = v.repository_id WHERE v.context = 'usage' "
+              "FROM " + CHECKS + " v JOIN repositories r ON r.id = v.repository_id WHERE v.context = 'usage' "
               "AND v.outcome IN ('worked', 'worked_with_conditions', 'failed', 'outdated', 'missing_step') AND "
               + _authored("v.target") + " = %(a)s AND " + _independent("v.author_id") + " AND {vis}")
     return [
@@ -211,15 +219,15 @@ def activity(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) 
         "posts": "SELECT count(*) FROM research_posts x JOIN repositories r ON r.id = x.repository_id WHERE x.author_id = %(a)s",
         "comments": "SELECT count(*) FROM messages x JOIN discussions d ON d.id = x.discussion_id JOIN repositories r "
                     "ON r.id = d.repository_id WHERE x.author_id = %(a)s",
-        "verification_reports": "SELECT count(*) FROM verification_reports x JOIN repositories r ON r.id = x.repository_id "
+        "verification_reports": "SELECT count(*) FROM " + CHECKS + " x JOIN repositories r ON r.id = x.repository_id "
                                 "WHERE x.author_id = %(a)s",
         "merge_requests": "SELECT count(*) FROM merge_requests x JOIN repositories r ON r.id = x.repository_id "
                           "WHERE x.author_id = %(a)s",
-        "reviews": "SELECT (SELECT count(*) FROM claim_reviews x JOIN claims c ON c.id = x.claim_id JOIN repositories r "
+        "reviews": "SELECT (SELECT count(*) FROM " + CLAIM_DECISIONS + " x JOIN claims c ON c.id = x.claim_id JOIN repositories r "
                    "ON r.id = c.repository_id WHERE x.reviewer_id = %(a)s AND {vis}) + (SELECT count(*) FROM reviews x "
                    "JOIN merge_requests m ON m.id = x.merge_request_id JOIN repositories r ON r.id = m.repository_id "
                    "WHERE x.reviewer_id = %(a)s AND {vis})",
-        "challenges": "SELECT count(*) FROM challenges x JOIN claims c ON c.id = x.claim_id JOIN repositories r "
+        "challenges": "SELECT count(*) FROM " + OBJECTIONS + " x JOIN claims c ON c.id = x.claim_id JOIN repositories r "
                       "ON r.id = c.repository_id WHERE x.author_id = %(a)s",
     }.items():
         sql = sql.replace("{vis}", where) if "{vis}" in sql else f"{sql} AND {where}"
@@ -268,18 +276,18 @@ def trust(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) -> 
     sql = (
         "SELECT r.slug, src, held, independent, at FROM ("
         f"  SELECT c.repository_id rid, 'claim_review' src, cr.verdict = 'approve' held, {indep.format(col='cr.reviewer_id')} "
-        "     independent, cr.created_at at FROM claim_reviews cr JOIN claims c ON c.id = cr.claim_id "
+        "     independent, cr.created_at at FROM " + CLAIM_DECISIONS + " cr JOIN claims c ON c.id = cr.claim_id "
         "   WHERE c.agent_id = %(a)s AND cr.reviewer_id <> %(a)s "
         f"  UNION ALL SELECT m.repository_id, 'merge_review', rv.verdict = 'approve', {indep.format(col='rv.reviewer_id')}, "
         "     rv.created_at FROM reviews rv JOIN merge_requests m ON m.id = rv.merge_request_id "
         "   WHERE m.author_id = %(a)s AND rv.reviewer_id <> %(a)s AND rv.verdict IN ('approve', 'reject') "
         f"  UNION ALL SELECT v.repository_id, v.context, v.outcome = ANY(%(held)s), {indep.format(col='v.author_id')}, "
-        "     v.created_at FROM verification_reports v "
+        "     v.created_at FROM " + CHECKS + " v "
         "     LEFT JOIN claims c ON v.target = 'claim:' || c.id LEFT JOIN research_posts po ON v.target = 'post:' || po.id "
         "   WHERE coalesce(c.agent_id, po.author_id) = %(a)s AND v.author_id <> %(a)s "
         "     AND (v.outcome = ANY(%(held)s) OR v.outcome = ANY(%(not_held)s)) "
         f"  UNION ALL SELECT c.repository_id, 'challenge', ch.state = 'dismissed', {indep.format(col='ch.author_id')}, "
-        "     ch.resolved_at FROM challenges ch JOIN claims c ON c.id = ch.claim_id "
+        "     ch.resolved_at FROM " + OBJECTIONS + " ch JOIN claims c ON c.id = ch.claim_id "
         "   WHERE c.agent_id = %(a)s AND ch.author_id <> %(a)s AND ch.state IN ('upheld', 'dismissed')"
         f") e JOIN repositories r ON r.id = e.rid WHERE {where}")
     domains: dict[str, dict] = {}

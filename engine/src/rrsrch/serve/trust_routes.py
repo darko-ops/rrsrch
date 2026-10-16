@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
+from ..collab import challenges, verification
 from ..identity import access
 from ..identity import store as ids
 from ..identity.access import Action, Principal
@@ -31,11 +32,6 @@ class NewMergeRequest(BaseModel):
     repository: str
     claim_id: int | None = None
     content: dict[str, Any]
-
-
-class NewReview(BaseModel):
-    verdict: Literal["approve", "request_changes", "reject"]
-    findings: str = Field(default="", max_length=4000)
 
 
 class Close(BaseModel):
@@ -77,13 +73,6 @@ def get_merge_request(mr_id: int, p: Principal | None = Depends(principal),
                               "approvals": decision.approvals}}
 
 
-@router.post("/merge-requests/{mr_id}/reviews", status_code=201)
-def review(mr_id: int, body: NewReview, p: Principal | None = Depends(principal),
-           c: psycopg.Connection = Depends(conn)) -> dict:
-    _call(merge.review, c, p, mr_id, body.verdict, body.findings)
-    return {"ok": True, "merge_request_id": mr_id, "verdict": body.verdict}
-
-
 @router.post("/merge-requests/{mr_id}/merge")
 def merge_request(mr_id: int, p: Principal | None = Depends(principal),
                   c: psycopg.Connection = Depends(conn)) -> JSONResponse:
@@ -102,38 +91,80 @@ def close(mr_id: int, body: Close, p: Principal | None = Depends(principal),
     return {"ok": True, "merge_request_id": mr_id, "state": body.state}
 
 
-class ClaimReview(BaseModel):
-    verdict: Literal["approve", "reject"]
-    findings: str = Field(default="", max_length=4000)
-
-
-@router.post("/claims/{claim_id}/reviews")
-def review_claim(claim_id: int, body: ClaimReview, p: Principal | None = Depends(principal),
-                 c: psycopg.Connection = Depends(conn)) -> dict:
-    """Review a claim already in a repository. The response says where the claim now stands, and why."""
-    return {"ok": True} | _call(claim_review.review, c, p, claim_id, body.verdict, body.findings)
+# every way of judging someone else's work goes through one endpoint (docs/SIMPLIFY.md): the verdict says which kind
+# of review it is, and the module that owns that kind decides what it does
+CHECKS = {"reproduced": ("reproduction", "reproduced"), "could_not_reproduce": ("reproduction", "failed"),
+          "inconclusive": ("reproduction", "inconclusive"),
+          "insufficient_evidence": ("reproduction", "insufficient_evidence"),
+          "worked": ("usage", "worked"), "worked_with_conditions": ("usage", "worked_with_conditions"),
+          "did_not_work": ("usage", "failed"), "outdated": ("usage", "outdated"),
+          "missing_step": ("usage", "missing_step"), "unclear": ("usage", "unclear")}
 
 
 class Review(BaseModel):
-    target: str = Field(pattern=r"^(proposal|mr|claim):[1-9][0-9]{0,17}$")
-    verdict: Literal["approve", "request_changes", "reject"]
-    findings: str = Field(default="", max_length=4000)
+    target: str = Field(pattern=r"^(proposal|mr|claim|post):[1-9][0-9]{0,17}$")
+    verdict: Literal["approve", "request_changes", "reject", "object", "reproduced", "could_not_reproduce",
+                     "inconclusive", "insufficient_evidence", "worked", "worked_with_conditions", "did_not_work",
+                     "outdated", "missing_step", "unclear"]
+    findings: str = Field(default="", max_length=8000)
+    # objections
+    objection: Literal["contradiction", "missing_assumption", "evidence_problem", "scope", "other"] = "other"
+    blocking: bool = True
+    evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    # reproduction and usage
+    method: str = Field(default="", max_length=4000)
+    environment: str = Field(default="", max_length=2000)
+    conditions: str = Field(default="", max_length=2000)
+    limitations: str = Field(default="", max_length=2000)
+    versions: dict[str, str] = Field(default_factory=dict, max_length=30)
+    artifacts: list[dict[str, Any]] = Field(default_factory=list, max_length=10)
 
 
 @router.post("/reviews")
-def review_anything(body: Review, p: Principal | None = Depends(principal),
-                    c: psycopg.Connection = Depends(conn)) -> dict:
-    """One way to review whatever waits for review: `proposal:N` (a proposed change, i.e. a merge request) or
-    `claim:N` (a claim already in the repository: not yet reviewed, or stale and up for review again)."""
+def review_anything(body: Review, request: Request, p: Principal | None = Depends(principal),
+                    c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Review someone else's work, any kind of review:
+
+      approve | request_changes | reject     a proposal (`proposal:N`) or a claim not yet reviewed (`claim:N`)
+      object                                 a claim: what's wrong in `findings`, its kind in `objection`
+      reproduced | could_not_reproduce | inconclusive | insufficient_evidence
+                                             a claim or a finding (`post:N`) you tried to reproduce
+      worked | worked_with_conditions | did_not_work | outdated | missing_step | unclear
+                                             a claim or a finding you used
+    """
     kind, n = body.target.split(":")
-    if kind == "claim":
-        if body.verdict == "request_changes":
-            raise HTTPException(400, "a claim already in the repository is approved or rejected; to change it, "
-                                     "propose a revision")
-        return {"ok": True, "target": body.target} | _call(claim_review.review, c, p, int(n), body.verdict,
-                                                             body.findings)
-    _call(merge.review, c, p, int(n), body.verdict, body.findings)
-    return {"ok": True, "target": f"proposal:{n}", "merge_request_id": int(n), "verdict": body.verdict}
+    kind = "proposal" if kind == "mr" else kind
+
+    def go():
+        if body.verdict in ("approve", "request_changes", "reject"):
+            if kind == "post":
+                raise HTTPException(400, "a finding is reviewed by reproducing or using it; propose it as a claim "
+                                         "to have it approved")
+            if kind == "claim":
+                if body.verdict == "request_changes":
+                    raise HTTPException(400, "a claim already in the repository is approved or rejected; to change "
+                                             "it, propose a revision")
+                return 200, {"ok": True, "target": body.target} | _call(claim_review.review, c, p, int(n),
+                                                                         body.verdict, body.findings)
+            _call(merge.review, c, p, int(n), body.verdict, body.findings)
+            return 200, {"ok": True, "target": f"proposal:{n}", "merge_request_id": int(n), "verdict": body.verdict}
+        if not body.findings.strip():
+            raise HTTPException(400, "say what you found in `findings`")
+        if body.verdict == "object":
+            if kind != "claim":
+                raise HTTPException(400, 'an objection is to a claim: target "claim:N"')
+            rid = _call(challenges.open_challenge, c, p, int(n), body.objection, body.findings, body.evidence,
+                        body.blocking)
+            state = c.execute("SELECT state FROM claims WHERE id = %s", (int(n),)).fetchone()[0]
+            return 201, {"ok": True, "review_id": rid, "challenge_id": rid, "claim_state": state}
+        if kind not in ("claim", "post"):
+            raise HTTPException(400, 'reproduction and usage reviews are of a claim or a finding ("post:N")')
+        context, outcome = CHECKS[body.verdict]
+        out = _call(verification.submit, c, p, body.target, context, outcome, body.findings, method=body.method,
+                    environment=body.environment, conditions=body.conditions, limitations=body.limitations,
+                    versions=body.versions, artifacts=body.artifacts)
+        return 201, {"ok": True, "review_id": out["report_id"]} | out
+    return idempotency.run(request, c, p, body, go)
 
 
 @router.get("/reviews")

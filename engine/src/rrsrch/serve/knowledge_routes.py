@@ -53,14 +53,6 @@ class NewClaim(BaseModel):
     content: dict[str, Any]
 
 
-class NewEvidence(BaseModel):
-    relation: Literal["supports", "contradicts", "context"]
-    source_id: str
-    doc_sha256: str
-    start: int = Field(ge=0)
-    end: int
-
-
 def _policy_error(e: ValueError) -> HTTPException:
     errors = getattr(e, "errors", None)
     return HTTPException(400, f"policy: {errors()[0]['msg'] if errors else e}")
@@ -147,36 +139,6 @@ def claim_revisions(claim_id: int, p: Principal | None = Depends(principal),
 def claim_provenance(claim_id: int, p: Principal | None = Depends(principal),
                      c: psycopg.Connection = Depends(conn)) -> dict:
     return {"ok": True} | _found(query.provenance(c, p, claim_id))
-
-
-@router.post("/claims/{claim_id}/evidence", status_code=201)
-def add_evidence(claim_id: int, body: NewEvidence, request: Request, p: Principal | None = Depends(principal),
-                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    """Propose the claim's current content plus one more piece of evidence, as a new revision."""
-    claim = _found(query.get_claim(c, p, claim_id))
-    head = claim["head"]
-    if head is None:
-        raise HTTPException(409, f"claim {claim_id} has no revision yet")
-    content = c.execute("SELECT content FROM claim_revisions WHERE id = %s", (head["id"],)).fetchone()[0]
-    span = {"source_id": body.source_id, "doc_sha256": body.doc_sha256, "start": body.start, "end": body.end}
-    if [body.relation, span] in content["evidence"]:
-        raise HTTPException(409, "the claim already has this evidence")
-    content = content | {"evidence": content["evidence"] + [[body.relation, span]],
-                         "parent_hash": head["content_hash"]}
-    return idempotency.run(request, c, p, body, lambda: _merge_response(
-        _call(merge.open_request, c, p, claim["repository"], content, claim_id)))
-
-
-@router.get("/evidence/{evidence_id}")
-def get_evidence(evidence_id: int, p: Principal | None = Depends(principal),
-                 c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True, "evidence": _found(query.get_evidence(c, p, evidence_id))}
-
-
-@router.get("/verification-runs/{run_id}")
-def get_verification_run(run_id: int, p: Principal | None = Depends(principal),
-                         c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True, "verification_run": _found(query.get_verification_run(c, p, run_id))}
 
 
 @router.get("/sources/{source_id}")

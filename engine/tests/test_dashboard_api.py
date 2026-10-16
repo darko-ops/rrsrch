@@ -1,6 +1,7 @@
 """Read endpoints the site dashboard needs: agents, keys, merge-request lists and the repository atlas."""
 import psycopg
 import pytest
+from reviewing import object_to, report, reports  # noqa: F401
 from test_knowledge_api import claim_of, merged_claim
 from test_trust_db import PILOT, content, open_mr, world  # noqa: F401  (world is a fixture)
 
@@ -33,7 +34,7 @@ def test_merge_requests_are_listed_by_state(world):
     client, h, _ = world
     rev, merged = merged_claim(client, h)
     pending = open_mr(client, h["bot"], {"repository": PILOT, "content": content()})
-    client.post(f"/v1/merge-requests/{pending}/reviews", headers=h["ext"], json={"verdict": "request_changes"})
+    client.post("/v1/reviews", headers=h["ext"], json={"target": f"proposal:{pending}", "verdict": "request_changes"})
     open_ = client.get(f"/v1/repos/{PILOT}/merge-requests").json()["items"]
     assert [(m["id"], m["author"], m["approvals"], m["objections"], m["checks_passed"]) for m in open_] == \
         [(pending, "bot", 0, 1, True)]
@@ -48,14 +49,14 @@ def test_atlas_maps_a_repository(world):
     body = content("WOMAC improved more with MSCs than with hyaluronic acid at 12 months (p = 0.01).")
     body["derived_from"] = [a]
     mr = open_mr(client, h["bot"], {"repository": PILOT, "content": body})
-    client.post(f"/v1/merge-requests/{mr}/reviews", headers=h["ext"], json={"verdict": "approve"})
+    client.post("/v1/reviews", headers=h["ext"], json={"target": f"proposal:{mr}", "verdict": "approve"})
     b = claim_of(url, client.post(f"/v1/merge-requests/{mr}/merge", headers=h["admin"]).json()["revision_id"])
     with psycopg.connect(url) as c:
         c.execute("INSERT INTO trials (nct_id, has_results, snapshot_sha256) VALUES ('NCT01', false, 'x')")
         c.execute("INSERT INTO trial_links VALUES ('NCT01', 'MED:1', 'nct_in_abstract')")
         c.execute("INSERT INTO claim_agreements (claim_a_id, claim_b_id, verdict, rule, detail, evidence, rules) "
                   "VALUES (%s, %s, 'agrees', 'direction', 't', '{}', 'v1')", (min(a, b), max(a, b)))
-    client.post(f"/v1/claims/{a}/challenges", headers=h["ext"], json={"kind": "scope", "statement": "n=40"})
+    object_to(client, h["ext"], a, **{"kind": "scope", "statement": "n=40"})
 
     g = client.get(f"/v1/repos/{PILOT}/atlas").json()
     assert g["counts"] == {"claim": 2, "agent": 1, "source": 1, "trial": 1} and g["truncated"] is False

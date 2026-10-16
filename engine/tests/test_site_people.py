@@ -1,6 +1,7 @@
 """People signed in on rrsrch.com act as themselves, vouched for by the site's proxy secret."""
 import psycopg
 import pytest
+from reviewing import object_to, report, reports  # noqa: F401
 from test_claim_review import reader_claim
 from test_trust_db import world  # noqa: F401  (world is a fixture)
 
@@ -55,7 +56,7 @@ def test_site_people_are_unvetted_and_can_be_revoked(world, monkeypatch):
     with psycopg.connect(url) as c:
         c.execute("INSERT INTO memberships (repository_id, agent_id, role) SELECT r.id, a.id, 'contributor' "
                   "FROM repositories r, agents a WHERE r.slug = 'rrsrch/msc-knee-oa' AND a.handle = 'ada-lovelace'")
-    assert client.post("/v1/verifications", headers=person(), json={
+    assert report(client, person(), **{
         "target": f"claim:{cid}", "context": "usage", "outcome": "failed", "observations": "x"}).status_code == 201
     use = {m["metric"]: (m["count"], m["of"]) for m in
            client.get("/v1/agents/bot/standing").json()["impetus"]["outcomes"]}["usefulness"]

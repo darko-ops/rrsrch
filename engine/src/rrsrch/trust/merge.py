@@ -93,7 +93,8 @@ def _proposal(conn, repo: access.Repo, policy_version: str, content: dict, autho
         "SELECT d.derived_from_id FROM claim_derivations d JOIN up ON d.claim_id = up.id) SELECT id FROM up",
         (derived,))}
     blocking = tuple(r[0] for r in conn.execute(
-        "SELECT id FROM challenges WHERE claim_id = %s AND state = 'open' AND blocking ORDER BY id", (claim_id,))) \
+        "SELECT id FROM reviews WHERE claim_id = %s AND kind = 'objection' AND claim_id IS NOT NULL AND state = 'open' AND blocking ORDER BY id",
+        (claim_id,))) \
         if claim_id else ()
     return pipeline.Proposal(
         content=content, repository=repo.slug, policy=load_policy(conn, repo.id, policy_version),

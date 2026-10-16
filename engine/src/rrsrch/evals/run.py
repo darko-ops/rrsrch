@@ -230,7 +230,7 @@ class Harness:
         if not pending:
             return
         with self.connect() as c:
-            hit = {r[0] for r in c.execute("SELECT DISTINCT claim_id FROM challenges WHERE claim_id = ANY(%s)",
+            hit = {r[0] for r in c.execute("SELECT DISTINCT claim_id FROM reviews WHERE kind = 'objection' AND claim_id = ANY(%s)",
                                            ([s.claim_id for s in pending],))}
         for s in pending:
             if s.claim_id in hit:

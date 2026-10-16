@@ -74,7 +74,7 @@ def submit(conn: psycopg.Connection, p: Principal | None, target: str, context: 
         raise Refused(400, f"a {context} report's outcome is one of {', '.join(OUTCOMES[context])}")
     repo_id, subject_author, revision_id = _subject(conn, target)
     feedback.require_contributor(conn, p, repo_id, target if target.startswith("post:") else "")
-    rate_limit(conn, "SELECT count(*) FROM verification_reports WHERE author_id = %s "
+    rate_limit(conn, "SELECT count(*) FROM reviews WHERE reviewer_id = %s AND kind IN ('reproduction', 'usage') "
                      "AND created_at > now() - interval '1 hour'", (p.agent_id,),
                REPORTS_PER_HOUR_UNCLAIMED if onboarding.is_unvetted(p.organization_id) else REPORTS_PER_HOUR,
                "verification reports in the last hour")
@@ -105,10 +105,12 @@ def reports(conn: psycopg.Connection, target: str) -> dict:
     """Every report on a target, newest first, with a summary. Callers check read access first."""
     _, subject_author, _ = _subject(conn, target)
     rows = [dict(zip(COLS, r)) for r in conn.execute(
-        "SELECT v.id, v.context, v.outcome, a.handle, a.kind, v.author_id <> %s, v.method, v.environment, v.observations, "
-        "v.conditions, v.limitations, v.versions, v.artifacts, rv.version, v.content_hash, v.created_at "
-        "FROM verification_reports v JOIN agents a ON a.id = v.author_id "
-        "LEFT JOIN claim_revisions rv ON rv.id = v.claim_revision_id WHERE v.target = %s ORDER BY v.id DESC",
+        "SELECT v.id, v.kind, v.verdict, a.handle, a.kind, v.reviewer_id <> %s, coalesce(v.details->>'method', ''), "
+        "coalesce(v.details->>'environment', ''), v.findings, coalesce(v.details->>'conditions', ''), "
+        "coalesce(v.details->>'limitations', ''), coalesce(v.details->'versions', '{}'), "
+        "coalesce(v.details->'artifacts', '[]'), rv.version, v.content_hash, v.created_at "
+        "FROM reviews v JOIN agents a ON a.id = v.reviewer_id LEFT JOIN claim_revisions rv ON rv.id = v.revision_id "
+        "WHERE v.target = %s AND v.kind IN ('reproduction', 'usage') ORDER BY v.id DESC",
         (subject_author, target))]
     summary: dict[str, dict[str, int]] = {c: {o: 0 for o in OUTCOMES[c]} | {"independent": 0} for c in OUTCOMES}
     for r in rows:

@@ -156,7 +156,7 @@ def _trust(conn: psycopg.Connection, ids: list[int]) -> dict[int, dict]:
     """Where each claim stands in review: state, version, open challenges, and the public claims the
     skeptic found contradicting it."""
     out = {cid: {"open_challenges": 0, "contradicted_by": [], "version": None} for cid in ids}
-    for cid, n in conn.execute("SELECT claim_id, count(*) FROM challenges WHERE claim_id = ANY(%s) "
+    for cid, n in conn.execute("SELECT claim_id, count(*) FROM reviews WHERE claim_id = ANY(%s) AND kind = 'objection' "
                                "AND state = 'open' GROUP BY 1", (ids,)):
         out[cid]["open_challenges"] = n
     for cid, v in conn.execute("SELECT claim_id, max(version) FROM claim_revisions WHERE claim_id = ANY(%s) "

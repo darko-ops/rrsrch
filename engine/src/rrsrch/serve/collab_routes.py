@@ -2,7 +2,6 @@
 subscriptions, notifications and contribution histories. Decisions live in rrsrch.collab."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
 import psycopg
@@ -13,7 +12,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
 from ..collab import (challenges, checkin, discussions, feed, feedback, inbox, research, review_requests, signal,
-                      sitemap, standing, verification)
+                      sitemap, standing)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -23,12 +22,6 @@ from .trust_routes import _call, _checks
 router = APIRouter(prefix="/v1")
 After = Query(default=0, ge=0)
 Limit = Query(default=50, ge=1, le=200)
-
-
-class NewDiscussion(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
-    subject: str = "repo"
-    body: str = Field(min_length=1, max_length=8000)
 
 
 class NewMessage(BaseModel):
@@ -50,13 +43,6 @@ class NewReport(BaseModel):
 
 class ReportAction(BaseModel):
     action: Literal["hide", "dismiss"]
-
-
-class NewChallenge(BaseModel):
-    kind: Literal["contradiction", "missing_assumption", "evidence_problem", "scope", "other"]
-    statement: str = Field(min_length=1, max_length=4000)
-    evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
-    blocking: bool = True
 
 
 class Resolution(BaseModel):
@@ -111,20 +97,6 @@ class Promotion(BaseModel):
     fields: dict[str, Any] = Field(default_factory=dict)
 
 
-class NewVerification(BaseModel):
-    target: str                                  # claim:N or post:N
-    context: Literal["reproduction", "usage"]
-    outcome: Literal["reproduced", "failed", "inconclusive", "insufficient_evidence",
-                     "worked", "worked_with_conditions", "outdated", "missing_step", "unclear"]
-    observations: str = Field(min_length=1, max_length=8000)
-    method: str = Field(default="", max_length=4000)
-    environment: str = Field(default="", max_length=2000)
-    conditions: str = Field(default="", max_length=2000)
-    limitations: str = Field(default="", max_length=2000)
-    versions: dict[str, str] = Field(default_factory=dict, max_length=30)
-    artifacts: list[dict[str, Any]] = Field(default_factory=list, max_length=10)
-
-
 def _readable_repo(c, p: Principal | None, owner: str, name: str) -> int:
     repo = query.get_repo(c, p, f"{owner}/{name}")
     if repo is None:
@@ -134,43 +106,6 @@ def _readable_repo(c, p: Principal | None, owner: str, name: str) -> int:
 
 # discussions
 
-@router.post("/repos/{owner}/{name}/discussions", status_code=201)
-def open_discussion(owner: str, name: str, body: NewDiscussion, request: Request,
-                    p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    def go():
-        did, mid = _call(discussions.open_discussion, c, p, f"{owner}/{name}", body.title, body.subject, body.body)
-        return 201, {"ok": True, "discussion_id": did, "message_id": mid}
-    return idempotency.run(request, c, p, body, go)
-
-
-@router.get("/repos/{owner}/{name}/discussions")
-def list_discussions(owner: str, name: str, subject: str | None = None, after: int = After, limit: int = Limit,
-                     p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True} | discussions.list_for_repo(c, _readable_repo(c, p, owner, name), subject, after, limit)
-
-
-@router.get("/discussions/{discussion_id}")
-def get_discussion(discussion_id: int, after: int = After, limit: int = Query(default=100, ge=1, le=500),
-                   p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True, "discussion": _call(discussions.get, c, p, discussion_id, after, limit)}
-
-
-@router.post("/discussions/{discussion_id}/messages", status_code=201)
-def post_message(discussion_id: int, body: NewMessage, request: Request, p: Principal | None = Depends(principal),
-                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    def go():
-        return 201, {"ok": True, "message_id": _call(discussions.post, c, p, discussion_id, body.kind, body.body,
-                                                     body.refs, body.parent_id)}
-    return idempotency.run(request, c, p, body, go)
-
-
-@router.post("/discussions/{discussion_id}/close")
-def close_discussion(discussion_id: int, p: Principal | None = Depends(principal),
-                     c: psycopg.Connection = Depends(conn)) -> dict:
-    _call(discussions.close, c, p, discussion_id)
-    return {"ok": True, "discussion_id": discussion_id, "state": "closed"}
-
-
 @router.post("/messages/{message_id}/hide")
 def hide_message(message_id: int, p: Principal | None = Depends(principal),
                  c: psycopg.Connection = Depends(conn)) -> dict:
@@ -179,24 +114,6 @@ def hide_message(message_id: int, p: Principal | None = Depends(principal),
 
 
 # challenges
-
-@router.post("/claims/{claim_id}/challenges", status_code=201)
-def open_challenge(claim_id: int, body: NewChallenge, request: Request, p: Principal | None = Depends(principal),
-                   c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    def go():
-        cid = _call(challenges.open_challenge, c, p, claim_id, body.kind, body.statement, body.evidence, body.blocking)
-        state = c.execute("SELECT state FROM claims WHERE id = %s", (claim_id,)).fetchone()[0]
-        return 201, {"ok": True, "challenge_id": cid, "claim_state": state}
-    return idempotency.run(request, c, p, body, go)
-
-
-@router.get("/claims/{claim_id}/challenges")
-def list_challenges(claim_id: int, p: Principal | None = Depends(principal),
-                    c: psycopg.Connection = Depends(conn)) -> dict:
-    if query.get_claim(c, p, claim_id) is None:
-        raise HTTPException(404)
-    return {"ok": True, "claim_id": claim_id, "challenges": challenges.list_for_claim(c, claim_id)}
-
 
 @router.post("/challenges/{challenge_id}/resolve")
 def resolve_challenge(challenge_id: int, body: Resolution, p: Principal | None = Depends(principal),
@@ -227,13 +144,6 @@ def decline_review(request_id: int, p: Principal | None = Depends(principal),
     return {"ok": True, "review_request_id": request_id, "state": "declined"}
 
 
-@router.get("/review-requests")
-def my_review_requests(p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
-    if p is None:
-        raise HTTPException(401, "authentication required")
-    return {"ok": True, "items": review_requests.mine(c, p)}
-
-
 # subscriptions, notifications, contributions
 
 @router.post("/subscriptions", status_code=201)
@@ -253,12 +163,6 @@ def list_subscriptions(p: Principal | None = Depends(principal), c: psycopg.Conn
 def unsubscribe(target: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
     removed = _call(feed.unsubscribe, c, p, target)
     return {"ok": True, "removed": removed, "subscriptions": feed.subscriptions(c, p)}
-
-
-@router.get("/notifications")
-def notifications(after: int = After, limit: int = Limit, p: Principal | None = Depends(principal),
-                  c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True} | _call(feed.notifications, c, p, after, limit)
 
 
 @router.get("/agents/{handle}/contributions")
@@ -365,26 +269,6 @@ def explore(kind: Literal["question", "finding"] | None = None, topic: str | Non
     return {"ok": True, "topics": research.topics(c, p)} | _call(
         research.explore, c, p, kind=kind, topic=topic, repository=repository, status=status, sort=sort, limit=limit,
         offset=offset, author=author, following=following, unanswered=unanswered, q=q)
-
-
-@router.post("/verifications", status_code=201)
-def submit_verification(body: NewVerification, request: Request, p: Principal | None = Depends(principal),
-                        c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    """Report a reproduction attempt or how knowledge worked in use. Evidence for reviewers: it never changes a
-    claim's state by itself."""
-    def go():
-        return 201, {"ok": True} | _call(verification.submit, c, p, body.target, body.context, body.outcome,
-                                         body.observations, method=body.method, environment=body.environment,
-                                         conditions=body.conditions, limitations=body.limitations,
-                                         versions=body.versions, artifacts=body.artifacts)
-    return idempotency.run(request, c, p, body, go)
-
-
-@router.get("/verifications")
-def list_verifications(target: str, p: Principal | None = Depends(principal),
-                       c: psycopg.Connection = Depends(conn)) -> dict:
-    _call(feedback._readable, c, p, target)
-    return {"ok": True} | _call(verification.reports, c, target)
 
 
 @router.get("/checkin")

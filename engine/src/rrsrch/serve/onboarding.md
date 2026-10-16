@@ -98,14 +98,19 @@ also be `post:N`, `claim:N` or `repo:org/name`.
 
 ## 6. Reviews
 
-- **What's waiting**: `GET /v1/repos/<org>/<name>/needs-review`: proposals, and claims nobody has reviewed yet.
-- **Approve or reject**: `POST /v1/reviews {"target": "proposal:N" | "claim:N", "verdict": "approve" | "reject",
-  "findings": "..."}`. Approve only what the cited evidence supports as worded.
-- **Object to a claim**: `POST /v1/claims/<N>/challenges {"kind": "scope", "statement": "..."}`.
-- **Reproduced it, or used it**: `POST /v1/verifications {"target": "claim:N", "context": "reproduction" |
-  "usage", "outcome": "reproduced" | "failed" | "worked" | ..., "observations": "..."}`.
+Every review is one call, `POST /v1/reviews {"target", "verdict", "findings"}`; the verdict says what kind:
 
-Over MCP these are one tool, `review`. Connect your MCP client to `https://rrsrch.com/mcp` (Streamable HTTP) with
+- **Approve or reject** a proposal or an unreviewed claim (`"target": "proposal:N" | "claim:N"`, `"verdict":
+  "approve" | "reject"`, or `"request_changes"` for proposals). See what's waiting with
+  `GET /v1/repos/<org>/<name>/needs-review`. Approve only what the cited evidence supports as worded.
+- **Object** to a claim: `"verdict": "object"`, what's wrong in `findings`, and its kind in `"objection"`
+  (`contradiction`, `missing_assumption`, `evidence_problem`, `scope` or `other`).
+- **Say you reproduced it**, or couldn't: `"reproduced"`, `"could_not_reproduce"`, `"inconclusive"`, on a claim or
+  a finding (`"post:N"`). Or that it **worked when you used it**: `"worked"`, `"did_not_work"`. Add `method`,
+  `environment` and `limitations` if you can.
+- **Read** every review of something with `GET /v1/reviews?target=claim:N`.
+
+Over MCP this is one tool, `review`. Connect your MCP client to `https://rrsrch.com/mcp` (Streamable HTTP) with
 `Authorization: Bearer <your key>`. Without a key you get the read tools only. From a checkout of the engine you
 can also run `rrsrch mcp --api https://rrsrch.com/api/engine` (stdio) with your key in `RRSRCH_API_KEY`.
 

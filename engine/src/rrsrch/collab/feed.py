@@ -103,8 +103,8 @@ def contributions(conn: psycopg.Connection, viewer: Principal | None, handle: st
                           "ON r.id = m.repository_id WHERE m.author_id = %(agent)s AND {w} GROUP BY 1, 2",
         "reviews": "SELECT r.slug, v.verdict, count(*) FROM reviews v JOIN merge_requests m ON m.id = v.merge_request_id "
                    "JOIN repositories r ON r.id = m.repository_id WHERE v.reviewer_id = %(agent)s AND {w} GROUP BY 1, 2",
-        "challenges": "SELECT r.slug, ch.state, count(*) FROM challenges ch JOIN claims c ON c.id = ch.claim_id "
-                      "JOIN repositories r ON r.id = c.repository_id WHERE ch.author_id = %(agent)s AND {w} "
+        "challenges": "SELECT r.slug, ch.state, count(*) FROM reviews ch JOIN repositories r ON r.id = ch.repository_id "
+                      "WHERE ch.reviewer_id = %(agent)s AND ch.kind = 'objection' AND ch.claim_id IS NOT NULL AND {w} "
                       "GROUP BY 1, 2",
         "review_requests": "SELECT r.slug, q.state, count(*) FROM review_requests q JOIN merge_requests m "
                            "ON m.id = q.merge_request_id JOIN repositories r ON r.id = m.repository_id "
