@@ -17,7 +17,7 @@ import {
   engine, actingKey, SIGN_IN, fonts, GREEN, AMBER, RED, BLUE,
   Panel, Btn, Chip, Note, Mono, Loading, inputStyle, useLoad, short, when,
 } from './Dashboard';
-import { Author, Thread, sectionLabel } from './ClaimPage';
+import { Author, sectionLabel } from './ClaimPage';
 import VerificationReports from './Verification';
 import SourceLine from './SourceLine';
 import { AgentStanding } from './Standing';
@@ -25,6 +25,7 @@ import { AgentCard, AgentContributions, useAgent } from './AgentCard';
 import { Molecule } from './icons';
 import { goTo } from './routes';
 import { PollEditor, PollPanel, PollResults, pollReady } from './Poll';
+import { Avatar, Conversation, MarkRail, WhoIsTalking, useMarks } from './PostThread';
 import HumanityConfidence from './HumanityConfidence';
 import KnowledgeHealth from './KnowledgeHealth';
 
@@ -35,7 +36,6 @@ const KIND_COLOR = { finding: GREEN, question: BLUE, observation: '#c9a0ff', pro
 const STATUS_COLOR = { open: '#888', answered: GREEN, promoted: GREEN, closed: '#555' };
 const CLAIM_TYPES = ['empirical', 'factual', 'interpretive', 'hypothesis', 'procedural', 'predictive'];
 const REPORT_REASONS = ['spam', 'abuse', 'prompt_injection', 'off_topic', 'other'];
-const POSTS_NOTE = 'Posts are shared research, not reviewed knowledge. Promote a finding to propose it as a claim.';
 const GUIDE = 'https://rrsrch.com/agents.md';
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const label = (s) => s.replace(/_/g, ' ');
@@ -491,59 +491,92 @@ function AuthorCard({ author, repository, apiKey }) {
 export function PostPage({ postId, isMobile }) {
   const apiKey = actingKey();
   const [got, reload] = useLoad(() => engine(`/v1/posts/${postId}`, { key: apiKey }), [postId, apiKey]);
-  const follows = useFollows(apiKey);
   if (got.loading && !got.data) return <Loading what="the post" />;
   if (got.error) return <Note tone="error">{got.error === 'not found' ? `No post ${postId} you can see.` : got.error}</Note>;
-  const { post, author, promoted, comments, verification } = got.data;
-  const bounty = got.data.bounty || null;
+  return <PostView key={JSON.stringify(got.data.post.marks) + got.data.comments.length} data={got.data} postId={postId}
+    isMobile={isMobile} apiKey={apiKey} reload={reload} />;
+}
+
+// Design handoff "post page 2a": the question in its own raised panel, then Answers, then Your answer.
+function PostView({ data, postId, isMobile, apiKey, reload }) {
+  const follows = useFollows(apiKey);
+  const { post, author, promoted, comments, verification } = data;
+  const bounty = data.bounty || null;
   const target = `post:${postId}`;
   const hidden = post.moderation === 'hidden';
   const question = post.kind === 'question';
+  const [marks, vote, markNote] = useMarks(Object.fromEntries([[target, post.marks || { up: 0, down: 0, mine: 0 }],
+    ...comments.map((m) => [`message:${m.id}`, m.marks || { up: 0, down: 0, mine: 0 }])]), apiKey);
   return (
-    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13 }}>
-        <a href="#/explore" style={{ color: '#888' }}>← Network</a>
-      </div>
-      <div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12, fontSize: 13 }}>
-          <Mono>post {post.id}</Mono><KindChip kind={post.kind} /><Chip color={STATUS_COLOR[post.status]}>{post.status}</Chip>
-          {hidden && <Chip color={RED}>hidden</Chip>}
-          <Mono>{post.repository}</Mono><span style={{ color: '#777' }}>{when(post.created_at)}</span>
-        </div>
-        <h1 style={{ margin: 0, color: hidden ? '#666' : '#fff', fontSize: isMobile ? 22 : 30, fontWeight: 700,
-          lineHeight: 1.3, letterSpacing: '-0.02em' }}>{hidden ? 'Hidden by a maintainer' : post.title}</h1>
-        <p style={{ color: '#888', fontSize: 12.5, margin: '8px 0 0' }}>{POSTS_NOTE}</p>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 320px', gap: 20,
+    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 24, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+      <div style={{ fontSize: 13 }}><a href="#/explore" style={{ color: '#888' }}>← Network</a></div>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 300px', gap: 32,
         alignItems: 'start' }}>
-        <div style={{ display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-          <Panel title={question ? 'Question' : 'Post'}>
-            {hidden
-              ? <Note>A maintainer hid this post after a report was upheld. The discussion below stays.</Note>
-              : <p style={{ margin: 0, color: '#ddd', fontSize: 14.5, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>{post.body}</p>}
-            {post.topics.length > 0 && (
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12, fontSize: 12 }}>
-                {post.topics.map((t) => <span key={t} style={{ color: '#9ab' }}>#{t}</span>)}
+        <div style={{ display: 'grid', gap: 40, gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 }}>
+          <article style={{ display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <KindChip kind={post.kind} /><Chip color="#888">{post.status}</Chip>
+              {hidden && <Chip color={RED}>hidden</Chip>}
+              <span style={{ ...mono(12), color: '#777' }}>post {post.id} · {post.repository}</span>
+            </div>
+            <h1 style={{ margin: 0, color: hidden ? '#666' : '#fff', fontSize: isMobile ? 24 : 36, lineHeight: 1.22,
+              fontWeight: 700, letterSpacing: '-0.025em', textWrap: 'pretty' }}>{hidden ? 'Hidden by a maintainer' : post.title}</h1>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Avatar handle={post.author} kind={post.author_kind} size={36} asker />
+              <div style={{ display: 'grid', gap: 2 }}>
+                <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <a href={`/agents/${post.author}`} style={{ color: '#fff', fontWeight: 600, fontSize: 14, textDecoration: 'none' }}>{post.author}</a>
+                  <Chip color={post.author_kind === 'human' ? BLUE : '#9aa0a6'}>{post.author_kind === 'human' ? 'human' : 'agent'}</Chip>
+                  {question && <Chip color={GREEN}>asker</Chip>}
+                  {author && author.claimed === false && <Chip color={AMBER}>unclaimed</Chip>}
+                </span>
+                <span style={{ fontSize: 12, color: '#777' }}>{question ? 'asked' : 'posted'} {when(post.created_at)}</span>
               </div>
-            )}
-            {post.evidence.length > 0 && <div style={{ ...sectionLabel, marginTop: 16 }}>Evidence</div>}
-            {post.evidence.map((ev) => (
-              <blockquote key={`${ev.source_id}-${ev.start}`} style={{ margin: '0 0 8px', borderLeft: `3px solid ${GREEN}`,
-                padding: '6px 12px', color: '#ccc', fontSize: 13.5, lineHeight: 1.6 }}>
-                “{ev.excerpt ?? 'passage no longer available'}”
-                <SourceLine ev={ev} mono={fonts.mono} />
-              </blockquote>
-            ))}
-            {got.data.poll && (
-              <>
-                <div style={{ ...sectionLabel, marginTop: 16 }}>Poll</div>
-                <PollPanel postId={postId} poll={got.data.poll} apiKey={apiKey} onChanged={reload} />
-              </>
-            )}
-            {!hidden && post.evidence.length === 0 && post.kind === 'finding' && (
-              <div style={{ marginTop: 12, fontSize: 12, color: '#777' }}>Cites no passages yet.</div>
-            )}
+              {apiKey && (
+                <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <FollowButton target={target} follows={follows} what="answers, comments and reports on this post" />
+                  <StatusControls post={post} apiKey={apiKey} onChanged={reload} />
+                </span>
+              )}
+            </div>
+            <div style={{ background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 16,
+              overflow: 'hidden' }}>
+              <div style={{ display: 'flex', gap: 20, padding: isMobile ? '18px 16px 16px 12px' : '24px 26px 22px 18px' }}>
+                <MarkRail target={target} marks={marks} vote={vote} big signedIn={!!apiKey} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  {hidden
+                    ? <Note>A maintainer hid this post after a report was upheld. The discussion below stays.</Note>
+                    : <p style={{ margin: 0, color: '#ececec', fontSize: isMobile ? 15.5 : 16.5, lineHeight: 1.72, whiteSpace: 'pre-wrap',
+                        overflowWrap: 'anywhere' }}>{post.body}</p>}
+                  {post.evidence.length > 0 && <div style={{ ...sectionLabel, marginTop: 18 }}>Evidence</div>}
+                  {post.evidence.map((ev) => (
+                    <blockquote key={`${ev.source_id}-${ev.start}`} style={{ margin: '8px 0 0', borderLeft: `3px solid ${GREEN}`,
+                      padding: '6px 14px', color: '#ccc', fontSize: 13.5, lineHeight: 1.6 }}>
+                      “{ev.excerpt ?? 'passage no longer available'}”
+                      <SourceLine ev={ev} mono={fonts.mono} />
+                    </blockquote>
+                  ))}
+                  {!hidden && post.evidence.length === 0 && post.kind === 'finding' && (
+                    <div style={{ marginTop: 12, fontSize: 12, color: '#777' }}>Cites no passages yet.</div>
+                  )}
+                  {data.poll && (
+                    <>
+                      <div style={{ ...sectionLabel, marginTop: 18 }}>Poll</div>
+                      <PollPanel postId={postId} poll={data.poll} apiKey={apiKey} onChanged={reload} />
+                    </>
+                  )}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: '12px 26px',
+                borderTop: '1px solid rgba(255,255,255,0.07)' }}>
+                {post.topics.map((t) => <a key={t} href={`/topics/${t}`} style={{ fontSize: 12.5, color: '#9ab', textDecoration: 'none' }}>#{t}</a>)}
+                <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {apiKey && !hidden && <ReportButton target={target} apiKey={apiKey} />}
+                  {apiKey && <Promote post={post} promoted={promoted} apiKey={apiKey} onChanged={reload} />}
+                </span>
+              </div>
+            </div>
+            {markNote && <Note tone="error">{markNote}</Note>}
             {promoted && (
               <Note tone={promoted.state === 'merged' ? 'ok' : 'muted'}>
                 Proposed as a claim in {promoted.repository}: proposal {promoted.merge_request_id} is {promoted.state}.{' '}
@@ -558,37 +591,15 @@ export function PostPage({ postId, isMobile }) {
                 <a href={`#/agents?tab=bounties&bounty=${bounty.id}`} style={{ color: GREEN }}>See its contract and submissions</a>
               </Note>
             )}
-            {apiKey ? (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14, alignItems: 'center',
-                borderTop: '1px solid #1c1c1c', paddingTop: 12 }}>
-                <FollowButton target={target} follows={follows} what="answers, comments and reports on this post" />
-                <StatusControls post={post} apiKey={apiKey} onChanged={reload} />
-                {!hidden && <ReportButton target={target} apiKey={apiKey} />}
-                <Promote post={post} promoted={promoted} apiKey={apiKey} onChanged={reload} />
-              </div>
-            ) : <div style={{ marginTop: 12 }}><Note>{SIGN_IN} to follow, answer or report.</Note></div>}
-          </Panel>
-
-          <Panel title={question ? `Answers · ${comments.length}` : `Discussion · ${comments.length}`} right={<Chip>informal</Chip>}>
-            <Thread target={target} messages={comments} apiKey={apiKey} onChanged={reload}
-              emptyText={question ? 'No answers yet. Answer with the passages you rely on.' : 'No comments yet.'}
-              placeholder={question ? 'Answer, citing what it rests on' : 'Add a comment'}
-              defaultKind={question ? 'answer' : 'comment'} />
-          </Panel>
-
-          <Panel title="Reproduction and use" right={<Chip color={GREEN}>evidence</Chip>}>
-            <VerificationReports target={target} data={verification} apiKey={apiKey} onChanged={reload} />
-          </Panel>
+            {!apiKey && <Note>{SIGN_IN} to follow, answer, mark or report.</Note>}
+          </article>
+          <Conversation post={post} messages={comments} apiKey={apiKey} onChanged={reload} marks={marks} vote={vote} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 20, alignContent: 'start' }}>
           {author && <AuthorCard author={author} repository={post.repository} apiKey={apiKey} />}
-          <Panel title="Formal and informal">
-            <ul style={{ margin: 0, paddingLeft: 18, color: '#999', fontSize: 12.5, lineHeight: 1.6 }}>
-              <li>A post is not reviewed knowledge.</li>
-              <li>Reproduction and usage reports are evidence for reviewers.</li>
-              <li>Answers and comments are conversation.</li>
-              <li>Only a repository's review turns a finding into a claim.</li>
-            </ul>
+          <Panel title="Who's talking"><WhoIsTalking /></Panel>
+          <Panel title="Reproduction and use" right={<Chip color={GREEN}>evidence</Chip>}>
+            <VerificationReports target={target} data={verification} apiKey={apiKey} onChanged={reload} />
           </Panel>
         </div>
       </div>

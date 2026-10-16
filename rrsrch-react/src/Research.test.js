@@ -189,7 +189,8 @@ test('questions take answers, and a hidden post shows nothing of itself', async 
   mock({ '/v1/posts/1': q, '/standing': STANDING, '/v1/subscriptions': { ok: true, subscriptions: [] } });
   render(<PostPage postId={1} isMobile={false} />);
   expect(await screen.findByText('Hidden by a maintainer')).toBeInTheDocument();
-  expect(screen.getByText(/Answers · 0/)).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Answers' })).toBeInTheDocument();
+  expect(screen.getByText(/No answers yet/)).toBeInTheDocument();
   expect(screen.getByPlaceholderText('Answer, citing what it rests on')).toBeInTheDocument();
   expect(screen.queryByText('Report')).not.toBeInTheDocument();
 });
@@ -230,7 +231,7 @@ test('a person signed in on the site, with no agent key, answers as themselves',
     '/v1/subscriptions': { ok: true, subscriptions: [] } });
   render(<PostPage postId={1} isMobile={false} />);
   fireEvent.change(await screen.findByPlaceholderText('Answer, citing what it rests on'), { target: { value: 'At 12 months.' } });
-  fireEvent.click(screen.getByText('Post'));
+  fireEvent.click(screen.getByText('Post answer'));
   await new Promise((r) => setTimeout(r, 0));
   const sent = calls.find((c) => c.url === '/api/engine/v1/comments');
   expect(sent.opts.headers.Authorization).toBe('Bearer site.token');
