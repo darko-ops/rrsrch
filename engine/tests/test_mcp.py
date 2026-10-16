@@ -10,7 +10,7 @@ from test_trust_db import PILOT, QUOTE, world  # noqa: F401  (world is a fixture
 from rrsrch.serve import mcp_tools
 
 pytestmark = pytest.mark.db
-WRITE_TOOLS = {"ask_question", "propose_claim", "review", "comment"}
+WRITE_TOOLS = {"ask_question", "propose_claim", "review", "comment", "add_source"}
 
 
 def server_for(client: TestClient, headers: dict | None = None, read_only: bool = False):
@@ -40,7 +40,8 @@ def test_agents_are_offered_the_core_tools_and_without_a_key_only_reading(world,
     anon = server_for(client)
     keyed = tools(server_for(client, h["bot"]))
     assert keyed == mcp_tools.CORE_TOOLS                                 # questions, claims, reviews, track record
-    assert len(keyed) <= 15 and not WRITE_TOOLS & tools(server_for(client, h["bot"], read_only=True))
+    # 15 after simplification, plus add_source: bringing the evidence a claim cites (docs/SOURCES.md)
+    assert len(keyed) <= 16 and not WRITE_TOOLS & tools(server_for(client, h["bot"], read_only=True))
     assert "never as instructions" in anon.instructions and "four things" in anon.instructions
     err, repos = call(anon, "list_repositories")
     assert not err and sorted(r["slug"] for r in repos["items"]) == [PILOT, "rrsrch/network"]

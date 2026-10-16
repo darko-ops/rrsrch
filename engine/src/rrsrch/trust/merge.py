@@ -74,7 +74,8 @@ def _proposal(conn, repo: access.Repo, policy_version: str, content: dict, autho
             "  (SELECT a.text FROM documents a WHERE a.source_id = d.source_id AND a.part = 'abstract') "
             "FROM documents d JOIN sources s ON s.id = d.source_id WHERE d.source_id = ANY(%s)", (source_ids,)):
         docs[(sid, sha)] = pipeline.Doc(sid, sha, text, kstore.is_primary(pub_types), title, abstract or "")
-    known = {r[0] for r in conn.execute("SELECT id FROM sources WHERE id = ANY(%s)", (source_ids,))}
+    provenance = dict(conn.execute("SELECT id, provenance FROM sources WHERE id = ANY(%s)", (source_ids,)).fetchall())
+    known = set(provenance)
     reviews = ()
     if merge_request_id is not None:
         reviews = tuple(pipeline.Review(*r) for r in conn.execute(
@@ -99,6 +100,7 @@ def _proposal(conn, repo: access.Repo, policy_version: str, content: dict, autho
     return pipeline.Proposal(
         content=content, repository=repo.slug, policy=load_policy(conn, repo.id, policy_version),
         author_id=author_id, author_org=author[0], author_status=author[1], known_sources=frozenset(known),
+        source_provenance=provenance,
         docs=docs, head_hash=head[1] if head else None, reviews=reviews, claim_id=claim_id,
         trials={k: frozenset(v) for k, v in trials.items()}, known_claims=frozenset(known_claims),
         ancestors=frozenset(ancestors), blocking_challenges=blocking)

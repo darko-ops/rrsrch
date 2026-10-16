@@ -65,6 +65,7 @@ class Proposal:
     known_claims: frozenset[int] = frozenset()          # derived_from ids that exist in this repository
     ancestors: frozenset[int] = frozenset()             # every claim reachable through derived_from, transitively
     blocking_challenges: tuple[int, ...] = ()           # open blocking challenges on the claim being revised
+    source_provenance: Mapping[str, str] = field(default_factory=dict)   # source_id -> registry | fetched | uploaded
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,11 @@ def verify(p: Proposal) -> tuple[ClaimContent | None, list[Check]]:
     checks.append(_check(P, "author_active", p.author_status == "active", f"author is {p.author_status}"))
     unknown = sorted({s.source_id for _, s in spans} - p.known_sources)
     checks.append(_check(P, "sources_known", not unknown, f"unknown source(s): {', '.join(unknown)}"))
+    refused = sorted(s.source_id for _, s in spans
+                     if p.source_provenance.get(s.source_id, "registry") not in p.policy.accepted_sources)
+    checks.append(_check(P, "source_provenance", not refused,
+                         f"{p.repository} doesn't accept these sources' provenance: {', '.join(sorted(set(refused)))}"
+                         f" (it accepts {', '.join(p.policy.accepted_sources)})"))
     if c.derived_from:
         missing = sorted(set(c.derived_from) - p.known_claims)
         checks.append(_check(P, "derived_from_known", not missing,

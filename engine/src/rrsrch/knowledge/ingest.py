@@ -1,21 +1,26 @@
-"""Adding a paper to the shared sources while the engine runs.
+"""Agents bring sources (docs/SOURCES.md).
 
-A claim can only cite a passage of a stored document, so an agent that found a new paper asks the engine to add
-it. The agent names the paper; the engine fetches it from Europe PMC itself and stores exactly what Europe PMC
-returned, the abstract always and the full text when the paper is open access. Nothing an agent sends becomes
-document text, so nobody can cite words they wrote. A source already stored is returned as it is: its text never
-changes under claims that point into it.
+A claim can only cite a passage of a stored document, so an agent that needs a source asks the engine to add it.
+The agent names it, by a Europe PMC id or DOI (a paper) or by a public https URL (a web page, an SEC filing, an
+award notice); the engine fetches it itself and stores exactly what it got, converted to text the same way every
+time. Nothing an agent sends becomes document text, so nobody can cite words they wrote. A source already stored is
+returned as it is: its text never changes under claims that point into it.
 """
 from __future__ import annotations
 
+import hashlib
+import os
 import re
+from datetime import datetime, timezone
 
 import psycopg
 
+from ..corpus import html as htmlmod
 from ..corpus import snapshot
 from ..identity.access import Principal
 from ..ledger import db
 from ..sources.ctgov import find_nct_ids
+from ..sources import web
 from ..sources.europepmc import EuropePMC
 from ..trust import audit
 from ..trust.merge import Refused
@@ -24,6 +29,11 @@ from . import query
 SOURCE_ID = re.compile(r"^(MED|PMC|PPR):[A-Za-z0-9]{1,20}$")
 DOI = re.compile(r"^10\.\d{4,9}/\S{1,200}$")
 SOURCES_PER_HOUR = 30
+# EDGAR documents: https://www.sec.gov/Archives/edgar/data/<cik>/<accession, 18 digits>/<file>
+SEC_DOC = re.compile(r"^https://www\.sec\.gov/Archives/edgar/data/(?P<cik>\d{1,10})/(?P<acc>\d{18})/(?P<file>[^/?#]+)$")
+# the SEC asks automated clients to identify themselves (https://www.sec.gov/os/accessing-edgar-data)
+SEC_USER_AGENT = os.environ.get("RRSRCH_SEC_USER_AGENT", "RRSRCH research network https://rrsrch.com")
+USER_AGENT = "RRSRCH source fetcher (+https://rrsrch.com/agents.md)"
 
 
 def _can_add(p: Principal | None) -> Principal:
@@ -43,23 +53,84 @@ def _record(epmc: EuropePMC, source_id: str | None, doi: str | None) -> dict | N
     return hits[0] if hits else None
 
 
-def add_source(conn: psycopg.Connection, p: Principal | None, *, source_id: str | None = None,
-               doi: str | None = None, epmc: EuropePMC | None = None) -> tuple[dict, bool]:
-    """Store a paper by its Europe PMC id (MED:<pmid>, PMC:<pmcid>, PPR:<id>) or DOI. Returns the source, as
-    GET /v1/sources/{id} shows it, and whether it was added now."""
+def _rate_limited(conn, p: Principal) -> None:
+    n = conn.execute("SELECT count(*) FROM audit_events WHERE actor_id = %s AND action = 'source.add' "
+                     "AND at > now() - interval '1 hour'", (p.agent_id,)).fetchone()[0]
+    if n >= SOURCES_PER_HOUR:
+        raise Refused(429, "too many sources added in the last hour; try again later")
+
+
+def _url_id(url: str) -> tuple[str, str]:
+    """(source id, kind) for a canonical URL: SEC:<accession>:<file> for an EDGAR document, else URL:<hash>."""
+    m = SEC_DOC.match(url)
+    if m:
+        acc = m["acc"]
+        return f"SEC:{acc[:10]}-{acc[10:12]}-{acc[12:]}:{m['file']}", "sec"
+    return "URL:" + hashlib.sha256(url.encode()).hexdigest()[:24], "url"
+
+
+def add_url(conn: psycopg.Connection, p: Principal | None, url: str, *, client=None, resolve=None) -> tuple[dict, bool]:
+    """Fetch a public https document and store it (provenance `registry` for SEC filings, `fetched` otherwise)."""
     p = _can_add(p)
-    if bool(source_id) == bool(doi):
-        raise Refused(400, "give a source_id (MED:<pmid>, PMC:<pmcid> or PPR:<id>) or a doi")
+    try:
+        canon = web.canonical(url)
+    except web.FetchRefused as e:
+        raise Refused(400, str(e)) from e
+    sid, kind = _url_id(canon)
+    have = conn.execute("SELECT id FROM sources WHERE id = %s OR url = %s", (sid, canon)).fetchone()
+    if have:
+        return query.get_source(conn, have[0]), False
+    _rate_limited(conn, p)
+    kw = {"client": client} if client is not None else {}
+    if resolve is not None:
+        kw["resolve"] = resolve
+    try:
+        got = web.fetch(canon, user_agent=SEC_USER_AGENT if kind == "sec" else USER_AGENT, **kw)
+    except web.FetchRefused as e:
+        raise Refused(422, str(e)) from e
+    final = web.canonical(got.url)
+    if final != canon:                                  # redirected: store it under where it really lives
+        sid, kind = _url_id(final)
+        have = conn.execute("SELECT id FROM sources WHERE id = %s OR url = %s", (sid, final)).fetchone()
+        if have:
+            return query.get_source(conn, have[0]), False
+    text = htmlmod.decode(got.body, got.charset)
+    title, body = htmlmod.to_text(text) if got.content_type != "text/plain" else ("", htmlmod.plain(text))
+    if len(body) < 40:
+        raise Refused(422, "the page has no readable text to cite")
+    title = title[:500] or final
+    digest = snapshot.sha256(got.body)
+    with conn.transaction():
+        conn.execute(
+            "INSERT INTO sources (id, title, has_full_text, snapshot_sha256, kind, provenance, url, content_type, "
+            "added_by, fetched_at) VALUES (%s, %s, true, %s, %s, %s, %s, %s, %s, %s)",
+            (sid, title, digest, kind, "registry" if kind == "sec" else "fetched", final, got.content_type,
+             p.agent_id, datetime.now(timezone.utc)))
+        db._put_document(conn, sid, "title", title)
+        db._put_document(conn, sid, "fulltext", body)
+        audit.append(conn, "source.add", f"source:{sid}", actor_id=p.agent_id,
+                     detail={"source_id": sid, "kind": kind, "url": final, "content_type": got.content_type,
+                             "content_sha256": digest, "converter": htmlmod.VERSION})
+    return query.get_source(conn, sid), True
+
+
+def add_source(conn: psycopg.Connection, p: Principal | None, *, source_id: str | None = None,
+               doi: str | None = None, url: str | None = None, epmc: EuropePMC | None = None,
+               client=None, resolve=None) -> tuple[dict, bool]:
+    """Store a source: a paper by its Europe PMC id (MED:<pmid>, PMC:<pmcid>, PPR:<id>) or DOI, or a public https
+    document by URL. Returns the source, as GET /v1/sources/{id} shows it, and whether it was added now."""
+    p = _can_add(p)
+    if sum(bool(x) for x in (source_id, doi, url)) != 1:
+        raise Refused(400, "give one of: a source_id (MED:<pmid>, PMC:<pmcid> or PPR:<id>), a doi, or an https url")
+    if url:
+        return add_url(conn, p, url, client=client, resolve=resolve)
     if source_id and not SOURCE_ID.match(source_id):
         raise Refused(400, "source_id must look like MED:<pmid>, PMC:<pmcid> or PPR:<id>")
     if doi and not DOI.match(doi):
         raise Refused(400, "doi must look like 10.<registrant>/<suffix>")
     if source_id and (have := query.get_source(conn, source_id)):
         return have, False
-    n = conn.execute("SELECT count(*) FROM audit_events WHERE actor_id = %s AND action = 'source.add' "
-                     "AND at > now() - interval '1 hour'", (p.agent_id,)).fetchone()[0]
-    if n >= SOURCES_PER_HOUR:
-        raise Refused(429, "too many sources added in the last hour; try again later")
+    _rate_limited(conn, p)
     epmc = epmc or EuropePMC()
     try:
         r = _record(epmc, source_id, doi)
@@ -83,6 +154,7 @@ def add_source(conn: psycopg.Connection, p: Principal | None, *, source_id: str 
     raw = snapshot.stable_record_bytes(r)
     with conn.transaction():
         parts = db.put_source(conn, sid, r, fulltext, raw)
+        conn.execute("UPDATE sources SET added_by = %s, fetched_at = now() WHERE id = %s", (p.agent_id, sid))
         for part in ("abstract", "fulltext"):          # link registered trials we already hold
             for nct in find_nct_ids(parts.get(part) or ""):
                 conn.execute("INSERT INTO trial_links (nct_id, source_id, method) SELECT %s, %s, %s "

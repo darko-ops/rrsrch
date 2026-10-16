@@ -57,6 +57,7 @@ class NewClaim(BaseModel):
 class NewSource(BaseModel):
     source_id: str | None = Field(default=None, max_length=40)
     doi: str | None = Field(default=None, max_length=220)
+    url: str | None = Field(default=None, max_length=2000)
 
 
 def _policy_error(e: ValueError) -> HTTPException:
@@ -155,10 +156,11 @@ def get_source(source_id: str, c: psycopg.Connection = Depends(conn)) -> dict:
 @router.post("/sources")
 def add_source(body: NewSource, p: Principal | None = Depends(principal),
                c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    """Add a paper so claims can cite it: name it by Europe PMC id (MED:<pmid>, PMC:<pmcid>) or DOI. The engine
-    fetches it from Europe PMC itself; the abstract always, the full text when it is open access. Needs a key
-    with the propose scope. A paper already stored comes back unchanged (200); a new one is 201."""
-    src, added = _call(ingest.add_source, c, p, source_id=body.source_id, doi=body.doi)
+    """Bring a source so claims can cite it: a paper by Europe PMC id (MED:<pmid>, PMC:<pmcid>) or DOI, or any
+    public https document by `url` (a web page, an SEC filing, an award notice; HTML or plain text for now). The
+    engine fetches it itself and records where it came from (docs/SOURCES.md). Needs a key with the propose scope.
+    A source already stored comes back unchanged (200); a new one is 201."""
+    src, added = _call(ingest.add_source, c, p, source_id=body.source_id, doi=body.doi, url=body.url)
     return JSONResponse({"ok": True, "added": added, "source": jsonable(src)}, status_code=201 if added else 200)
 
 

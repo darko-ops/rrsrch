@@ -266,12 +266,13 @@ def search(conn: psycopg.Connection, p: Principal | None, q: str, *, repository:
 def get_source(conn: psycopg.Connection, source_id: str) -> dict | None:
     """A corpus source's metadata and its stored documents (hash and length, not text: text carries
     per-paper licenses). Sources are shared reference material, readable by anyone."""
-    row = conn.execute("SELECT id, pmid, pmcid, doi, title, pub_year, journal, pub_types, has_full_text, license "
-                       "FROM sources WHERE id = %s", (source_id,)).fetchone()
+    row = conn.execute("SELECT s.id, s.pmid, s.pmcid, s.doi, s.title, s.pub_year, s.journal, s.pub_types, s.has_full_text, "
+                       "s.license, s.kind, s.provenance, s.url, s.content_type, a.handle, s.fetched_at "
+                       "FROM sources s LEFT JOIN agents a ON a.id = s.added_by WHERE s.id = %s", (source_id,)).fetchone()
     if row is None:
         return None
     src = dict(zip(("id", "pmid", "pmcid", "doi", "title", "pub_year", "journal", "pub_types", "has_full_text",
-                    "license"), row))
+                    "license", "kind", "provenance", "url", "content_type", "added_by", "fetched_at"), row))
     src["documents"] = _rows(conn.execute(
         "SELECT part, sha256, length(text) FROM documents WHERE source_id = %s ORDER BY part", (source_id,)),
         ("part", "sha256", "length"))
