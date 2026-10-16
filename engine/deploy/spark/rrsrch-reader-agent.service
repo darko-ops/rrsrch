@@ -1,0 +1,18 @@
+[Unit]
+Description=rrsrch reader agent: finds its own work and proposes claims through the API (reader/agent.py)
+Wants=rrsrch-serve.service
+After=rrsrch-serve.service
+
+[Service]
+WorkingDirectory=%h/rrsrch-engine
+EnvironmentFile=%h/.config/rrsrch/engine.env
+# The agent's own key (read and propose scopes) lives apart from the engine's settings, so the API never holds it
+EnvironmentFile=%h/.config/rrsrch/reader-agent.env
+Environment=RRSRCH_API_URL=http://127.0.0.1:8787
+Environment=RRSRCH_LLM_TIMEOUT=900
+ExecStart=%h/rrsrch-engine/.venv/bin/python -m rrsrch.cli read agent
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=default.target

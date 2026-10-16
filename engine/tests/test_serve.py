@@ -96,7 +96,8 @@ def test_health_reports_claims_or_503(calls, monkeypatch, tmp_path):
     monkeypatch.setenv("RRSRCH_READER_MODEL", "m")
     monkeypatch.setattr(api, "BACKUP_STATUS", tmp_path / "missing.json")
     for path in ("/v1/health", "/health", "/"):
-        assert client(calls).get(path).json() == {"ok": True, "claims": 7, "model": "m", "backup": None}
+        assert client(calls).get(path).json() == {"ok": True, "claims": 7, "model": "m", "answers_in_progress": 7,
+                                                     "backup": None}
     r = client(calls, fail_db=True).get("/v1/health")
     assert (r.status_code, r.json()) == (503, {"ok": False, "error": "connection refused"})
 

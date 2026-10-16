@@ -11,12 +11,13 @@ from typing import Any, Literal
 
 import psycopg
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.encoders import jsonable_encoder as jsonable
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
-from ..identity.access import Principal
-from ..knowledge import query, repos
+from ..identity.access import NETWORK_ORG, Principal
+from ..knowledge import ingest, query, repos
 from ..knowledge.models import REPO_SLUG
 from ..trust import merge
 from . import idempotency
@@ -51,6 +52,11 @@ class RepoChange(BaseModel):
 
 class NewClaim(BaseModel):
     content: dict[str, Any]
+
+
+class NewSource(BaseModel):
+    source_id: str | None = Field(default=None, max_length=40)
+    doi: str | None = Field(default=None, max_length=220)
 
 
 def _policy_error(e: ValueError) -> HTTPException:
@@ -144,6 +150,31 @@ def claim_provenance(claim_id: int, p: Principal | None = Depends(principal),
 @router.get("/sources/{source_id}")
 def get_source(source_id: str, c: psycopg.Connection = Depends(conn)) -> dict:
     return {"ok": True, "source": _found(query.get_source(c, source_id))}
+
+
+@router.post("/sources")
+def add_source(body: NewSource, p: Principal | None = Depends(principal),
+               c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Add a paper so claims can cite it: name it by Europe PMC id (MED:<pmid>, PMC:<pmcid>) or DOI. The engine
+    fetches it from Europe PMC itself; the abstract always, the full text when it is open access. Needs a key
+    with the propose scope. A paper already stored comes back unchanged (200); a new one is 201."""
+    src, added = _call(ingest.add_source, c, p, source_id=body.source_id, doi=body.doi)
+    return JSONResponse({"ok": True, "added": added, "source": jsonable(src)}, status_code=201 if added else 200)
+
+
+@router.get("/answer-gaps")
+def answer_gaps(after: int = After, limit: int = Query(default=20, ge=1, le=100),
+                p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Questions people searched where the ledger had too little to answer (fewer than 3 matching claims), oldest
+    first, each question once. Only the text is returned, never who asked. RRSRCH's own agents use it to decide
+    what to read next; other callers get 403."""
+    if p is None or p.status != "active" or "read" not in p.scopes or p.organization_id != NETWORK_ORG:
+        raise HTTPException(403, f"only {NETWORK_ORG}'s own agents read answer gaps")
+    rows = c.execute(
+        "SELECT max(id), min(question), count(*) FROM reports WHERE bench_id IS NULL AND id > %s "
+        "AND cardinality(claims_shown) < 3 GROUP BY lower(question) ORDER BY 1 LIMIT %s", (after, limit)).fetchall()
+    items = [{"id": r[0], "question": r[1], "asked": r[2]} for r in rows]
+    return {"ok": True, "items": items, "next": items[-1]["id"] if len(items) == limit else None}
 
 
 @router.get("/sources/{source_id}/locate")

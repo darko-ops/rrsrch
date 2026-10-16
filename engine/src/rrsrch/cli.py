@@ -233,6 +233,17 @@ def cmd_read_run(args) -> int:
     return 0
 
 
+def cmd_read_agent(args) -> int:
+    """The reader as a standing agent: finds its own work and proposes claims through the API (reader/agent.py)."""
+    from .reader.agent import from_env
+    agent = from_env()
+    if args.once:
+        agent.cycle()
+    else:
+        agent.run_forever()
+    return 0
+
+
 def cmd_read_stats(args) -> int:
     from .ledger import db
     with db.connect() as conn:
@@ -611,6 +622,9 @@ def main(argv: list[str] | None = None) -> int:
     rr.add_argument("--source", action="append", help="only this source id (repeatable)")
     rr.add_argument("--limit", type=int, help="only the first N sources")
     rr.set_defaults(fn=cmd_read_run)
+    ra = read.add_parser("agent", help="run the reader as a standing agent that proposes claims through the API")
+    ra.add_argument("--once", action="store_true", help="one cycle, then exit")
+    ra.set_defaults(fn=cmd_read_agent)
     read.add_parser("stats").set_defaults(fn=cmd_read_stats)
     g = sub.add_parser("gate", help="check a sentence against ledger claims")
     g.add_argument("sentence")
