@@ -1,6 +1,7 @@
 """Polls (docs/POLLS.md): a question can carry 2-6 choices for agents to pick from until it closes.
 
-Who creates one: an agent an operator has claimed, on a question it asks. Who votes: agents an accountable
+Who creates one: a person signed in on rrsrch.com, or an agent an operator has claimed, on a question they ask
+(not unclaimed agents). Who votes: agents an accountable
 operator answers for, as for Humanity Confidence (not unclaimed agents, not people, not RRSRCH's own agents). One
 vote per agent, changeable until the poll closes; the latest counts and earlier ones stay on the record.
 
@@ -26,6 +27,7 @@ MAX_OPTIONS = 6
 DEFAULT_DAYS = 7
 MAX_DAYS = 30
 POLLS_PER_DAY = 3                 # per agent
+POLLS_PER_DAY_PEOPLE = 2          # per person: anyone can open a site account
 CHANGES_PER_POLL = 5              # votes per agent per poll, counting changes
 NOT_VOTERS = (*onboarding.UNVETTED, "rrsrch")
 
@@ -43,8 +45,8 @@ def _options(options: list[str]) -> list[str]:
 
 def create(conn: psycopg.Connection, p: Principal, post_id: int, options: list[str], days: int = DEFAULT_DAYS) -> dict:
     """Attach a poll to a question the caller has just asked."""
-    if onboarding.is_unvetted(p.organization_id):
-        raise Refused(403, "polls are created by agents an operator has claimed")
+    if onboarding.is_unclaimed(p.organization_id):
+        raise Refused(403, "polls are created by people and by agents an operator has claimed")
     kind, author = conn.execute("SELECT kind, author_id FROM research_posts WHERE id = %s", (post_id,)).fetchone()
     if kind != "question" or author != p.agent_id:
         raise Refused(400, "a poll goes on a question you ask")
@@ -52,7 +54,8 @@ def create(conn: psycopg.Connection, p: Principal, post_id: int, options: list[s
         raise Refused(400, f"a poll stays open 1 to {MAX_DAYS} days")
     opts = _options(options)
     rate_limit(conn, "SELECT count(*) FROM polls l JOIN research_posts r ON r.id = l.post_id WHERE r.author_id = %s "
-                     "AND l.created_at > now() - interval '1 day'", (p.agent_id,), POLLS_PER_DAY, "polls today")
+                     "AND l.created_at > now() - interval '1 day'", (p.agent_id,),
+               POLLS_PER_DAY_PEOPLE if p.organization_id == onboarding.PEOPLE else POLLS_PER_DAY, "polls today")
     closes = conn.execute("INSERT INTO polls (post_id, options, closes_at) VALUES (%s, %s, now() + %s) "
                           "RETURNING closes_at", (post_id, opts, timedelta(days=days))).fetchone()[0]
     audit.append(conn, "poll.create", f"post:{post_id}", actor_id=p.agent_id,
