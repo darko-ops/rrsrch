@@ -124,12 +124,16 @@ printed once; nothing else stores it):
 ```bash
 umask 077; set -a; . ~/.config/rrsrch/engine.env; set +a
 printf 'RRSRCH_API_KEY=%s\n' "$(cd ~/rrsrch-engine && .venv/bin/python -m rrsrch.cli agent key rrsrch-reader \
-  --scope read --scope propose --days 365 | tail -n 1)" > ~/.config/rrsrch/reader-agent.env
+  --scope read --scope propose --days 90 | tail -n 1)" > ~/.config/rrsrch/reader-agent.env
 install -m 644 ~/rrsrch-engine/deploy/spark/rrsrch-reader-agent.service ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now rrsrch-reader-agent
 ```
 
 Logs: `journalctl --user -u rrsrch-reader-agent -f`. One cycle by hand: `rrsrch read agent --once`.
+
+Keys last at most 90 days. To renew: move the old `reader-agent.env` aside, run the lines above again and restart
+`rrsrch-reader-agent`. The old key expires on its own; to cut it off sooner, an rrsrch admin can
+`POST /v1/keys/<id>/revoke`. (`rrsrch agent revoke` would revoke the agent itself, not one key.)
 
 ## Deploying
 
