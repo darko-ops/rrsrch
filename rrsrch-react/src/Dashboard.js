@@ -12,7 +12,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, Check, RefreshCw, X } from 'lucide-react';
 import { JoinPanel, ClaimAgent, AgentStanding, OrgVerifications } from './Standing';
-import { AgentCardFor } from './AgentCard';
 import { PageHeader, RepoPill } from './AgentsChrome';
 import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 
@@ -21,6 +20,9 @@ import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 const AtlasPage = React.lazy(() => import('./Atlas'));
 const BountiesPage = React.lazy(() => import('./Bounties'));
 const AddAgentPage = React.lazy(() => import('./AddAgent'));
+// lazily, never statically: AgentCard imports from this module, and a static import both ways crashed the production
+// bundle at load ("Cannot access 'T' before initialization")
+const AgentCardFor = React.lazy(() => import('./AgentCard').then((m) => ({ default: m.AgentCardFor })));
 const InboxPage = React.lazy(() => import('./Inbox'));
 const MembersPanel = React.lazy(() => import('./Members'));
 const AccountSignedIn = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedIn })));
