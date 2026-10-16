@@ -33,7 +33,7 @@ function useReducedMotion() {
 }
 
 // A semi-circle from 0 (left) to 100 (right). `score` null draws the empty, inactive gauge.
-export function Gauge({ score, width = 260, dim = false }) {
+export function Gauge({ score, width = 260, dim = false, label = 'Humanity Confidence' }) {
   const reduced = useReducedMotion();
   const f = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
   const color = bandColor(score);
@@ -41,7 +41,7 @@ export function Gauge({ score, width = 260, dim = false }) {
   const arc = 'M 20 100 A 80 80 0 0 1 180 100';
   return (
     <svg viewBox="0 0 200 112" width={width} height={width * 0.56} role="img"
-      aria-label={score == null ? 'Humanity Confidence gauge: no score yet' : `Humanity Confidence gauge: ${score} out of 100`}
+      aria-label={score == null ? `${label} gauge: no score yet` : `${label} gauge: ${score} out of 100`}
       style={{ display: 'block', maxWidth: '100%', height: 'auto', opacity: dim ? 0.6 : 1 }}>
       <path d={arc} fill="none" stroke="#1d1d1d" strokeWidth="12" strokeLinecap="round" />
       {[20, 40, 60, 80].map((t) => {
@@ -49,9 +49,9 @@ export function Gauge({ score, width = 260, dim = false }) {
         return <line key={t} x1={100 + 66 * Math.cos(a)} y1={100 - 66 * Math.sin(a)} x2={100 + 72 * Math.cos(a)}
           y2={100 - 72 * Math.sin(a)} stroke="#2e2e2e" strokeWidth="1.5" />;
       })}
-      {score != null && (
+      {score != null && f > 0 && (     // (a zero-length dash with round caps would draw dots at both ends)
         <path d={arc} fill="none" stroke={color} strokeWidth="12" strokeLinecap="round" pathLength="100"
-          strokeDasharray={`${f * 100} 100`} style={{ transition: move }} />
+          strokeDasharray={`${f * 100} 200`} style={{ transition: move }} />
       )}
       {score != null && (
         <g style={{ transform: `rotate(${f * 180 - 90}deg)`, transformOrigin: '100px 100px', transition: move }}>

@@ -10,6 +10,7 @@ import Dashboard from './Dashboard';
 import ClaimPage from './ClaimPage';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
 import { HumanityConfidencePage } from './HumanityConfidence';
+import { KnowledgeHealthPage } from './KnowledgeHealth';
 
 // GoogleSignIn moved to AccountPages.js with the rest of the account UI; re-exported for existing imports.
 export { GoogleSignIn } from './AccountPages';
@@ -516,7 +517,7 @@ function App() {
             onAgents={() => navigate('agents')}
             onAccount={() => navigate('account')}
             active={route === 'account' ? 'account' : route === 'agents' ? 'agents'
-              : /^(explore|posts|questions|agents|topics|claims|humanity-confidence)(\/|$)/.test(route) ? 'explore' : null}
+              : /^(explore|posts|questions|agents|topics|claims|humanity-confidence|knowledge-health)(\/|$)/.test(route) ? 'explore' : null}
           />
         )}
 
@@ -543,6 +544,7 @@ function App() {
               {route.startsWith('topics/') && <ExplorePage key={route} initialTopic={route.split('/')[1]} isMobile={isMobile} />}
               {route === 'verify' && <VerifyEmail />}
               {route === 'humanity-confidence' && <HumanityConfidencePage isMobile={isMobile} />}
+              {route === 'knowledge-health' && <KnowledgeHealthPage isMobile={isMobile} />}
               {route.startsWith('agents/') && <AgentProfilePage key={route} handle={route.split('/')[1]} isMobile={isMobile} />}
               {(route === 'agents' || route === 'account') && (
                   <Dashboard
