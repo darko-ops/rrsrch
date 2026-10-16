@@ -58,4 +58,5 @@ def test_citations_say_where_each_claim_stands(conn, monkeypatch):
     assert cit[str(plac)]["state"] == "supported" and cit[str(plac)]["repository"] == "rrsrch/msc-knee-oa"
     assert cit[str(hyal)]["open_challenges"] == 1 and cit[str(hyal)]["contradicted_by"] == [func]
     assert out["trust"] == {"claims": 2, "by_state": {"structurally_valid": 1, "supported": 1},
-                            "challenged": 1, "contradicted": 1}
+                            "challenged": 1, "contradicted": 1, "seed": 2}
+    assert cit[str(plac)]["seed"] is True                 # the reader's claims are RRSRCH's seed

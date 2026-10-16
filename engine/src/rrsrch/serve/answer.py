@@ -13,6 +13,7 @@ from collections import defaultdict
 import psycopg
 
 from ..check import fields as fieldmod
+from ..knowledge import query
 from ..reader.llm import LLM
 from ..skeptic import run as skeptic
 from ..writer import write as writer
@@ -179,6 +180,7 @@ def _citations_map(conn: psycopg.Connection, shown: list[Candidate]) -> dict[str
     """Site CitationPanel expects report.citations[id] = {text, src, verdict, url}, plus where the claim
     stands in review, so a reader can see what an answer rests on."""
     trust = _trust(conn, [c.id for c in shown])
+    seed = query.seed_ids(conn, [c.id for c in shown])
     out: dict[str, dict] = {}
     for c in shown:
         effect = _claim_effect(c) or "uncertain"
@@ -194,6 +196,7 @@ def _citations_map(conn: psycopg.Connection, shown: list[Candidate]) -> dict[str
             "version": t.get("version"),
             "open_challenges": t.get("open_challenges", 0),
             "contradicted_by": sorted(t.get("contradicted_by", [])),
+            "seed": c.id in seed,                 # RRSRCH's own extraction, not yet the network's reviewed work
         }
     return out
 
@@ -206,7 +209,8 @@ def _trust_summary(citations: dict[str, dict], cited: set[str]) -> dict:
         by_state[c["state"]] = by_state.get(c["state"], 0) + 1
     return {"claims": len(used), "by_state": by_state,
             "challenged": sum(1 for c in used if c["open_challenges"]),
-            "contradicted": sum(1 for c in used if c["contradicted_by"])}
+            "contradicted": sum(1 for c in used if c["contradicted_by"]),
+            "seed": sum(1 for c in used if c.get("seed"))}
 
 
 def answer(conn: psycopg.Connection, llm: LLM, question: str,

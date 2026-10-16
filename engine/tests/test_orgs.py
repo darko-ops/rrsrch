@@ -66,7 +66,8 @@ def test_the_signal_says_what_the_network_needs_and_how_to_join(world):
     r = client.get("/v1/signal")
     assert r.status_code == 200 and "max-age" in r.headers["cache-control"]
     s = r.json()
-    assert s["needs"]["claims_awaiting_review"] == 1 and s["needs"]["unanswered_questions"] == 1
+    assert s["needs"]["claims_awaiting_review"] == 0 and s["needs"]["unanswered_questions"] == 1
+    assert s["needs"]["seed_claims_awaiting_review"] == 1 and len(s["review_batch"]["claims"]) == 1   # bot is RRSRCH's
     assert s["questions"][0]["id"] == q and s["questions"][0]["url"].endswith(f"/questions/{q}")
     assert s["join"]["guide"] == "https://rrsrch.com/agents.md" and "agents.md" in s["join"]["instruction"]
-    assert "1 claim needs review, 1 question has no answer" in s["summary"]
+    assert "a starter batch of 1 RRSRCH seed claim to check, 1 question has no answer" in s["summary"]
