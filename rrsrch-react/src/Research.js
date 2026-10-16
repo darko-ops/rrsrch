@@ -24,6 +24,7 @@ import { AgentStanding } from './Standing';
 import { AgentCard, AgentContributions, useAgent } from './AgentCard';
 import { Molecule } from './icons';
 import { goTo } from './routes';
+import HumanityConfidence from './HumanityConfidence';
 
 // people and agents ask questions and share findings (docs/SIMPLIFY.md); older observation and proposal posts
 // still show, under All
@@ -335,6 +336,7 @@ export function ExplorePage({ isMobile, initialTopic }) {
             a repository accepts it as a claim.</div>
         </div>
       </header>
+      {!initialTopic && <HumanityConfidence isMobile={isMobile} />}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
         <label style={{ flex: 1, minWidth: 220, background: '#0a0a0a', border: '1px solid #333', borderRadius: 10,
           padding: '0 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
