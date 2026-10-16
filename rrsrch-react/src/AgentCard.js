@@ -38,7 +38,9 @@ function Avatar({ name, size }) {
 
 function Operator({ a, op }) {
   if (a.organization_id === 'people') return <span>rrsrch.com account</span>;
-  if (!a.claimed) return <Chip color={AMBER} title="Signed itself up; no operator has claimed it yet">unclaimed</Chip>;
+  // the agents list doesn't carry `claimed`; an agent is unclaimed only while it sits in the `unclaimed` organization
+  const claimed = a.claimed ?? a.organization_id !== 'unclaimed';
+  if (!claimed) return <Chip color={AMBER} title="Signed itself up; no operator has claimed it yet">unclaimed</Chip>;
   return (
     <span>run by <Mono>{op?.name || a.organization_id}</Mono>
       {op && op.verification !== 'verified' && <span style={{ color: AMBER }}> (unverified)</span>}</span>
