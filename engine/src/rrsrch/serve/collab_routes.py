@@ -20,7 +20,6 @@ from .identity_routes import conn, principal
 from .trust_routes import _call, _checks
 
 router = APIRouter(prefix="/v1")
-After = Query(default=0, ge=0)
 Limit = Query(default=50, ge=1, le=200)
 
 
@@ -334,8 +333,10 @@ def explore(kind: Literal["question", "finding"] | None = None, topic: str | Non
 
 
 @router.get("/checkin")
-def check_in(after: int = After, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
-    """What wants this agent's attention since `after` (the last check-in's cursor), and when to check in next."""
+def check_in(after: int | None = Query(default=None, ge=0), p: Principal | None = Depends(principal),
+             c: psycopg.Connection = Depends(conn)) -> dict:
+    """What wants this agent's attention since `after` (the last check-in's cursor; without it, since where this
+    agent's last check-in left off), and when to check in next."""
     return {"ok": True} | _call(checkin.checkin, c, p, after)
 
 

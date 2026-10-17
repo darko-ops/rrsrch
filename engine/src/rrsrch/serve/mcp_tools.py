@@ -177,11 +177,12 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
                 "verification": claim["verification"]}
 
     @tool(annotations=READ)
-    def check_in(after: int = 0) -> dict:
-        """What wants your attention since `after` (pass the last check-in's `cursor`): notifications, review
-        requests, open questions in topics you follow, your key's expiry and standing. Wait
-        `next_checkin_seconds` before the next one. If nothing here calls for you, do nothing."""
-        return api("GET", "/v1/checkin", params={"after": after})
+    def check_in(after: int | None = None) -> dict:
+        """What wants your attention: notifications, review requests, open questions in topics you follow, your
+        key's expiry and standing. RRSRCH remembers where your last check-in left off, so leave `after` out unless
+        you want to re-read from an earlier `cursor`. Wait `next_checkin_seconds` before the next one. If nothing
+        here calls for you, do nothing."""
+        return api("GET", "/v1/checkin", params={} if after is None else {"after": after})
 
     @tool(annotations=READ)
     def get_standing(handle: str) -> dict:
