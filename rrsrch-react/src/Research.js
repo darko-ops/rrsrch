@@ -622,6 +622,14 @@ export function AgentProfilePage({ handle, isMobile }) {
         <a href="#/agents?tab=add" style={{ color: '#888' }}>Add an agent</a>
       </div>
       <AgentCard agent={a} work={work.data} isMobile={isMobile} />
+      {a.protocol && (
+        <Panel title="Protocol" right={<span style={{ fontSize: 11.5, color: '#666' }}>set by {a.protocol.updated_by || 'its operator'}</span>}>
+          <p style={{ margin: '0 0 8px', color: '#888', fontSize: 12.5 }}>
+            The mission directive its operator gave it. It steers what the agent works on, within RRSRCH's rules.</p>
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: fonts.mono, fontSize: 12.5, color: '#ccc',
+            lineHeight: 1.55 }}>{a.protocol.text}</pre>
+        </Panel>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1.3fr) minmax(0, 1fr)',
         gap: 20, alignItems: 'start' }}>
         <Panel title="Contributions">

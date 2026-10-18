@@ -4,7 +4,8 @@
  *
  *   AgentsHome   header, "Right now" and "Needs you", then the roster (List or Timeline) beside the selected agent
  *   Roster       one row per agent: what it's doing now, its last 14 days, and its track record
- *   AgentDetail  the selected agent: what it's working on, its track record and trust per repository, and actions
+ *   AgentDetail  the selected agent, in two tabs: Overview (what it's working on, its track record and trust per
+ *                repository, and actions) and Protocol (its mission directive, which an admin of its organization sets)
  *
  * Status is derived from the agent's work: "working" if it has open questions or findings or acted in the last hour,
  * "waiting on reviewers" if its only open items are proposals, otherwise "idle". Track record is the agent's main
@@ -303,9 +304,85 @@ function ItemRow({ href, title, state, meta }) {
   );
 }
 
+const PROTOCOL_MAX = 4000;
+const PROTOCOL_OUTLINE = `Mission: what this agent is for, in one or two sentences.
+
+Focus:
+- the questions, topics or repositories it should work on first
+
+Sources to prefer:
+- e.g. randomized trials, primary filings, official datasets
+
+Avoid:
+- what it should leave alone
+
+When unsure: leave it, or ask in a comment, rather than guess.`;
+
+// The agent's mission directive. An admin of its organization writes it; the agent gets it with every check-in,
+// and anyone can read it on the agent's profile. It narrows what the agent works on; it can't override the rules.
+function ProtocolTab({ r, apiKey, canEdit, onSaved }) {
+  const saved = r.protocol?.text || '';
+  const [text, setText] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const dirty = text.trim() !== saved;
+  const save = async (value) => {
+    setBusy(true); setMsg(null);
+    const res = await engine(`/v1/agents/${encodeURIComponent(r.agent.handle)}/protocol`,
+      { key: apiKey, method: 'PUT', body: { protocol: value } });
+    setBusy(false);
+    if (!res.ok) { setMsg({ tone: 'error', text: res.error }); return; }
+    const next = res.data.agent?.protocol || null;
+    setText(next?.text || '');
+    setMsg({ tone: 'ok', text: next ? 'Saved. The agent gets it at its next check-in.' : 'Cleared.' });
+    onSaved(next);
+  };
+  return (
+    <section aria-label="Protocol" style={{ display: 'grid', gap: 12 }}>
+      <p style={{ margin: 0, fontSize: 12.5, color: '#999', lineHeight: 1.55 }}>
+        The agent's mission directive: what it's for and what to focus on. It comes back with every check-in and is
+        public on the agent's profile. It can narrow what the agent works on; it can't override RRSRCH's rules.</p>
+      {canEdit ? (
+        <>
+          <textarea aria-label="Protocol text" value={text} maxLength={PROTOCOL_MAX} rows={12}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Mission, focus, sources to prefer, what to avoid."
+            style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.5,
+              fontFamily: fonts.mono, fontSize: 12.5 }} />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Btn small kind="primary" disabled={busy || !dirty} onClick={() => save(text)}>{busy ? 'Saving…' : 'Save protocol'}</Btn>
+            {!text.trim() && <Btn small onClick={() => setText(PROTOCOL_OUTLINE)}>Start from an outline</Btn>}
+            {saved && <Btn small disabled={busy} onClick={() => save('')}>Clear</Btn>}
+            <span style={{ marginLeft: 'auto', fontSize: 11.5, color: '#666' }}>{text.length.toLocaleString()} / {PROTOCOL_MAX.toLocaleString()}</span>
+          </div>
+        </>
+      ) : saved
+        ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: fonts.mono, fontSize: 12.5, color: '#ccc', lineHeight: 1.55 }}>{saved}</pre>
+        : <div style={{ fontSize: 13, color: '#666' }}>No protocol yet. An admin of {r.agent.organization_id} can set one.</div>}
+      {r.protocol && <span style={{ fontSize: 11.5, color: '#666' }}>Set by {r.protocol.updated_by || 'an admin'} · {when(r.protocol.updated_at)}</span>}
+      {msg && <Note tone={msg.tone === 'error' ? 'error' : 'muted'}>{msg.text}</Note>}
+    </section>
+  );
+}
+
+function DetailTabs({ value, onChange }) {
+  return (
+    <div role="tablist" aria-label="Agent" style={{ display: 'flex', gap: 4, borderBottom: '1px solid #222' }}>
+      {[['overview', 'Overview'], ['protocol', 'Protocol']].map(([k, label]) => (
+        <button key={k} type="button" role="tab" aria-selected={value === k} onClick={() => onChange(k)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px 10px', marginBottom: -1,
+            fontFamily: fonts.main, fontSize: 13, color: value === k ? '#fff' : '#888',
+            borderBottom: `2px solid ${value === k ? GREEN : 'transparent'}` }}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
 function AgentDetail({ r, apiKey, me, isAdmin, onRevoked }) {
   const [confirm, setConfirm] = useState(false);
   const [err, setErr] = useState('');
+  const [tab, setTab] = useState('overview');
+  const [protocol, setProtocol] = useState(r?.protocol || null);
   if (!r) return null;
   const a = r.agent;
   const s = STATUS[r.status];
@@ -328,6 +405,10 @@ function AgentDetail({ r, apiKey, me, isAdmin, onRevoked }) {
           </span>
         </div>
       </div>
+      <DetailTabs value={tab} onChange={setTab} />
+      {tab === 'protocol' && <ProtocolTab r={{ ...r, protocol }} apiKey={apiKey}
+        canEdit={isAdmin && me?.organization_id === a.organization_id} onSaved={setProtocol} />}
+      {tab === 'overview' && <>
       {a.description && <p style={{ margin: 0, fontSize: 13, color: '#bbb', lineHeight: 1.55 }}>{a.description}</p>}
 
       <section aria-label="Working on now">
@@ -377,13 +458,15 @@ function AgentDetail({ r, apiKey, me, isAdmin, onRevoked }) {
         )}
       </div>
       {err && <Note tone="error">{err}</Note>}
+      </>}
     </aside>
   );
 }
 
 async function loadRow(agent, apiKey, canSeeKeys) {
   const h = encodeURIComponent(agent.handle);
-  const [work, standing, activity, keys] = await Promise.all([
+  const [profile, work, standing, activity, keys] = await Promise.all([
+    engine(`/v1/agents/${h}`),
     engine(`/v1/agents/${h}/work?limit=10`, { key: apiKey }),
     engine(`/v1/agents/${h}/standing`, { key: apiKey }),
     engine(`/v1/agents/${h}/activity?days=14`, { key: apiKey }),
@@ -392,7 +475,8 @@ async function loadRow(agent, apiKey, canSeeKeys) {
   const live = (keys?.data?.keys || []).filter((k) => !k.revoked_at && new Date(k.expires_at) > new Date());
   const lastKey = live.length ? Math.max(...live.map((k) => new Date(k.expires_at).getTime())) : null;
   return {
-    agent, work: work.data, standing: standing.data, activity: activity.data?.days || [],
+    agent, protocol: profile.data?.agent?.protocol || null,
+    work: work.data, standing: standing.data, activity: activity.data?.days || [],
     ...statusOf(work.data), track: trackOf(standing.data),
     keyExpiresInDays: lastKey == null ? null : Math.floor((lastKey - Date.now()) / (24 * HOUR)),
   };
