@@ -582,7 +582,7 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
                 Proposed as a claim in {promoted.repository}: proposal {promoted.merge_request_id} is {promoted.state}.{' '}
                 {promoted.claim_id
                   ? <a href={`/claims/${promoted.claim_id}`} style={{ color: GREEN }}>See claim {promoted.claim_id}</a>
-                  : <a href={`#/agents?tab=review&repo=${encodeURIComponent(promoted.repository)}`} style={{ color: '#9ab' }}>Review it</a>}
+                  : <a href={`#/agents?tab=tasks&repo=${encodeURIComponent(promoted.repository)}`} style={{ color: '#9ab' }}>Review it</a>}
               </Note>
             )}
             {bounty && (

@@ -118,7 +118,7 @@ function hrefFor(target, repository) {
   const [kind, id] = String(target).split(':');
   if (kind === 'claim') return `/claims/${id}`;
   if (kind === 'post') return `/posts/${id}`;
-  return `#/agents?tab=review&repo=${encodeURIComponent(repository)}`;
+  return `#/agents?tab=tasks&repo=${encodeURIComponent(repository)}`;
 }
 
 /** What the agent added, newest first, in sections. */
@@ -128,7 +128,7 @@ export function AgentContributions({ work }) {
     ['Claims added', work.claims, (c) => <Row key={`c${c.id}`} href={`/claims/${c.id}`} title={short(c.proposition, 160)}
       state={c.state} meta={<>{c.repository} · {when(c.created_at)}</>} />],
     ['Proposals', work.proposals, (m) => <Row key={`m${m.id}`} title={short(m.proposition || '(revision)', 160)}
-      href={m.claim_id && m.state === 'merged' ? `/claims/${m.claim_id}` : `#/agents?tab=review&repo=${encodeURIComponent(m.repository)}`}
+      href={m.claim_id && m.state === 'merged' ? `/claims/${m.claim_id}` : `#/agents?tab=tasks&repo=${encodeURIComponent(m.repository)}`}
       state={m.state} meta={<>proposal {m.id} · {m.repository} · {when(m.created_at)}</>} />],
     ['Reviews of others\' work', work.reviews, (r) => <Row key={`r${r.id}`} href={hrefFor(r.target, r.repository)}
       title={`${REVIEW_LABEL[r.kind] || r.kind}: ${r.verdict.replace(/_/g, ' ')}`}
@@ -175,7 +175,7 @@ export function AgentWorkFor({ handle, apiKey }) {
           ? <div style={{ color: '#666', fontSize: 13, padding: '6px 0' }}>Nothing open right now.</div>
           : <>
             {waiting.map((m) => <Row key={`m${m.id}`} title={short(m.proposition || '(revision)', 160)}
-              href={`#/agents?tab=review&repo=${encodeURIComponent(m.repository)}`} state="under_review"
+              href={`#/agents?tab=tasks&repo=${encodeURIComponent(m.repository)}`} state="under_review"
               meta={<>proposal {m.id}, waiting for review · {m.repository} · {when(m.created_at)}</>} />)}
             {openPosts.map((p) => <Row key={`p${p.id}`} href={`/${p.kind === 'question' ? 'questions' : 'posts'}/${p.id}`}
               title={p.title} state={p.status} meta={<>{p.kind} · {p.repository} · {when(p.created_at)}</>} />)}

@@ -89,10 +89,33 @@ test('the tab row lists the pages with their counts and switches between them', 
   expect(await screen.findByText('315')).toBeInTheDocument();                 // one count: 313 claims + 2 proposals
   expect(screen.getByRole('navigation', { name: 'Agents pages' })).toBeInTheDocument();   // tabs, not a sidebar
   expect(screen.queryByRole('button', { name: /Merge requests/ })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: /^Review/ }));
+  expect(screen.queryByRole('button', { name: /^Review|^Inbox/ })).not.toBeInTheDocument();   // both are Tasks now
+  fireEvent.click(screen.getByRole('button', { name: /^Tasks/ }));
   expect((await screen.findAllByRole('heading', { name: 'Proposed changes' })).length).toBeGreaterThan(0);
-  expect(window.location.hash).toBe('#/agents?tab=review');
+  expect(window.location.hash).toBe('#/agents?tab=tasks');
   window.location.hash = '';
+});
+
+test('Tasks: what\'s addressed to you first, then what\'s waiting for review; old Review and Inbox links open it', async () => {
+  localStorage.setItem('rrsrch_engine_key', 'rrsrch_k');
+  window.location.hash = '#/agents?tab=inbox';
+  mockEngine({
+    '/health': () => [200, { ok: true, claims: 12 }],
+    '/v1/repos?': () => [200, { ok: true, items: [{ slug: 'rrsrch/msc-knee-oa', claims: 12 }] }],
+    '/v1/me/counts': () => [200, { ok: true, queue: 3, merge: 0 }],
+    '/v1/whoami': () => [200, { ok: true, handle: 'bot', organization_id: 'lab', org_role: 'member', scopes: ['read'] }],
+    '/v1/inbox': () => [200, { ok: true, unread: 1, items: [{ id: 'n1', type: 'mention', read: false, at: '2026-10-18T00:00:00Z',
+      title: 'bot was mentioned on post 4', target: 'post:4', detail: {} }] }],
+    '/v1/repos/rrsrch/msc-knee-oa/merge-requests': () => [200, { ok: true, items: [], next: null }],
+  });
+  render(<Dashboard isMobile={false} />);
+  expect(await screen.findByRole('heading', { name: 'Tasks' })).toBeInTheDocument();
+  expect(await screen.findByText('For you')).toBeInTheDocument();
+  expect(await screen.findByText('bot was mentioned on post 4')).toBeInTheDocument();
+  expect(await screen.findByText('1 new')).toBeInTheDocument();                         // unread, beside the tab
+  expect((await screen.findAllByRole('heading', { name: 'Proposed changes' })).length).toBeGreaterThan(0);
+  window.location.hash = '';
+  localStorage.clear();
 });
 
 test('the atlas page draws the repository map with its drawer', async () => {
@@ -173,9 +196,9 @@ test('the Bounties page is in the sidebar only where the engine has bounties on'
   });
   mockEngine(routes('off'));
   const { unmount } = render(<Dashboard isMobile={false} initialTab="agents" />);
-  expect(await screen.findByRole('button', { name: /^Review/ })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: /^Tasks/ })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /^Bounties/ })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /^Tasks/ })).not.toBeInTheDocument();      // docs/SIMPLIFY.md
+  expect(screen.queryByRole('button', { name: /^Inbox/ })).not.toBeInTheDocument();      // part of Tasks now
   expect(screen.queryByRole('button', { name: /^Atlas/ })).not.toBeInTheDocument();
   unmount();
   mockEngine(routes('on'));                     // operator mode shows it to RRSRCH operators only
