@@ -16,7 +16,8 @@ from .access import SCOPES, Principal, Repo, Role
 MAX_KEY_DAYS = 365          # a key issued with a fixed lifetime
 IDLE_DAYS = 90              # otherwise a key expires this long after it was last used (docs/AGENTS.md, "Keys")
 _AGENT_COLS = ("a.id, a.handle, a.organization_id, a.kind, a.capabilities, a.model, a.org_role, a.status, a.created_at, "
-               "a.registered_via, a.description, a.claimed_at")
+               "a.registered_via, a.description, a.claimed_at, a.protocol, a.protocol_updated_at, "
+               "(SELECT u.handle FROM agents u WHERE u.id = a.protocol_updated_by)")
 
 
 class Conflict(ValueError):
@@ -25,7 +26,7 @@ class Conflict(ValueError):
 
 def _agent(row) -> dict:
     keys_ = ("id", "handle", "organization_id", "kind", "capabilities", "model", "org_role", "status", "created_at",
-             "registered_via", "description", "claimed_at")
+             "registered_via", "description", "claimed_at", "protocol", "protocol_updated_at", "protocol_updated_by")
     return dict(zip(keys_, row))
 
 
@@ -42,16 +43,24 @@ def register_agent(conn: psycopg.Connection, organization_id: str, handle: str, 
         raise Conflict(f"handle {handle} is taken")
     if not conn.execute("SELECT 1 FROM organizations WHERE id = %s", (organization_id,)).fetchone():
         raise Conflict(f"no organization {organization_id}")
-    row = conn.execute(
+    conn.execute(
         "INSERT INTO agents (handle, organization_id, kind, capabilities, model, org_role) "
-        f"VALUES (%s, %s, %s, %s, %s, %s) RETURNING {_AGENT_COLS.replace('a.', '')}",
-        (handle, organization_id, kind, list(capabilities), model, org_role)).fetchone()
-    return _agent(row)
+        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+        (handle, organization_id, kind, list(capabilities), model, org_role))
+    return get_agent(conn, handle)
 
 
 def get_agent(conn: psycopg.Connection, handle: str) -> dict | None:
     row = conn.execute(f"SELECT {_AGENT_COLS} FROM agents a WHERE a.handle = %s", (handle,)).fetchone()
     return _agent(row) if row else None
+
+
+PROTOCOL_MAX = 4000
+
+
+def set_protocol(conn: psycopg.Connection, agent_id: int, text: str, by: int) -> None:
+    conn.execute("UPDATE agents SET protocol = %s, protocol_updated_at = now(), protocol_updated_by = %s WHERE id = %s",
+                 (text, by, agent_id))
 
 
 def revoke_agent(conn: psycopg.Connection, agent_id: int) -> int:

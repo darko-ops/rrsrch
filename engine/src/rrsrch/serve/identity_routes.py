@@ -117,7 +117,16 @@ def _target_agent(c: psycopg.Connection, handle: str) -> dict:
 def _public(agent: dict) -> dict:
     return {k: agent[k] for k in ("handle", "organization_id", "kind", "capabilities", "model", "status",
                                   "created_at", "registered_via", "description")} \
-        | {"claimed": not onboarding.is_unclaimed(agent["organization_id"])}
+        | {"claimed": not onboarding.is_unclaimed(agent["organization_id"]), "protocol": protocol_of(agent)}
+
+
+def protocol_of(agent: dict) -> dict | None:
+    """The mission directive its operator set, or None. Public: anyone reading the agent's work can see what it
+    was told to do."""
+    if not agent.get("protocol"):
+        return None
+    return {"text": agent["protocol"], "updated_at": agent["protocol_updated_at"],
+            "updated_by": agent["protocol_updated_by"]}
 
 
 class NewAgent(BaseModel):
@@ -146,6 +155,10 @@ class SelfRegistration(BaseModel):
 class ProfileUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     model: str | None = Field(default=None, max_length=200)
+
+
+class ProtocolUpdate(BaseModel):
+    protocol: str = Field(max_length=store.PROTOCOL_MAX)     # empty clears it
 
 
 class NewOrganization(BaseModel):
@@ -265,6 +278,21 @@ def update_agent(handle: str, body: ProfileUpdate, p: Principal | None = Depends
     if fields:
         audit.append(c, "agent.update", f"agent:{handle}", actor_id=p.agent_id, detail={"fields": sorted(fields)})
     return {"ok": True, "agent": _public(_target_agent(c, handle))}
+
+
+@router.put("/agents/{handle}/protocol")
+def set_protocol(handle: str, body: ProtocolUpdate, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """An admin of the agent's organization sets its protocol: what it's for and what to focus on. The agent
+    can't set its own; direction comes from the people who answer for it. It never overrides RRSRCH's rules."""
+    agent = _target_agent(c, handle)
+    _require(access.can_manage_agents(p, agent["organization_id"]))
+    text = body.protocol.strip()
+    if text == (agent["protocol"] or ""):
+        return {"ok": True, "agent": _public(agent), "changed": False}
+    store.set_protocol(c, agent["id"], text, p.agent_id)
+    audit.append(c, "agent.protocol", f"agent:{handle}", actor_id=p.agent_id, detail={"protocol": text})
+    return {"ok": True, "agent": _public(_target_agent(c, handle)), "changed": True}
 
 
 @router.post("/agents/{handle}/revoke")

@@ -264,3 +264,25 @@ def test_trust_counts_only_independent_evaluations_per_repository(world):
     assert (net["evaluations"], net["held"], net["same_operator_excluded"]) == (1, 1, 1)
 
     assert standing._wilson_lower(5, 5) < 1 and standing._wilson_lower(0, 5) == 0
+
+
+def test_an_operator_sets_an_agents_protocol_and_the_agent_gets_it_at_every_check_in(world):
+    client, h, url = world
+    text = "Mission: keep the MSC knee claims honest. Review what you're asked first; answer dose questions."
+    assert client.put("/v1/agents/bot/protocol", headers=h["bot"], json={"protocol": text}).status_code == 403  # not itself
+    assert client.put("/v1/agents/bot/protocol", headers=h["ext"], json={"protocol": text}).status_code == 403  # not another org
+    assert client.put("/v1/agents/bot/protocol", json={"protocol": text}).status_code == 401
+    assert client.put("/v1/agents/bot/protocol", headers=h["admin"], json={"protocol": "x" * 4001}).status_code in (400, 422)
+    r = client.put("/v1/agents/bot/protocol", headers=h["admin"], json={"protocol": f"  {text}\n"})
+    assert r.status_code == 200 and r.json()["changed"] is True
+    shown = client.get("/v1/agents/bot").json()["agent"]["protocol"]                     # public, with who set it
+    assert shown["text"] == text and shown["updated_by"] == "admin" and shown["updated_at"]
+    assert client.put("/v1/agents/bot/protocol", headers=h["admin"], json={"protocol": text}).json()["changed"] is False
+    got = checkin(client, h["bot"], None, url).json()
+    assert got["protocol"]["text"] == text and "can't override" in got["guidance"]
+    with psycopg.connect(url) as c:
+        events = c.execute("SELECT detail->>'protocol' FROM audit_events WHERE action = 'agent.protocol'").fetchall()
+    assert events == [(text,)]                                                              # one change, full text on record
+    assert client.put("/v1/agents/bot/protocol", headers=h["admin"], json={"protocol": ""}).json()["agent"]["protocol"] is None
+    cleared = checkin(client, h["bot"], None, url).json()
+    assert cleared["protocol"] is None and "can't override" not in cleared["guidance"]
