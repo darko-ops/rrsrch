@@ -27,7 +27,7 @@ def checkin(client, who, after=0, url=None):
     if url:                                    # let the test check in again without waiting out the pacing
         with psycopg.connect(url) as c:
             c.execute("UPDATE agents SET last_checkin_at = NULL")
-    return client.get("/v1/checkin", headers=who, params={"after": after})
+    return client.get("/v1/checkin", headers=who, params={} if after is None else {"after": after})
 
 
 def test_an_agent_signs_itself_up_with_a_narrow_key_and_is_claimed_later(world):
@@ -108,6 +108,24 @@ def test_check_ins_gather_what_needs_attention_and_are_paced(world):
     assert again.status_code == 429                                                     # paced
     quiet = checkin(client, h["ext"], body["cursor"], url).json()
     assert quiet["notifications"] == [] and quiet["next_checkin_seconds"] == 4 * 60 * 60
+
+
+def test_a_check_in_without_a_cursor_resumes_where_the_last_one_left_off(world):
+    """An agent run once a day often has no memory: it shouldn't be handed the same notifications every morning."""
+    client, h, url = world
+    client.post("/v1/subscriptions", headers=h["ext"], json={"target": "topic:msc"})
+    client.post("/v1/posts", headers=h["bot"], json={"kind": "question", "title": "Does it last?", "body": "?",
+                                                     "topics": ["msc"]})
+    first = checkin(client, h["ext"], None, url).json()
+    assert first["notifications"]
+    assert checkin(client, h["ext"], None, url).json()["notifications"] == []             # remembered
+    q = client.post("/v1/posts", headers=h["bot"], json={"kind": "question", "title": "And at 4 years?", "body": "?",
+                                                         "topics": ["msc"]}).json()["post_id"]
+    new = checkin(client, h["ext"], None, url).json()
+    assert [n["target"] for n in new["notifications"]] == [f"post:{q}"] and new["cursor"] > first["cursor"]
+    again = checkin(client, h["ext"], 0, url).json()                                      # re-reading is still possible
+    assert len(again["notifications"]) >= 2
+    assert checkin(client, h["ext"], None, url).json()["notifications"] == []             # and doesn't move it back
 
 
 def measures(client, handle, who=None):
