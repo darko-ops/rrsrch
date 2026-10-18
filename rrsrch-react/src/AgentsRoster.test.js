@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import AgentsHome, { statusOf, trackOf } from './AgentsRoster';
+import AgentsHome, { statusOf, trackOf, roleOf, missionOf } from './AgentsRoster';
+import { markCells } from './AgentCard';
 
 const hoursAgo = (h) => new Date(Date.now() - h * 3600e3).toISOString();
 
@@ -41,10 +42,30 @@ const DATA = {
     verb: 'proposed', title: '42% responded at 24 months.' }] },
   '/v1/agents?organization=unclaimed': { items: [] },
   '/v1/agents/trial-reader': { agent: { handle: 'trial-reader', organization_id: 'lab', protocol: {
-    text: 'Mission: read knee OA trials.', updated_at: hoursAgo(3), updated_by: 'admin' } } },
+    text: 'Role: Trial reader\n\nMission: read knee OA trials.', updated_at: hoursAgo(3), updated_by: 'admin' } } },
 };
 
-test('the Agents page: right now, the roster with status filters, and the selected agent', async () => {
+test('the identity mark: the same 5x5 mirrored mark for a handle, every time', () => {
+  const m = markCells('trial-reader');
+  expect(m).toHaveLength(25);
+  expect(markCells('trial-reader')).toEqual(m);
+  for (let y = 0; y < 5; y++) {
+    expect(m[y * 5 + 3]).toBe(m[y * 5 + 1]);
+    expect(m[y * 5 + 4]).toBe(m[y * 5]);
+  }
+  expect(markCells('old-bot')).not.toEqual(m);
+});
+
+test('role and mission come from the protocol\'s "Role:" and "Mission:" lines', () => {
+  const p = { text: 'Role: Trial reader\nMission: Read every knee OA trial\nand propose its outcomes.\n\nFocus:\n- MSCs' };
+  expect(roleOf(p)).toBe('Trial reader');
+  expect(missionOf(p)).toBe('Read every knee OA trial and propose its outcomes.');
+  expect(missionOf({ text: 'Mission: one line\nFocus:\n- x' })).toBe('one line');
+  expect(roleOf(null)).toBe('');
+  expect(missionOf({ text: 'no labels here' })).toBe('');
+});
+
+test('the Agents page: right now, needs you, status filters and a card per agent linking to its profile', async () => {
   global.fetch = jest.fn((url) => {
     const path = url.replace('/api/engine', '').replace(/&limit=\d+$/, '');
     const key = Object.keys(DATA).find((k) => path === k || path.startsWith(`${k}?`));
@@ -55,66 +76,19 @@ test('the Agents page: right now, the roster with status filters, and the select
   const now = await screen.findByRole('region', { name: 'Right now' });
   await within(now).findByText('proposed');
   expect(now).toHaveTextContent('trial-reader proposed 42% responded');
-  const roster = await screen.findByRole('table', { name: 'Your agents' });
-  expect(await within(roster).findByText('old-bot')).toBeInTheDocument();
-  expect(within(roster).getByText('90%')).toBeInTheDocument();
-  const detail = screen.getByRole('complementary', { name: 'trial-reader detail' });          // first agent selected
-  expect(detail).toHaveTextContent('Working on now · 1');
-  expect(detail).toHaveTextContent('waiting on reviewers');
-  expect(detail).toHaveTextContent('trust 90% of 10');
-  expect(screen.queryByText(/Sparks/i)).not.toBeInTheDocument();                             // dormant: never shown
+  const cards = await screen.findByRole('region', { name: 'Your agents' });
+  const reader = await within(cards).findByRole('link', { name: 'trial-reader, waiting on reviewers' });
+  expect(reader).toHaveAttribute('href', '/agents/trial-reader');
+  expect(reader).toHaveTextContent('waiting');
+  expect(reader).toHaveTextContent('No. 001 · qwen');
+  expect(reader).toHaveTextContent('Trial reader');                                       // its protocol's Role: line
+  const old = within(cards).getByRole('link', { name: 'old-bot, idle' });
+  expect(old).toHaveTextContent('No. 002');
+  expect(old).toHaveTextContent('agent');                                                 // no role yet: its kind
+  expect(within(reader).getByTestId('identity-mark').children).toHaveLength(25);
+  expect(screen.queryByRole('table')).not.toBeInTheDocument();                           // the roster table is gone
+  expect(screen.queryByText(/Sparks/i)).not.toBeInTheDocument();                         // dormant: never shown
   fireEvent.click(screen.getByRole('button', { name: /^idle/ }));
-  expect(within(screen.getByRole('table', { name: 'Your agents' })).queryByText('trial-reader')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('row', { name: /old-bot/ }));
-  expect(screen.getByRole('complementary', { name: 'old-bot detail' })).toHaveTextContent('No independent evaluations yet');
-  fireEvent.click(screen.getByRole('button', { name: 'Timeline' }));
-  expect(screen.getByRole('table', { name: 'Your agents over 14 days' })).toBeInTheDocument();
-  expect(localStorage.getItem('rrsrch_agents_view')).toBe('timeline');
-  localStorage.clear();
-});
-
-test('the Protocol tab: an admin of the agent\'s organization writes its mission directive', async () => {
-  const puts = [];
-  global.fetch = jest.fn((url, opts = {}) => {
-    const path = url.replace('/api/engine', '').replace(/&limit=\d+$/, '');
-    if (opts.method === 'PUT') {
-      puts.push([path, JSON.parse(opts.body)]);
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, changed: true, agent: {
-        handle: 'old-bot', protocol: { text: 'Mission: tidy dose claims.', updated_at: hoursAgo(0), updated_by: 'admin' } } }) });
-    }
-    const key = Object.keys(DATA).find((k) => path === k || path.startsWith(`${k}?`));
-    return Promise.resolve({ ok: !!key, status: key ? 200 : 404, json: () => Promise.resolve({ ok: !!key, ...(DATA[key] || {}) }) });
-  });
-  const me = { handle: 'admin', organization_id: 'lab', org_role: 'admin', scopes: ['agents', 'read'] };
-  render(<AgentsHome apiKey="k" me={me} isMobile={false} repos={[]} repo="lab/knee" onRepo={() => {}} />);
-  await screen.findByRole('complementary', { name: 'trial-reader detail' });
-  fireEvent.click(screen.getByRole('tab', { name: 'Protocol' }));
-  expect(screen.getByRole('textbox', { name: 'Protocol text' })).toHaveValue('Mission: read knee OA trials.');
-  expect(screen.getByText(/Set by admin/)).toBeInTheDocument();
-
-  fireEvent.click(screen.getByRole('row', { name: /old-bot/ }));                           // no protocol yet
-  fireEvent.click(screen.getByRole('tab', { name: 'Protocol' }));
-  const box = screen.getByRole('textbox', { name: 'Protocol text' });
-  expect(box).toHaveValue('');
-  expect(screen.getByRole('button', { name: 'Save protocol' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Start from an outline' }));
-  expect(box.value).toMatch(/^Mission:/);
-  fireEvent.change(box, { target: { value: 'Mission: tidy dose claims.' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save protocol' }));
-  expect(await screen.findByText(/gets it at its next check-in/)).toBeInTheDocument();
-  expect(puts).toEqual([['/v1/agents/old-bot/protocol', { protocol: 'Mission: tidy dose claims.' }]]);
-});
-
-test('the Protocol tab is read-only for anyone who isn\'t an admin of the agent\'s organization', async () => {
-  global.fetch = jest.fn((url) => {
-    const path = url.replace('/api/engine', '').replace(/&limit=\d+$/, '');
-    const key = Object.keys(DATA).find((k) => path === k || path.startsWith(`${k}?`));
-    return Promise.resolve({ ok: !!key, status: key ? 200 : 404, json: () => Promise.resolve({ ok: !!key, ...(DATA[key] || {}) }) });
-  });
-  const me = { handle: 'visitor', organization_id: 'lab', org_role: 'member', scopes: ['read'] };
-  render(<AgentsHome apiKey="k" me={me} isMobile={false} repos={[]} repo="lab/knee" onRepo={() => {}} />);
-  await screen.findByRole('complementary', { name: 'trial-reader detail' });
-  fireEvent.click(screen.getByRole('tab', { name: 'Protocol' }));
-  expect(screen.queryByRole('textbox', { name: 'Protocol text' })).not.toBeInTheDocument();
-  expect(screen.getByText('Mission: read knee OA trials.')).toBeInTheDocument();
+  expect(within(cards).queryByRole('link', { name: /trial-reader/ })).not.toBeInTheDocument();
+  expect(within(cards).getByRole('link', { name: /old-bot/ })).toBeInTheDocument();
 });
