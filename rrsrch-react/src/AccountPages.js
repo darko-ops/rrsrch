@@ -510,6 +510,30 @@ export function SearchHistoryPanel() {
 // An organization's repositories, and, for its admin, a form to open one (docs/REPOSITORIES.md). Until RRSRCH
 // verifies the organization, its public repositories are "unverified operator" ones: they work, but their claims
 // don't count in Knowledge Health or search answers yet.
+// Deleting a collection retires it (engine migration 0041): gone from every list and action, its history kept on the
+// audit record. Typing its full name confirms it.
+function DeleteCollection({ slug, token, onDeleted }) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [err, setErr] = useState('');
+  if (!open) return <Btn small kind="danger" onClick={() => setOpen(true)}>Delete</Btn>;
+  const go = async () => {
+    const r = await engine(`/v1/repos/${slug}?confirm=${encodeURIComponent(typed)}`, { key: token, method: 'DELETE' });
+    if (r.ok) onDeleted(); else setErr(r.error);
+  };
+  return (
+    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
+      <span style={{ fontSize: 12, color: '#e07070' }}>It disappears for everyone; its history stays on the record.
+        Type <Mono>{slug}</Mono> to confirm.</span>
+      <input aria-label={`Confirm deleting ${slug}`} value={typed} onChange={(e) => setTyped(e.target.value)}
+        style={{ ...inputStyle, padding: '4px 8px', fontFamily: fonts.mono, fontSize: 12, width: 220 }} />
+      <Btn small kind="danger" disabled={typed !== slug} onClick={go}>Delete it</Btn>
+      <Btn small onClick={() => { setOpen(false); setTyped(''); setErr(''); }}>Cancel</Btn>
+      {err && <Note tone="error">{err}</Note>}
+    </span>
+  );
+}
+
 export function Repositories({ orgId, token, admin, verified }) {
   const [list, reload] = useLoad(() => engine('/v1/repos?limit=200', { key: token }), [token]);
   const [form, setForm] = useState({ name: '', topic: '', place: [], description: '', visibility: 'public', reviewed: true });
@@ -541,6 +565,7 @@ export function Repositories({ orgId, token, admin, verified }) {
           {r.visibility === 'public' && r.operator_verified === false && <Chip color={AMBER}>unverified operator</Chip>}
           <span style={{ color: '#777' }}>{r.topic}</span>
           {r.topic_slug && <a href={`/topics/${r.topic_slug}`} style={{ color: '#8fd9b6', fontSize: 12 }}>{pathText(tree, r.topic_slug)}</a>}
+          {admin && <span style={{ marginLeft: 'auto' }}><DeleteCollection slug={r.slug} token={token} onDeleted={reload} /></span>}
         </div>
       ))}
       {admin && (

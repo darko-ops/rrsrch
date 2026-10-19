@@ -65,9 +65,9 @@ test('the index shows every top-level topic with what is under it, and the tree 
   expect(within(tree).queryByText('Medicine')).not.toBeInTheDocument();
 });
 
-test('a topic shows its path, sub-topics and collections; an organization admin adds a sub-topic', async () => {
+test('a topic shows its path, sub-topics and collections; anyone signed in adds a sub-topic', async () => {
   localStorage.setItem('rrsrch_engine_key', 'rrsrch_k');
-  const posted = serve({ me: { handle: 'lab-admin', organization_id: 'lab', org_role: 'admin', scopes: ['read'] } });
+  const posted = serve();                                                              // no admin role needed
   render(<TopicsPage slug="musculoskeletal" isMobile={false} />);
   expect(await screen.findByRole('heading', { name: 'Musculoskeletal' })).toBeInTheDocument();
   const path = screen.getByRole('navigation', { name: 'Topic path' });
@@ -78,11 +78,24 @@ test('a topic shows its path, sub-topics and collections; an organization admin 
   expect(screen.getByRole('region', { name: 'Collections' })).toHaveTextContent('its sub-topics may have some');
   expect(screen.getByRole('region', { name: 'Questions and findings' })).toBeInTheDocument();
   fireEvent.click(await screen.findByRole('button', { name: 'Add a sub-topic' }));
-  fireEvent.change(screen.getByLabelText('Sub-topic title'), { target: { value: 'Hip osteoarthritis' } });
+  fireEvent.change(screen.getByLabelText('Topic title'), { target: { value: 'Hip osteoarthritis' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add it' }));
   await screen.findByText('Hip osteoarthritis');
   expect(posted).toEqual([{ title: 'Hip osteoarthritis', parent: 'musculoskeletal', description: '' }]);
   expect(window.location.pathname).toBe('/topics/hip-oa');
+});
+
+test('signed in, the index adds a top-level topic', async () => {
+  localStorage.setItem('rrsrch_engine_key', 'rrsrch_k');
+  const posted = serve();
+  render(<TopicsPage isMobile={false} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Add a topic' }));
+  expect(screen.getByText('New top-level topic')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Topic title'), { target: { value: 'Biology' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add it' }));
+  await screen.findByText('Topics');
+  await new Promise((r) => setTimeout(r, 0));
+  expect(posted).toEqual([{ title: 'Biology', parent: null, description: '' }]);
 });
 
 test('signed out, a topic has no follow or add buttons', async () => {
