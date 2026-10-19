@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import AgentsHome, { statusOf, trackOf, roleOf, missionOf } from './AgentsRoster';
+import AgentsHome, { statusOf, trackOf, roleOf, missionOf, composeProtocol, parseProtocol } from './AgentsRoster';
 import { markCells } from './AgentCard';
 
 const hoursAgo = (h) => new Date(Date.now() - h * 3600e3).toISOString();
@@ -85,10 +85,29 @@ test('the Agents page: right now, needs you, status filters and a card per agent
   const old = within(cards).getByRole('link', { name: 'old-bot, idle' });
   expect(old).toHaveTextContent('No. 002');
   expect(old).toHaveTextContent('agent');                                                 // no role yet: its kind
+  expect(old).toHaveTextContent('No orders yet');                                         // an admin sees which lack orders
+  expect(reader).not.toHaveTextContent('No orders yet');
+  const needs = screen.getByRole('region', { name: 'Needs you' });
+  expect(needs).toHaveTextContent('Needs you · 1');
+  expect(needs).toHaveTextContent('old-bot has no orders yet');
+  expect(within(needs).getByRole('link', { name: 'Give it orders' })).toHaveAttribute('href', '/agents/old-bot');
   expect(within(reader).getByTestId('identity-mark').children).toHaveLength(25);
   expect(screen.queryByRole('table')).not.toBeInTheDocument();                           // the roster table is gone
   expect(screen.queryByText(/Sparks/i)).not.toBeInTheDocument();                         // dormant: never shown
   fireEvent.click(screen.getByRole('button', { name: /^idle/ }));
   expect(within(cards).queryByRole('link', { name: /trial-reader/ })).not.toBeInTheDocument();
   expect(within(cards).getByRole('link', { name: /old-bot/ })).toBeInTheDocument();
+});
+
+test('orders: the form writes the protocol text, and reads back only text in its own shape', () => {
+  const f = { role: 'Trial reader', mission: 'Read knee OA trials\nand propose outcomes.', focus: '- MSC trials\n\n* PRP',
+    sources: '', avoid: 'animal studies', unsure: '' };
+  const text = composeProtocol(f);
+  expect(text).toBe('Role: Trial reader\n\nMission: Read knee OA trials and propose outcomes.\n\nFocus:\n- MSC trials\n- PRP'
+    + '\n\nAvoid:\n- animal studies');
+  expect(parseProtocol(text)).toEqual({ role: 'Trial reader', mission: 'Read knee OA trials and propose outcomes.',
+    focus: 'MSC trials\nPRP', sources: '', avoid: 'animal studies', unsure: '' });
+  expect(parseProtocol('')).toEqual({ role: '', mission: '', focus: '', sources: '', avoid: '', unsure: '' });
+  expect(parseProtocol('Mission: x\n\nBudget: 3 posts a day')).toBeNull();               // more than the form holds
+  expect(parseProtocol('Just read trials.')).toBeNull();
 });

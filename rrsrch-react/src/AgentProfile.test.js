@@ -65,25 +65,36 @@ test('the profile leads with the protocol\'s mission, then the ID panel, track r
   expect(now).toHaveTextContent('Right now · 1');
   expect(within(now).getByText('42% responded at 24 months.').closest('a'))
     .toHaveAttribute('href', '#/agents?tab=tasks&repo=lab%2Fknee');
-  const protocol = screen.getByRole('region', { name: 'Full protocol' });
-  expect(protocol).toHaveTextContent('Focus:');
-  expect(within(protocol).queryByRole('textbox')).not.toBeInTheDocument();               // read-only for visitors
+  const orders = screen.getByRole('region', { name: 'Orders' });
+  expect(orders).toHaveTextContent('Focus:');
+  expect(within(orders).queryByRole('textbox')).not.toBeInTheDocument();                 // read-only for visitors
+  expect(orders.compareDocumentPosition(now) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();  // below its work
   expect(screen.queryByText('Revoke')).not.toBeInTheDocument();
   expect(id).not.toHaveTextContent('Keys');
   expect(global.fetch.mock.calls.some(([u]) => u.includes('/keys'))).toBe(false);
 });
 
-test('an admin of the agent\'s organization edits its protocol, sees its keys and can revoke it', async () => {
+test('an admin of the agent\'s organization gives it orders, sees its keys and can revoke it', async () => {
   const puts = serve({ handle: 'admin', organization_id: 'lab', org_role: 'admin', scopes: ['agents', 'read'] });
   render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
-  const box = await screen.findByRole('textbox', { name: 'Protocol text' });
-  expect(box.value).toMatch(/^Role: Trial reader/);
+  const orders = await screen.findByRole('region', { name: 'Orders' });
+  // right under the mission, as a form filled from the protocol
+  expect(screen.getByRole('region', { name: 'Mission' }).nextElementSibling).toBe(orders);
+  expect(within(orders).getByRole('textbox', { name: 'Role' })).toHaveValue('Trial reader');
+  expect(within(orders).getByRole('textbox', { name: 'Focus' })).toHaveValue('MSCs');
   const id = screen.getByRole('complementary', { name: 'trial-reader ID' });
   expect(await within(id).findByText('2 live · one expires in 3 days')).toBeInTheDocument();
-  fireEvent.change(box, { target: { value: 'Role: Dose checker\nMission: Check dose claims.' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save protocol' }));
-  expect(await screen.findByText(/gets it at its next check-in/)).toBeInTheDocument();
-  expect(puts).toEqual([['/v1/agents/trial-reader/protocol', { protocol: 'Role: Dose checker\nMission: Check dose claims.' }]]);
+  fireEvent.change(within(orders).getByRole('textbox', { name: 'Role' }), { target: { value: 'Dose checker' } });
+  fireEvent.change(within(orders).getByRole('textbox', { name: 'Mission' }), { target: { value: 'Check dose claims.' } });
+  fireEvent.change(within(orders).getByRole('textbox', { name: 'Avoid' }), { target: { value: '- animal studies\npreprints' } });
+  // the same orders as text, and back
+  fireEvent.click(within(orders).getByRole('button', { name: 'Edit as text' }));
+  const text = 'Role: Dose checker\n\nMission: Check dose claims.\n\nFocus:\n- MSCs\n\nAvoid:\n- animal studies\n- preprints';
+  expect(within(orders).getByRole('textbox', { name: 'Protocol text' })).toHaveValue(text);
+  fireEvent.click(within(orders).getByRole('button', { name: 'Edit as a form' }));
+  fireEvent.click(within(orders).getByRole('button', { name: 'Save orders' }));
+  expect(await screen.findByText('Saved. trial-reader gets these orders at its next check-in.')).toBeInTheDocument();
+  expect(puts).toEqual([['/v1/agents/trial-reader/protocol', { protocol: text }]]);
   expect(screen.getByRole('region', { name: 'Mission' })).toHaveTextContent('Check dose claims.');
   expect(id).toHaveTextContent('Dose checker');
   fireEvent.click(within(id).getByRole('button', { name: 'Revoke' }));
