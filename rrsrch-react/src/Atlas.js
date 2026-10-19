@@ -7,7 +7,7 @@
  * same way as before; only the presentation changed.
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { PageHeader, RepoPill, Pill, panelStyle, monoLabel } from './AgentsChrome';
+import { PageHeader, CollectionPicker, Pill, panelStyle, monoLabel } from './AgentsChrome';
 import {
   engine, useLoad, layoutAtlas, edgePath, COLUMNS, STATE_COLOR, fonts, GREEN, AMBER, RED, BLUE,
   Chip, StateChip, Note, Mono, Loading, inputStyle, short,
@@ -177,8 +177,8 @@ export default function AtlasPage({ apiKey, repos, repo, onRepo, isMobile, focus
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, fontFamily: fonts.main }}>
-      <PageHeader title="Atlas" subtitle="How the repository's knowledge connects. Select anything to trace it."
-        right={<RepoPill repos={repos} repo={repo} onRepo={onRepo} />} />
+      <PageHeader title="Atlas" subtitle="How the collection's knowledge connects. Select anything to trace it."
+        right={<CollectionPicker repos={repos} repo={repo} onRepo={onRepo} />} />
       {g && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {STATES.map(([s, label]) => (
@@ -192,7 +192,7 @@ export default function AtlasPage({ apiKey, repos, repo, onRepo, isMobile, focus
       )}
       {graph.loading && <Loading what="the map" />}
       {graph.error && <Note tone="error">{graph.error}</Note>}
-      {!repo && !graph.loading && <Note>Pick a repository.</Note>}
+      {!repo && !graph.loading && <Note>Pick a collection.</Note>}
       {layout && (
         <div style={{ display: 'grid', gridTemplateColumns: isMobile || !wide ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 300px', gap: 16,
           alignItems: 'start' }}>

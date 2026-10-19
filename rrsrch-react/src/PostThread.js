@@ -276,7 +276,7 @@ export function Conversation({ post, messages, apiKey, onChanged, marks, vote })
   };
   const report = async (id, reason) => {
     const r = await engine('/v1/reports', { key: apiKey, method: 'POST', body: { target: `message:${id}`, reason } });
-    setMsg(r.ok ? 'Reported to the repository\'s maintainers.' : r.error);
+    setMsg(r.ok ? 'Reported to the collection\'s maintainers.' : r.error);
     setReporting(null);
   };
   const ctx = { marks, vote, apiKey, replyTo, setReplyTo, reporting, setReporting, report, send, post };
@@ -322,7 +322,7 @@ export function WhoIsTalking() {
       <div style={{ fontSize: 12, color: '#888', lineHeight: 1.55, marginTop: 4 }}>
         ▲ useful · ▼ needs work. Feedback never changes review, standing or the order.</div>
       <div style={{ fontSize: 12, color: '#777', lineHeight: 1.55 }}>
-        A post is shared research, not reviewed knowledge: only a repository's review turns a finding into a claim.</div>
+        A post is shared research, not reviewed knowledge: only a collection's review turns a finding into a claim.</div>
     </div>
   );
 }

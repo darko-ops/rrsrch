@@ -12,7 +12,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Copy, Check, RefreshCw, X } from 'lucide-react';
 import { JoinPanel, ClaimAgent, AgentStanding, OrgVerifications } from './Standing';
-import { PageHeader, RepoPill } from './AgentsChrome';
+import { PageHeader, CollectionPicker } from './AgentsChrome';
 import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 
 // The pages are loaded lazily: each imports primitives from this file, so a static import here would be a cycle
@@ -775,10 +775,10 @@ function ClaimQueue({ apiKey, repo }) {
     [repo, apiKey, after]);
   useEffect(() => { setAfter(0); }, [repo]);
   return (
-    <Panel title="Claims already in the repository, not yet reviewed" right={queue.data && <Chip color={AMBER}>{queue.data.waiting} waiting</Chip>}>
+    <Panel title="Claims already in the collection, not yet reviewed" right={queue.data && <Chip color={AMBER}>{queue.data.waiting} waiting</Chip>}>
       <p style={{ margin: '0 0 6px', color: '#999', fontSize: 14, lineHeight: 1.6 }}>
         Check each claim against its passage: approve only if the passage supports it exactly as worded. The
-        repository's policy decides when a claim is supported; the result shows what, if anything, still holds it.
+        collection's policy decides when a claim is supported; the result shows what, if anything, still holds it.
       </p>
       {!apiKey && <Note>Connect an agent key with the reviewer role (Agents & keys) to review.</Note>}
       <div style={{ display: 'flex', gap: 6, margin: '10px 0 4px' }}>
@@ -868,7 +868,7 @@ function MergeRequestDetail({ id, apiKey, onChanged }) {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Btn kind={preview.allowed ? 'primary' : 'ghost'} disabled={!preview.allowed}
-              onClick={() => act(`/v1/merge-requests/${id}/merge`, undefined, 'Accepted into the repository.')}>Accept</Btn>
+              onClick={() => act(`/v1/merge-requests/${id}/merge`, undefined, 'Accepted into the collection.')}>Accept</Btn>
             <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} placeholder="reviewer handle"
               style={{ ...inputStyle, width: 160, fontFamily: fonts.mono }} />
             <Btn disabled={!reviewer.trim()} onClick={() => act(`/v1/merge-requests/${id}/review-requests`, { reviewer: reviewer.trim() }, `Asked ${reviewer.trim()} to review.`)}>Request review</Btn>
@@ -1042,7 +1042,7 @@ function OrgAgentKeys({ apiKey, me }) {
 function RepoPage({ title, subtitle, repos, repo, onRepo, children }) {
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <PageHeader title={title} subtitle={subtitle} right={<RepoPill repos={repos} repo={repo} onRepo={onRepo} />} />
+      <PageHeader title={title} subtitle={subtitle} right={<CollectionPicker repos={repos} repo={repo} onRepo={onRepo} />} />
       {children}
     </div>
   );
@@ -1158,7 +1158,7 @@ export default function Dashboard({ isMobile, initialTab }) {
     );
   } else if (tab === 'tasks') {
     page = (
-      <RepoPage title="Tasks" subtitle="What's addressed to you, then everything in this repository waiting for review: proposed changes, then claims already in it that nobody has reviewed yet. The repository's policy decides what is accepted." {...repoProps}>
+      <RepoPage title="Tasks" subtitle="What's addressed to you, then everything in this collection waiting for review: proposed changes, then claims already in it that nobody has reviewed yet. The collection's policy decides what is accepted." {...repoProps}>
         {!acting && <Note>Reading is open to everyone. {SIGN_IN} to review and to see what's addressed to you.</Note>}
         {acting && <InboxPage apiKey={acting} me={me} isMobile={isMobile} embedded
           onUnreadChange={(n) => setCounts((c) => ({ ...(c || {}), inbox_unread: n }))} />}

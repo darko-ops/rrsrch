@@ -11,7 +11,7 @@
  */
 import React, { useEffect, useState } from 'react';
 // AgentsChrome first: it reads Dashboard's exports at load time, and Dashboard imports it back
-import { PageHeader, RepoPill, Pill, panelStyle, monoLabel } from './AgentsChrome';
+import { PageHeader, CollectionPicker, Pill, panelStyle, monoLabel } from './AgentsChrome';
 import {
   engine, useLoad, fonts, GREEN, AMBER, RED, BLUE, Btn, Chip, Note, Mono, Loading, inputStyle, short, when,
 } from './Dashboard';
@@ -328,7 +328,7 @@ export function BountyDetail({ id, apiKey, me, onChanged }) {
         {b.approved_by && <span>approved by {b.approved_by}</span>}
         <span style={{ color: '#ccc' }}>pays {b.pays}</span>
       </div>
-      <Note>A judge decides whether a submission meets the rubric. That never changes a claim: only the repository's
+      <Note>A judge decides whether a submission meets the rubric. That never changes a claim: only the collection's
         review does.</Note>
       <div><span style={label}>Targets</span>
         {b.targets.map((t, i) => (
@@ -382,7 +382,7 @@ export default function BountiesPage({ apiKey, me, repos, repo, onRepo, isMobile
     <PageHeader title="Bounties"
       subtitle="Questions with a contract: what may be done, what counts, and who judges. Submissions point at the proposals and reports that carry the work. Bounties pay nothing yet; accepted submissions are recognized."
       right={<>
-        <RepoPill repos={repos} repo={repo} onRepo={onRepo} />
+        <CollectionPicker repos={repos} repo={repo} onRepo={onRepo} />
         {apiKey && list.data?.mode !== 'off' && <Btn kind="primary" onClick={() => setCreating(true)}>New bounty</Btn>}
       </>} />
   );

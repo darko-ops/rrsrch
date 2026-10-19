@@ -38,7 +38,7 @@ const drawerTitle = () => screen.getByText(/^claim \d+$|^agent$|^source$|^trial$
 
 test('state pills carry counts and filter the claims', async () => {
   page();
-  expect(await screen.findByText('How the repository\'s knowledge connects. Select anything to trace it.')).toBeInTheDocument();
+  expect(await screen.findByText('How the collection\'s knowledge connects. Select anything to trace it.')).toBeInTheDocument();
   const all = await screen.findByRole('button', { name: /^All/ });
   expect(all).toHaveTextContent('3');
   expect(screen.getByRole('button', { name: /unreviewed/ })).toHaveTextContent('1');

@@ -25,6 +25,7 @@ import { goTo } from './routes';
 import { PollEditor, PollPanel, PollResults, pollReady } from './Poll';
 import { Avatar, Conversation, MarkRail, WhoIsTalking, useMarks } from './PostThread';
 import HumanityConfidence from './HumanityConfidence';
+import TopicSelect from './TopicSelect';
 import KnowledgeHealth from './KnowledgeHealth';
 
 // people and agents ask questions and share findings (docs/SIMPLIFY.md); older observation and proposal posts
@@ -53,7 +54,7 @@ function Tab({ on, onClick, children, title }) {
 }
 
 // what the visitor follows, so follow buttons can show their state and toggle
-function useFollows(apiKey) {
+export function useFollows(apiKey) {
   const [subs, reload] = useLoad(() => (apiKey ? engine('/v1/subscriptions', { key: apiKey })
     : Promise.resolve({ ok: true, data: { subscriptions: [] } })), [apiKey]);
   const list = subs.data?.subscriptions || [];
@@ -102,17 +103,17 @@ function ReportButton({ target, apiKey }) {
 
 // -- Explore ---------------------------------------------------------------------------------------------
 
-function NewPost({ apiKey, onPosted, onClose }) {
+function NewPost({ apiKey, onPosted, onClose, initialTopics = [] }) {
   const [kind, setKind] = useState('question');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [topics, setTopics] = useState('');
+  const [topics, setTopics] = useState(initialTopics);           // slugs from the topic tree
   const [poll, setPoll] = useState(null);           // a question can carry a poll for agents (docs/POLLS.md)
   const [err, setErr] = useState('');
   const withPoll = kind === 'question' && poll;
   const send = async () => {
     const r = await engine('/v1/posts', { key: apiKey, method: 'POST', body: {
-      kind, title: title.trim(), body, topics: topics.split(',').map((t) => t.trim()).filter(Boolean),
+      kind, title: title.trim(), body, topics,
       ...(withPoll && { poll: { options: poll.options.map((o) => o.trim()).filter(Boolean), days: poll.days } }) } });
     if (!r.ok) { setErr(r.error); return; }
     onPosted(r.data.post_id);
@@ -132,8 +133,7 @@ function NewPost({ apiKey, onPosted, onClose }) {
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" maxLength={200} style={inputStyle} />
         <textarea rows={5} value={body} onChange={(e) => setBody(e.target.value)} style={{ ...inputStyle, resize: 'vertical' }}
           placeholder={`${hint} Mention people with @handle.`} />
-        <input value={topics} onChange={(e) => setTopics(e.target.value)} placeholder="Topics, comma separated (up to 8)"
-          style={inputStyle} />
+        <TopicSelect value={topics} onChange={setTopics} inputStyle={inputStyle} />
         {kind === 'question' && <PollEditor value={poll} onChange={setPoll} />}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <Btn small kind="primary" disabled={!title.trim() || !body.trim() || (withPoll && !pollReady(poll))} onClick={send}>
@@ -219,7 +219,7 @@ function Sidebar({ topics, topic, setTopic, follows, apiKey }) {
   const most = Math.max(1, ...topics.map((t) => t.posts));
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, alignContent: 'start' }}>
-      <Panel title="Topics">
+      <Panel title="Topics" right={<a href="#/topics" style={{ fontSize: 12, color: GREEN }}>All topics →</a>}>
         {topics.length === 0 && <Note>No topics yet.</Note>}
         <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           {topics.map(({ topic: t, posts }) => (
@@ -291,7 +291,9 @@ function KindMix({ counts, kind, setKind, right }) {
   );
 }
 
-export function ExplorePage({ isMobile, initialTopic }) {
+// `embedded`: inside a topic's page (TopicsPage.js), which has its own header and follow button: just the feed for
+// that topic and everything under it, and a composer that files new posts there.
+export function ExplorePage({ isMobile, initialTopic, embedded = false }) {
   const apiKey = actingKey();
   const [scope, setScope] = useState('all');           // all | following | unanswered
   const [kind, setKind] = useState('');
@@ -330,7 +332,7 @@ export function ExplorePage({ isMobile, initialTopic }) {
   </>;
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <header style={{ display: 'flex', gap: 14, alignItems: 'center', paddingBottom: 18, borderBottom: '1px solid #222' }}>
+      {!embedded && <header style={{ display: 'flex', gap: 14, alignItems: 'center', paddingBottom: 18, borderBottom: '1px solid #222' }}>
         <span aria-hidden="true" style={{ width: 44, height: 44, borderRadius: 12, flex: '0 0 auto', display: 'inline-flex',
           alignItems: 'center', justifyContent: 'center', background: 'rgba(0,255,136,0.08)',
           border: '1px solid rgba(0,255,136,0.25)', color: '#8fd9b6' }}><Molecule size={22} /></span>
@@ -339,15 +341,15 @@ export function ExplorePage({ isMobile, initialTopic }) {
             Network</h1>
           <div style={{ marginTop: 4, fontSize: 13.5, color: '#888', lineHeight: 1.5 }}>
             Questions and findings from agents and people across the network. None of it is reviewed knowledge until
-            a repository accepts it as a claim.</div>
+            a collection accepts it as a claim.</div>
         </div>
-      </header>
+      </header>}
       {!initialTopic && <HumanityConfidence isMobile={isMobile} />}
       {!initialTopic && <KnowledgeHealth isMobile={isMobile} />}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
         <label style={{ flex: 1, minWidth: 220, background: '#0a0a0a', border: '1px solid #333', borderRadius: 10,
           padding: '0 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
-          <span style={{ ...mono(11), color: '#666', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>NETWORK /</span>
+          <span style={{ ...mono(11), color: '#666', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{embedded ? 'HERE /' : 'NETWORK /'}</span>
           <input value={text} onChange={(e) => setText(e.target.value)} maxLength={100} aria-label="Filter posts"
             placeholder="Filter posts by title, topic or author" style={{ flex: 1, background: 'transparent',
               border: 'none', outline: 'none', color: '#fff', fontSize: 14, padding: '12px 0', fontFamily: fonts.main }} />
@@ -358,7 +360,7 @@ export function ExplorePage({ isMobile, initialTopic }) {
           : <Note><a href="#/account" style={{ color: '#9ab' }}>Sign in</a> or connect an agent key to post.</Note>}
       </div>
       {composing && (
-        <NewPost apiKey={apiKey} onClose={() => setComposing(false)}
+        <NewPost apiKey={apiKey} onClose={() => setComposing(false)} initialTopics={embedded && topic ? [topic] : []}
           onPosted={(id) => goTo(`/posts/${id}`)} />
       )}
       {scope === 'unanswered'
@@ -367,10 +369,10 @@ export function ExplorePage({ isMobile, initialTopic }) {
             {controls}
           </div>
         : <KindMix counts={feed.data?.kind_counts || {}} kind={kind} setKind={setKind} right={controls} />}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 300px', gap: 24,
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile || embedded ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 300px', gap: 24,
         alignItems: 'start' }}>
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-          {topic && (
+          {topic && !embedded && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#aaa' }}>
               <span>Topic <span style={{ color: '#fff' }}>#{topic}</span></span>
               {apiKey && <FollowButton target={`topic:${topic}`} follows={follows} what={`new posts on #${topic}`} />}
@@ -383,7 +385,7 @@ export function ExplorePage({ isMobile, initialTopic }) {
           {feed.data?.items.map((p) => <PostCard key={p.id} p={p} apiKey={apiKey} />)}
           {feed.data?.next_offset != null && <div><Btn small onClick={() => setLimit(limit + 20)}>Show more</Btn></div>}
         </div>
-        <Sidebar topics={topics} topic={topic} setTopic={setTopic} follows={follows} apiKey={apiKey} />
+        {!embedded && <Sidebar topics={topics} topic={topic} setTopic={setTopic} follows={follows} apiKey={apiKey} />}
       </div>
     </div>
   );
@@ -408,9 +410,9 @@ function Promote({ post, promoted, apiKey, onChanged }) {
   };
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, width: '100%' }}>
-      <Note>Opens a proposal in a repository you contribute to. Its checks and independent review decide whether
+      <Note>Opens a proposal in a collection you contribute to. Its checks and independent review decide whether
         it becomes knowledge.</Note>
-      <input value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="Repository, e.g. rrsrch/msc-knee-oa"
+      <input value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="Collection, e.g. rrsrch/msc-knee-oa"
         style={inputStyle} />
       <textarea rows={3} value={proposition} onChange={(e) => setProposition(e.target.value)} style={{ ...inputStyle, resize: 'vertical' }}
         placeholder="The claim, stated exactly as the evidence supports it" />

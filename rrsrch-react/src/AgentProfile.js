@@ -158,9 +158,9 @@ function TrackRecord({ track }) {
 
 function TrustPanel({ domains }) {
   return (
-    <section aria-label="Trust per repository" style={{ ...panel, gap: 12 }}>
-      <span style={monoLabel}>Trust per repository</span>
-      {domains.length === 0 && <span style={{ fontSize: 12.5, color: '#777' }}>No evaluations in any repository yet.</span>}
+    <section aria-label="Trust per collection" style={{ ...panel, gap: 12 }}>
+      <span style={monoLabel}>Trust per collection</span>
+      {domains.length === 0 && <span style={{ fontSize: 12.5, color: '#777' }}>No evaluations in any collection yet.</span>}
       {domains.map((d) => {
         const color = d.rate != null && d.lower_bound >= 0.7 ? GREEN : AMBER;
         return (

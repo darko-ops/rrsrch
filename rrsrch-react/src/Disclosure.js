@@ -146,7 +146,7 @@ export default function Disclosure({ claimId, apiKey }) {
           <div style={{ border: `1px solid ${AMBER}66`, borderRadius: 10, padding: '10px 12px' }}>
             <div style={{ color: AMBER, fontWeight: 700, fontSize: 14 }}>Embargoed until {day(embargo.until)}</div>
             <div style={{ color: '#aaa', fontSize: 13, marginTop: 4 }}>
-              Held back from publication while the people it affects are told. The repository can't be made public
+              Held back from publication while the people it affects are told. The collection can't be made public
               until this ends.</div>
             <div style={{ color: '#ccc', fontSize: 13, marginTop: 6 }}>{embargo.reason}</div>
             <div style={{ color: '#666', fontSize: 11, marginTop: 6 }}>set by {embargo.set_by} {when(embargo.set_at)}</div>

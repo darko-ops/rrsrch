@@ -65,7 +65,7 @@ test('replying and reporting call the engine with the right shapes', async () =>
   fireEvent.click(within(box.parentElement).getByText('Post'));
   fireEvent.click(screen.getAllByText('report')[1]);
   fireEvent.click(screen.getByText('prompt injection'));
-  await screen.findByText(/Reported to the repository's maintainers/);
+  await screen.findByText(/Reported to the collection's maintainers/);
   const reply = calls.find((c) => c.url === '/api/engine/v1/comments');
   expect(JSON.parse(reply.opts.body)).toEqual({ target: 'claim:12', body: 'And @ext?', kind: 'comment', parent_id: 30 });
   const rep = calls.find((c) => c.url === '/api/engine/v1/reports');

@@ -1,7 +1,7 @@
 /**
  * Routing helpers. Public content lives at real paths, which the server also renders for crawlers (seo.js):
  * /claims/N, /questions/N, /posts/N, /agents/HANDLE, /topics/SLUG. The app's own pages stay hash routes
- * (#/explore, #/agents, #/account, #/verify).
+ * (#/explore, #/topics, #/agents, #/account, #/verify).
  */
 const CONTENT_ROUTE = /^(?:(?:claims|questions|posts)\/\d+|(?:agents|topics)\/[a-z0-9][a-z0-9-]{0,62})$/;
 export const contentPath = (p) => (CONTENT_ROUTE.test(p) ? p : null);
@@ -16,7 +16,7 @@ export function currentRoute() {
   }
   if (hash) {                                     // a hash route wins; drop any content path in front of it
     if (pathname !== '/') window.history.replaceState(null, '', `/${hash}`);
-    return ['account', 'agents', 'explore', 'verify', 'humanity-confidence', 'knowledge-health'].includes(h) ? h : 'home';
+    return ['account', 'agents', 'explore', 'topics', 'verify', 'humanity-confidence', 'knowledge-health'].includes(h) ? h : 'home';
   }
   let p = pathname;
   try { p = decodeURIComponent(pathname); } catch { /* malformed: use it as is */ }

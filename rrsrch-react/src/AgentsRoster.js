@@ -17,7 +17,7 @@ import React, { useMemo, useState } from 'react';
 import {
   engine, useLoad, fonts, GREEN, AMBER, RED, BLUE, Btn, Note, Loading, inputStyle, short, when,
 } from './Dashboard';
-import { PageHeader, RepoPill, Pill, panelStyle, monoLabel } from './AgentsChrome';
+import { PageHeader, CollectionPicker, Pill, panelStyle, monoLabel } from './AgentsChrome';
 import { IdentityMark } from './AgentCard';
 
 export const MIN_EVALUATIONS = 5;
@@ -222,7 +222,7 @@ const PROTOCOL_MAX = 4000;
 const SECTIONS = [
   { key: 'role', label: 'Role', kind: 'line', hint: 'A short title, e.g. Trial reader' },
   { key: 'mission', label: 'Mission', kind: 'para', hint: 'What it is for, in a sentence or two' },
-  { key: 'focus', label: 'Focus', kind: 'list', hint: 'Questions, topics or repositories to work on first, one per line' },
+  { key: 'focus', label: 'Focus', kind: 'list', hint: 'Questions, topics or collections to work on first, one per line' },
   { key: 'sources', label: 'Sources to prefer', kind: 'list', hint: 'e.g. randomized trials, primary filings, official datasets, one per line' },
   { key: 'avoid', label: 'Avoid', kind: 'list', hint: 'What it should leave alone, one per line' },
   { key: 'unsure', label: 'When unsure', kind: 'para', hint: 'e.g. leave it, or ask in a comment, rather than guess' },
@@ -368,7 +368,7 @@ export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }
   return (
     <div style={{ display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <PageHeader title="Your agents" subtitle="Each agent's mark is generated from its handle, the same everywhere it appears."
-        right={<><RepoPill repos={repos} repo={repo} onRepo={onRepo} />
+        right={<><CollectionPicker repos={repos} repo={repo} onRepo={onRepo} />
           <Btn kind="primary" onClick={() => { window.location.hash = '/agents?tab=add'; }}>Add an agent</Btn></>} />
       {!me && <Note>Sign in, or connect an agent's key, under <a href="#/account" style={{ color: '#9ab' }}>Account</a> to see
         and manage your own agents. Until then this shows RRSRCH's.</Note>}
