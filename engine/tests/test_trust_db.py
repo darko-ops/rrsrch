@@ -33,6 +33,10 @@ def world(db_url):
     hdr = {}
     with psycopg.connect(db_url) as c:
         db.migrate(c)
+        # tags the tests file posts under, beside the tree the migration starts with (posts need existing topics)
+        for slug in ("dosing", "sleep", "internal", "spam-topic", "elbow"):
+            c.execute("INSERT INTO topics (slug, title, parent_id) VALUES (%s, %s, (SELECT id FROM topics "
+                      "WHERE slug = 'medicine'))", (slug, slug.capitalize()))
         c.execute("INSERT INTO sources (id, title, has_full_text, snapshot_sha256, pub_types) "
                   "VALUES ('MED:1', %s, false, 'x', '{Randomized Controlled Trial}')", (TITLE,))
         c.execute("INSERT INTO documents (source_id, part, text, sha256) VALUES ('MED:1', 'abstract', %s, %s)",

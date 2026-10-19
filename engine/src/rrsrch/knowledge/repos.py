@@ -63,8 +63,15 @@ def _agent_may_publish(conn, p: Principal, org: str, policy: Policy) -> None:
     _review_floor(policy)
 
 
+def _topic_id(conn, slug: str) -> int:
+    row = conn.execute("SELECT id FROM topics WHERE slug = %s", (slug,)).fetchone()
+    if row is None:
+        raise Refused(400, f"not in the topic tree: {slug}. GET /v1/topics to find one, or add a sub-topic")
+    return row[0]
+
+
 def create(conn: psycopg.Connection, p: Principal | None, slug: str, topic: str, description: str,
-           visibility: str, rules: dict) -> int:
+           visibility: str, rules: dict, topic_slug: str | None = None) -> int:
     org = slug.split("/", 1)[0]
     if p is None:
         raise Refused(401, "authentication required")
@@ -85,22 +92,24 @@ def create(conn: psycopg.Connection, p: Principal | None, slug: str, topic: str,
         _agent_may_publish(conn, p, org, policy)
     features.check_policy(p, policy, visibility)
     via = "human" if human else "agent"
+    topic_id = _topic_id(conn, topic_slug) if topic_slug else None
     repo_id = conn.execute(
         "INSERT INTO repositories (slug, organization_id, topic, description, visibility, policy_version, created_by, "
-        "created_via) VALUES (%s, %s, %s, %s, %s, 'v1', %s, %s) RETURNING id",
-        (slug, org, topic, description, visibility, p.agent_id, via)).fetchone()[0]
+        "created_via, topic_id) VALUES (%s, %s, %s, %s, %s, 'v1', %s, %s, %s) RETURNING id",
+        (slug, org, topic, description, visibility, p.agent_id, via, topic_id)).fetchone()[0]
     conn.execute("INSERT INTO policies (repository_id, version, rules, created_by) VALUES (%s, 'v1', %s, %s)",
                  (repo_id, policy.model_dump_json(), p.agent_id))
     if p.org_role != "admin":                           # an agent that opened it runs it (org admins own it already)
         ids.set_member(conn, repo_id, p.agent_id, "owner", granted_by=None)
     audit.append(conn, "repository.create", f"repo:{slug}", actor_id=p.agent_id, repository_id=repo_id,
-                 policy_version="v1", detail={"visibility": visibility, "created_via": via,
+                 policy_version="v1", detail={"visibility": visibility, "created_via": via, "topic_slug": topic_slug,
                                               "rules": policy.model_dump(mode="json")})
     return repo_id
 
 
 def update(conn: psycopg.Connection, p: Principal | None, slug: str, *, topic: str | None = None,
-           description: str | None = None, visibility: str | None = None, rules: dict | None = None) -> str:
+           description: str | None = None, visibility: str | None = None, rules: dict | None = None,
+           topic_slug: str | None = None) -> str:
     """Change a repository; returns the policy version now in force."""
     repo = ids.get_repo(conn, slug)
     role = ids.role_in(conn, p.agent_id if p else None, repo.id) if repo else None
@@ -138,6 +147,9 @@ def update(conn: psycopg.Connection, p: Principal | None, slug: str, *, topic: s
                      if v is not None}
     for col, val in changes.items():
         conn.execute(f"UPDATE repositories SET {col} = %s WHERE id = %s", (val, repo.id))
+    if topic_slug is not None:                  # where it sits in the topic tree
+        conn.execute("UPDATE repositories SET topic_id = %s WHERE id = %s", (_topic_id(conn, topic_slug), repo.id))
+        changes["topic_slug"] = topic_slug
     version = conn.execute("SELECT policy_version FROM repositories WHERE id = %s", (repo.id,)).fetchone()[0]
     if rules is not None:
         policy = Policy.model_validate(rules)
