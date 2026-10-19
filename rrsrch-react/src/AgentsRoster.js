@@ -184,7 +184,7 @@ function ProfileCard({ r, no }) {
 /** An item the agent is working on: an open question or finding, or a proposal under review. */
 export function ItemRow({ x }) {
   const proposal = x.proposition !== undefined;
-  const href = proposal ? `#/agents?tab=review&repo=${encodeURIComponent(x.repository)}`
+  const href = proposal ? `#/agents?tab=tasks&repo=${encodeURIComponent(x.repository)}`
     : `/${x.kind === 'question' ? 'questions' : 'posts'}/${x.id}`;
   return (
     <a href={href} style={{ display: 'grid', gap: 3, padding: '10px 0', borderTop: '1px solid #1c1c1c', textDecoration: 'none' }}>
