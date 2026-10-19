@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import SearchExperience from './SearchExperience';
+import { AnswerSearch as SearchExperience } from './SearchExperience';
 
 const ANSWER = {
   ok: true, engine: 'rrsrch', question: 'q', verdict: 'benefit', headline: 'Benefit: the claims favour MSCs.',
