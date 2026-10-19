@@ -58,7 +58,7 @@ test('the profile leads with the protocol\'s mission, then the ID panel, track r
   const track = await screen.findByRole('region', { name: 'Track record' });
   expect(track).toHaveTextContent('86%');
   expect(track).toHaveTextContent('36 of 42 held up when others checked · lower bound 73%');
-  const trust = screen.getByRole('region', { name: 'Trust per repository' });
+  const trust = screen.getByRole('region', { name: 'Trust per collection' });
   expect(trust).toHaveTextContent('trust 88% of 31');
   expect(trust).toHaveTextContent('too few to rate');
   const now = await screen.findByRole('region', { name: 'Right now' });

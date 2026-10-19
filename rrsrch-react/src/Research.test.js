@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
 import ClaimPage from './ClaimPage';
+import { resetTopics } from './topicTree';
 
 const FEED = {
   ok: true, next_offset: null, topics: [{ topic: 'msc', posts: 2 }],
@@ -106,19 +107,30 @@ test('people ask questions or share findings; the other post kinds are no longer
   expect(screen.queryByText('proposal')).not.toBeInTheDocument();
 });
 
-test('publishing a post sends kind, title, body and topics', async () => {
-  const calls = mock({ '/v1/explore': FEED, '/v1/posts': { ok: true, post_id: 9 }, '/v1/subscriptions': { ok: true, subscriptions: [] } });
+test('publishing a post sends kind, title, body and topics chosen from the tree', async () => {
+  resetTopics();
+  const t = (slug, title, parent = null) => ({ slug, title, parent, description: '', own: {}, total: {} });
+  const calls = mock({ '/v1/explore': FEED, '/v1/posts': { ok: true, post_id: 9 }, '/v1/subscriptions': { ok: true, subscriptions: [] },
+    '/v1/topics': { ok: true, items: [t('medicine', 'Medicine'), t('musculoskeletal', 'Musculoskeletal', 'medicine'),
+      t('knee-oa', 'Knee osteoarthritis', 'musculoskeletal'), t('msc', 'Mesenchymal stromal cells', 'medicine')] } });
   render(<ExplorePage isMobile={false} />);
   fireEvent.click(await screen.findByText('New post'));
   fireEvent.click(screen.getByRole('button', { name: 'finding' }));            // the composer's tab
   fireEvent.change(screen.getByPlaceholderText('Title'), { target: { value: 'Dose matters' } });
   fireEvent.change(screen.getByPlaceholderText(/What did you find/), { target: { value: 'Higher doses did better.' } });
-  fireEvent.change(screen.getByPlaceholderText(/Topics/), { target: { value: 'msc, dosing' } });
+  fireEvent.change(screen.getByLabelText('Add a topic'), { target: { value: 'mesench' } });
+  fireEvent.mouseDown(await screen.findByRole('option', { name: /Mesenchymal stromal cells/ }));
+  fireEvent.change(screen.getByLabelText('Add a topic'), { target: { value: 'knee' } });
+  expect(screen.getByRole('option', { name: /Knee osteoarthritis · Medicine › Musculoskeletal/ })).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByLabelText('Add a topic'), { key: 'Enter' });
+  fireEvent.change(screen.getByLabelText('Add a topic'), { target: { value: 'zebrafish' } });
+  expect(screen.getByText(/No topic matches/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Add a topic'), { target: { value: '' } });
   fireEvent.click(screen.getByText('Publish'));
   await new Promise((r) => setTimeout(r, 0));
   const pub = calls.find((c) => c.url === '/api/engine/v1/posts');
   expect(JSON.parse(pub.opts.body)).toEqual({ kind: 'finding', title: 'Dose matters', body: 'Higher doses did better.',
-    topics: ['msc', 'dosing'] });
+    topics: ['msc', 'knee-oa'] });
   expect(window.location.pathname).toBe('/posts/9');
 });
 
@@ -131,7 +143,7 @@ test('a post shows its evidence and reports, and promotes through a merge reques
   expect(screen.getByText(/never changes review state by itself/)).toBeInTheDocument();
   expect(screen.getByText('reproduced · 1')).toBeInTheDocument();
   fireEvent.click(screen.getByText('Propose as a claim'));
-  fireEvent.change(screen.getByPlaceholderText(/Repository/), { target: { value: 'rrsrch/msc-knee-oa' } });
+  fireEvent.change(screen.getByPlaceholderText(/Collection/), { target: { value: 'rrsrch/msc-knee-oa' } });
   fireEvent.click(screen.getByText('Propose it'));
   await new Promise((r) => setTimeout(r, 0));
   const promote = calls.find((c) => c.url === '/api/engine/v1/posts/1/promote');

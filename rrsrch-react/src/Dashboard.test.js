@@ -139,7 +139,7 @@ test('a deep link from a search citation opens that claim in the atlas', async (
     '/v1/repos/rrsrch/msc-knee-oa/atlas': () => [200, { ok: true, repository: 'rrsrch/msc-knee-oa', ...GRAPH }],
   });
   render(<Dashboard isMobile={false} />);
-  expect(await screen.findByText('rrsrch/msc-knee-oa ▾')).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Collection: rrsrch/msc-knee-oa' })).toBeInTheDocument();
   expect(await screen.findByText(/Open the claim page/)).toHaveAttribute('href', '/claims/2');
   window.location.hash = '';
 });
@@ -182,7 +182,7 @@ test('old links to the review queue, merge requests or tasks open the one Review
   render(<Dashboard isMobile={false} />);
   expect((await screen.findAllByRole('heading', { name: 'Proposed changes' })).length).toBeGreaterThan(0);
   expect(await screen.findByText('No proposals waiting.')).toBeInTheDocument();
-  expect(screen.getByText('Claims already in the repository, not yet reviewed')).toBeInTheDocument();
+  expect(screen.getByText('Claims already in the collection, not yet reviewed')).toBeInTheDocument();
   window.location.hash = '';
 });
 

@@ -19,6 +19,8 @@ import {
 import { panelStyle, monoLabel } from './AgentsChrome';
 import { passwordChecks, passwordOk } from './passwordRules';
 import { readSearchHistory, clearSearchHistory, searchAgain } from './searchHistory';
+import TopicSelect from './TopicSelect';
+import { useTopics, pathText } from './topicTree';
 
 export const TOKEN_KEY = 'rrsrch_token';
 const siteToken = () => readStored(TOKEN_KEY);
@@ -510,7 +512,8 @@ export function SearchHistoryPanel() {
 // don't count in Knowledge Health or search answers yet.
 export function Repositories({ orgId, token, admin, verified }) {
   const [list, reload] = useLoad(() => engine('/v1/repos?limit=200', { key: token }), [token]);
-  const [form, setForm] = useState({ name: '', topic: '', description: '', visibility: 'public', reviewed: true });
+  const [form, setForm] = useState({ name: '', topic: '', place: [], description: '', visibility: 'public', reviewed: true });
+  const [{ tree }] = useTopics();
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const mine = (list.data?.items || []).filter((r) => r.slug.startsWith(`${orgId}/`));
@@ -520,36 +523,40 @@ export function Repositories({ orgId, token, admin, verified }) {
     setBusy(true); setErr('');
     const r = await engine('/v1/repos', { key: token, method: 'POST', body: {
       slug: `${orgId}/${name}`, topic: form.topic.trim(), description: form.description.trim(),
+      ...(form.place.length && { topic_slug: form.place[0] }),
       visibility: form.visibility,
       policy: form.reviewed ? { required_approvals: 1, approvals_from_other_orgs_only: true } : {} } });
     setBusy(false);
-    if (r.ok) { setForm({ ...form, name: '', topic: '', description: '' }); reload(); } else setErr(r.error);
+    if (r.ok) { setForm({ ...form, name: '', topic: '', place: [], description: '' }); reload(); } else setErr(r.error);
   };
   return (
     <div style={{ ...panelStyle, padding: 18, display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <span style={monoLabel}>Repositories</span>
-      {list.loading && !list.data && <Loading what="repositories" />}
-      {list.data && mine.length === 0 && <Note>No repositories yet.</Note>}
+      <span style={monoLabel}>Collections</span>
+      {list.loading && !list.data && <Loading what="collections" />}
+      {list.data && mine.length === 0 && <Note>No collections yet.</Note>}
       {mine.map((r) => (
         <div key={r.slug} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 13 }}>
           <a href={`#/agents?tab=atlas&repo=${encodeURIComponent(r.slug)}`} style={{ color: '#ddd' }}><Mono>{r.slug}</Mono></a>
           <Chip>{r.visibility}</Chip>
           {r.visibility === 'public' && r.operator_verified === false && <Chip color={AMBER}>unverified operator</Chip>}
           <span style={{ color: '#777' }}>{r.topic}</span>
+          {r.topic_slug && <a href={`/topics/${r.topic_slug}`} style={{ color: '#8fd9b6', fontSize: 12 }}>{pathText(tree, r.topic_slug)}</a>}
         </div>
       ))}
       {admin && (
         <form onSubmit={create} style={{ display: 'grid', gap: 8, gridTemplateColumns: 'minmax(0, 1fr)',
           borderTop: '1px solid #1c1c1c', paddingTop: 12 }}>
-          <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>New repository</span>
+          <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>New collection</span>
           <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <Mono>{orgId}/</Mono>
-            <input aria-label="Repository name" value={form.name} placeholder="semis-robotics" maxLength={100}
+            <input aria-label="Collection name" value={form.name} placeholder="semis-robotics" maxLength={100}
               onChange={(e) => setForm({ ...form, name: e.target.value.toLowerCase() })}
               style={{ ...inputStyle, flex: 1, fontFamily: fonts.mono }} />
           </label>
-          <input aria-label="Topic" value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })}
-            placeholder="Topic, e.g. Semiconductor capital intensity" maxLength={200} style={inputStyle} />
+          <input aria-label="Title" value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })}
+            placeholder="What it's about, e.g. Semiconductor capital intensity" maxLength={200} style={inputStyle} />
+          <TopicSelect value={form.place} onChange={(place) => setForm({ ...form, place })} inputStyle={inputStyle} max={1}
+            placeholder="Where it sits in the topic tree, e.g. Semiconductors" />
           <textarea aria-label="Description" rows={2} value={form.description} maxLength={2000}
             onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What belongs here (optional)"
             style={{ ...inputStyle, resize: 'vertical' }} />
@@ -567,12 +574,12 @@ export function Repositories({ orgId, token, admin, verified }) {
           </div>
           {form.visibility === 'public' && !verified && (
             <span style={{ fontSize: 12, color: '#b9a46f', lineHeight: 1.5 }}>Your organization isn't verified yet, so
-              this will be an "unverified operator" repository: it works normally, but its claims don't count in
+              this will be an "unverified operator" collection: it works normally, but its claims don't count in
               Knowledge Health or search answers until RRSRCH verifies the organization.</span>
           )}
           <div><Btn kind="primary" type="submit" disabled={busy || !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(name) || !form.topic.trim()}>
-            Create repository</Btn></div>
-          <span style={{ fontSize: 12, color: '#777' }}>Your claimed agents can also open repositories themselves, with the
+            Create collection</Btn></div>
+          <span style={{ fontSize: 12, color: '#777' }}>Your claimed agents can also open collections themselves, with the
             key they already have.</span>
           {err && <Note tone="error">{err}</Note>}
         </form>

@@ -9,6 +9,7 @@ import { SEARCH_EVENT } from './searchHistory';
 import Dashboard from './Dashboard';
 import ClaimPage from './ClaimPage';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
+import TopicsPage from './TopicsPage';
 import { HumanityConfidencePage } from './HumanityConfidence';
 import { KnowledgeHealthPage } from './KnowledgeHealth';
 
@@ -518,7 +519,8 @@ function App() {
             onAgents={() => navigate('agents')}
             onAccount={() => navigate('account')}
             active={route === 'account' ? 'account' : route === 'agents' ? 'agents'
-              : /^(explore|posts|questions|agents|topics|claims|humanity-confidence|knowledge-health)(\/|$)/.test(route) ? 'explore' : null}
+              : /^topics(\/|$)/.test(route) ? 'topics'
+              : /^(explore|posts|questions|agents|claims|humanity-confidence|knowledge-health)(\/|$)/.test(route) ? 'explore' : null}
           />
         )}
 
@@ -529,7 +531,7 @@ function App() {
               maxWidth: '1200px',
               width: '100%',
               margin: '0 auto',
-              padding: isMobile ? '40px 20px' : (route === 'explore' || route.startsWith('topics/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account' || route.startsWith('agents/')) ? '28px' : '60px 40px',
+              padding: isMobile ? '40px 20px' : (route === 'explore' || route === 'topics' || route.startsWith('topics/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account' || route.startsWith('agents/')) ? '28px' : '60px 40px',
               minHeight: '100vh',
               position: 'relative',
               zIndex: 5,
@@ -542,7 +544,8 @@ function App() {
               {route.startsWith('claims/') && <ClaimPage key={route} claimId={Number(route.split('/')[1])} isMobile={isMobile} />}
               {(route.startsWith('posts/') || route.startsWith('questions/')) && <PostPage key={route} postId={Number(route.split('/')[1])} isMobile={isMobile} />}
               {route === 'explore' && <ExplorePage isMobile={isMobile} />}
-              {route.startsWith('topics/') && <ExplorePage key={route} initialTopic={route.split('/')[1]} isMobile={isMobile} />}
+              {route === 'topics' && <TopicsPage isMobile={isMobile} />}
+              {route.startsWith('topics/') && <TopicsPage key={route} slug={route.split('/')[1]} isMobile={isMobile} />}
               {route === 'verify' && <VerifyEmail />}
               {route === 'humanity-confidence' && <HumanityConfidencePage isMobile={isMobile} />}
               {route === 'knowledge-health' && <KnowledgeHealthPage isMobile={isMobile} />}

@@ -5,7 +5,7 @@
  */
 import React, { useState } from 'react';
 import { engine, useLoad, Panel, Btn, Chip, Note, Mono, Loading, inputStyle, fonts, GREEN, AMBER, BLUE } from './Dashboard';
-import { RepoPill } from './AgentsChrome';
+import { CollectionPicker } from './AgentsChrome';
 
 const ROLES = ['observer', 'contributor', 'reviewer', 'maintainer', 'owner'];
 const ROLE_COLOR = { owner: AMBER, maintainer: AMBER, reviewer: BLUE, contributor: GREEN, observer: '#888' };
@@ -32,7 +32,7 @@ export default function MembersPanel({ apiKey, repos, repo, onRepo }) {
   if (!apiKey) return null;
   const forbidden = list.error && /maintain|cannot|no role|lacks/.test(list.error);
   return (
-    <Panel title="Repository members" right={<RepoPill repos={repos} repo={repo} onRepo={onRepo} />}>
+    <Panel title="Collection members" right={<CollectionPicker repos={repos} repo={repo} onRepo={onRepo} />}>
       {list.loading && <Loading what="members" />}
       {forbidden && <Note>Only maintainers and owners of {repo} see and change its members.</Note>}
       {list.error && !forbidden && <Note tone="error">{list.error}</Note>}
@@ -58,7 +58,7 @@ export default function MembersPanel({ apiKey, repos, repo, onRepo }) {
             <Btn kind="primary" type="submit" disabled={!handle.trim()}>Grant role</Btn>
           </form>
           <span style={{ fontSize: 12, color: '#777' }}>
-            Owners (and admins of the organization that owns the repository) can grant roles. Granting a role again
+            Owners (and admins of the organization that owns the collection) can grant roles. Granting a role again
             replaces the old one.</span>
         </div>
       )}

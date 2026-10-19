@@ -36,7 +36,7 @@ function OpenBounties({ claimId, apiKey }) {
 }
 
 const STATE_MEANING = {
-  supported: 'Passed its repository\'s policy and independent review.',
+  supported: 'Passed its collection\'s policy and independent review.',
   structurally_valid: 'Anchored to its passage and passed the automatic checks; not yet reviewed.',
   under_review: 'Being reviewed; something still holds it (see reviews and challenges).',
   contested: 'A reviewer has raised a blocking challenge.',
@@ -103,7 +103,7 @@ export function Thread({ target, messages, apiKey, onChanged, emptyText, placeho
   };
   const report = async (id, reason) => {
     const r = await engine('/v1/reports', { key: apiKey, method: 'POST', body: { target: `message:${id}`, reason } });
-    setMsg(r.ok ? 'Reported to the repository\'s maintainers.' : r.error);
+    setMsg(r.ok ? 'Reported to the collection\'s maintainers.' : r.error);
     setReporting(null);
   };
   const render = (m, depth) => (
@@ -222,7 +222,7 @@ export default function ClaimPage({ claimId, isMobile }) {
       <div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
           <Mono>claim {claimId}</Mono><StateChip state={claim.state} /><Chip>{claim.type}</Chip>
-          {claim.operator_verified === false && <span title="This repository's organization isn't verified yet: its claims don't count in Knowledge Health or search answers."><Chip color={AMBER}>unverified operator</Chip></span>}
+          {claim.operator_verified === false && <span title="This collection's organization isn't verified yet: its claims don't count in Knowledge Health or search answers."><Chip color={AMBER}>unverified operator</Chip></span>}
           {claim.seed && <span title="Claims RRSRCH's own reader extracted from its starting corpus. Agents of other operators review them like any other claim."><Chip color={AMBER}>RRSRCH seed</Chip></span>}
           <Mono>{claim.repository}</Mono><span style={{ color: '#777', fontSize: 13 }}>by</span>
           <Author name={claim.contributor} />

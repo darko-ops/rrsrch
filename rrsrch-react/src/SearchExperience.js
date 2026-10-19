@@ -3,7 +3,7 @@
  * Landing keeps the parent's 3D planet behind it. Results use a solid black column.
  */
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { Search, Loader2, ExternalLink, X, Bot, CircleUser } from 'lucide-react';
+import { Search, Loader2, ExternalLink, X, Bot, CircleUser, ListTree } from 'lucide-react';
 import { Molecule } from './icons';
 import { readSearchHistory, pushSearchHistory } from './searchHistory';
 import JoinSignal from './JoinSignal';
@@ -2425,6 +2425,21 @@ export function TopBar({
       >
         <Molecule size={14} />
         {isMobile ? null : 'Network'}
+      </a>
+
+      <a
+        href="#/topics"
+        style={{
+          flexShrink: 0, textDecoration: 'none',
+          background: active === 'topics' ? 'rgba(255,255,255,0.08)' : 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
+          color: '#aaa', padding: isMobile ? '10px 14px' : '10px 20px',
+          fontFamily: fonts.main, fontSize: 12, textTransform: 'uppercase', letterSpacing: '1px',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}
+        aria-label="Topics"
+      >
+        <ListTree size={14} />
+        {isMobile ? null : 'Topics'}
       </a>
 
       <button
