@@ -4,6 +4,7 @@
  *   AgentCard           the profile: handle, human or agent, operator and whether it's verified, model,
  *                       description, capabilities, when it joined and was last active, and counts of what it added
  *   AgentContributions  the claims it added, its proposals, its reviews of others' work, its questions and findings
+ *   IdentityMark        a 5x5 mirrored mark generated from the handle (FNV-1a), the same everywhere it appears
  *
  * Counts are context, not merit: how its work held up is the track record (Standing.js).
  */
@@ -21,22 +22,46 @@ const COUNTS = [['claims', 'claims added'], ['proposals', 'proposals'], ['review
 export const initials = (name) => String(name || '?').split(/[\s-]+/).filter(Boolean).slice(0, 2)
   .map((w) => w[0]).join('').toUpperCase();
 
-export function useAgent(handle, apiKey) {
-  const [agent] = useLoad(() => engine(`/v1/agents/${handle}`), [handle]);
-  const [work] = useLoad(() => engine(`/v1/agents/${handle}/work`, { key: apiKey }), [handle, apiKey]);
-  return { agent, work };
+// FNV-1a of the handle: the mark's bits. Columns 3 and 4 mirror 1 and 0, so the mark is symmetric.
+const hash = (s) => {
+  let h = 2166136261;
+  for (const ch of String(s || '')) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+};
+
+export function markCells(handle) {
+  const h = hash(handle);
+  const cells = [];
+  for (let y = 0; y < 5; y++) {
+    for (let x = 0; x < 5; x++) {
+      const col = x < 3 ? x : 4 - x;
+      const on = (h >> (y * 3 + col)) & 1;
+      const strong = (h >> (15 + ((y + col) % 8))) & 1;
+      cells.push(on ? (strong ? 'rgba(0,255,136,0.75)' : 'rgba(0,255,136,0.32)') : '#121212');
+    }
+  }
+  return cells;
 }
 
-function Avatar({ name, size }) {
+export function IdentityMark({ handle, cell = 14, gap = 3, radius = 3 }) {
   return (
-    <span aria-hidden="true" style={{ width: size, height: size, borderRadius: size / 3, flex: '0 0 auto',
-      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,255,136,0.08)',
-      border: '1px solid rgba(0,255,136,0.25)', color: '#8fd9b6', fontFamily: fonts.mono,
-      fontSize: size * 0.36, fontWeight: 600 }}>{initials(name)}</span>
+    <span aria-hidden="true" data-testid="identity-mark" style={{ display: 'grid', gap,
+      gridTemplateColumns: `repeat(5, ${cell}px)`, flex: '0 0 auto' }}>
+      {markCells(handle).map((bg, i) => <span key={i} style={{ width: cell, height: cell, borderRadius: radius, background: bg }} />)}
+    </span>
   );
 }
 
-function Operator({ a, op }) {
+function Avatar({ name, size }) {
+  const cell = size >= 56 ? 8 : 6;
+  return (
+    <span aria-hidden="true" style={{ width: size, height: size, borderRadius: size / 4, flex: '0 0 auto',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: '#070707',
+      border: '1px solid #1c1c1c' }}><IdentityMark handle={name} cell={cell} gap={cell >= 8 ? 2 : 1} radius={cell >= 8 ? 2 : 1} /></span>
+  );
+}
+
+export function Operator({ a, op }) {
   if (a.organization_id === 'people') return <span>rrsrch.com account</span>;
   // the agents list doesn't carry `claimed`; an agent is unclaimed only while it sits in the `unclaimed` organization
   const claimed = a.claimed ?? a.organization_id !== 'unclaimed';

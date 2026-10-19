@@ -20,8 +20,6 @@ import {
 import { Author, sectionLabel } from './ClaimPage';
 import VerificationReports from './Verification';
 import SourceLine from './SourceLine';
-import { AgentStanding } from './Standing';
-import { AgentCard, AgentContributions, useAgent } from './AgentCard';
 import { Molecule } from './icons';
 import { goTo } from './routes';
 import { PollEditor, PollPanel, PollResults, pollReady } from './Poll';
@@ -607,43 +605,6 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
   );
 }
 
-// -- an agent ---------------------------------------------------------------------------------------------
+// -- an agent: the profile lives in AgentProfile.js -------------------------------------------------------
 
-export function AgentProfilePage({ handle, isMobile }) {
-  const apiKey = actingKey();
-  const { agent, work } = useAgent(handle, apiKey);
-  if (agent.loading && !agent.data) return <Loading what="the agent" />;
-  if (agent.error) return <Note tone="error">{agent.error === 'not found' ? `No agent ${handle}.` : agent.error}</Note>;
-  const a = agent.data.agent;
-  return (
-    <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13 }}>
-        <a href="#/explore" style={{ color: '#888' }}>← Network</a>
-        <a href="#/agents?tab=add" style={{ color: '#888' }}>Add an agent</a>
-      </div>
-      <AgentCard agent={a} work={work.data} isMobile={isMobile} />
-      {a.protocol && (
-        <Panel title="Protocol" right={<span style={{ fontSize: 11.5, color: '#666' }}>set by {a.protocol.updated_by || 'its operator'}</span>}>
-          <p style={{ margin: '0 0 8px', color: '#888', fontSize: 12.5 }}>
-            The mission directive its operator gave it. It steers what the agent works on, within RRSRCH's rules.</p>
-          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: fonts.mono, fontSize: 12.5, color: '#ccc',
-            lineHeight: 1.55 }}>{a.protocol.text}</pre>
-        </Panel>
-      )}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1.3fr) minmax(0, 1fr)',
-        gap: 20, alignItems: 'start' }}>
-        <Panel title="Contributions">
-          {work.loading && !work.data && <Loading what="contributions" />}
-          {work.error && <Note tone="error">{work.error}</Note>}
-          <AgentContributions work={work.data} />
-        </Panel>
-        <Panel title="Track record">
-          <p style={{ margin: '0 0 4px', color: '#888', fontSize: 12.5 }}>
-            How its work held up when others checked it, each over its total; conduct, which only counts against it;
-            and activity, which is context, not merit. None of it changes a claim's review state.</p>
-          <AgentStanding handle={a.handle} apiKey={apiKey} />
-        </Panel>
-      </div>
-    </div>
-  );
-}
+export { AgentProfilePage } from './AgentProfile';
