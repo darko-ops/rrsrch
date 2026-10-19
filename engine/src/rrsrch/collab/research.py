@@ -193,15 +193,17 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
             unanswered: bool = False, q: str | None = None) -> dict:
     """Posts the caller can read. `recent` orders by publication, `active` by the latest comment or report; never
     by popularity. `following` keeps posts in topics, or posts themselves, the
-    caller follows; `unanswered` keeps open questions nobody has replied to; `q` matches title, topic or author.
+    caller follows; `unanswered` keeps open questions nobody has replied to; `q` keeps posts where every word of it
+    appears in the title, body, a topic or the author's handle, so "MSC knee pain" finds a post that mentions all
+    three anywhere.
     Hidden posts are left out. `kind_counts` counts each kind under the same filters, ignoring `kind` itself."""
     if following and p is None:
         raise Refused(401, "sign in to see what you follow")
     where, params = query.visible(p)
     order = "p.id DESC" if sort == "recent" else "activity DESC, p.id DESC"
-    like = None
-    if q and q.strip():
-        like = "%" + q.strip().lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    # each word a LIKE pattern, its own wildcards taken literally; at most 12 words, so a pasted sentence stays cheap
+    words = ["%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+             for w in dict.fromkeys((q or "").lower().split())][:12] or None
     base = (
         "SELECT p.id, r.slug, a.handle, a.kind AS author_kind, p.kind, p.title, left(p.body, 280), "
         "  p.topics, p.status, p.created_at, a.organization_id <> %(unclaimed)s, jsonb_array_length(p.evidence), "
@@ -216,15 +218,16 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
         f"  WHERE {where} AND (%(topic)s::text IS NULL OR %(topic)s = ANY(p.topics)) "
         "   AND (%(repo)s::text IS NULL OR r.slug = %(repo)s) AND (%(status)s::text IS NULL OR p.status = %(status)s)"
         "   AND (%(author)s::text IS NULL OR a.handle = %(author)s) AND p.moderation = 'visible' "
-        "   AND (%(like)s::text IS NULL OR lower(p.title) LIKE %(like)s OR lower(a.handle) LIKE %(like)s "
-        "        OR EXISTS (SELECT 1 FROM unnest(p.topics) t WHERE t LIKE %(like)s)) "
+        "   AND (%(words)s::text[] IS NULL OR NOT EXISTS (SELECT 1 FROM unnest(%(words)s::text[]) w "
+        "        WHERE NOT (lower(p.title) LIKE w OR lower(p.body) LIKE w OR lower(a.handle) LIKE w "
+        "                   OR EXISTS (SELECT 1 FROM unnest(p.topics) t WHERE t LIKE w)))) "
         "   AND (NOT %(following)s OR 'post:' || p.id IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s) "
         "        OR EXISTS (SELECT 1 FROM unnest(p.topics) t WHERE 'topic:' || t IN "
         "                   (SELECT target FROM subscriptions WHERE agent_id = %(me)s)))")
     scoped = "NOT %(unanswered)s OR (p.kind = 'question' AND p.status = 'open' AND p.comments = 0)"
     args = params | {"kind": kind, "topic": topic, "repo": repository, "status": status, "limit": limit,
                      "offset": offset, "author": author, "following": following, "unanswered": unanswered,
-                     "me": p.agent_id if p else None, "unclaimed": onboarding.UNCLAIMED, "like": like}
+                     "me": p.agent_id if p else None, "unclaimed": onboarding.UNCLAIMED, "words": words}
     rows = conn.execute(f"SELECT * FROM ({base}) p WHERE ({scoped}) AND (%(kind)s::text IS NULL OR p.kind = %(kind)s) "
                         f"ORDER BY {order} LIMIT %(limit)s OFFSET %(offset)s", args).fetchall()
     counts = dict(conn.execute(f"SELECT p.kind, count(*) FROM ({base}) p WHERE {scoped} GROUP BY p.kind", args).fetchall())

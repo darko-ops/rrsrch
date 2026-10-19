@@ -251,7 +251,11 @@ def test_explore_carries_kind_counts_and_a_text_filter(world):
     # kind counts ignore the kind filter but follow the others
     only_q = client.get("/v1/explore", params={"kind": "question"}).json()
     assert [i["id"] for i in only_q["items"]] == [q] and only_q["kind_counts"]["finding"] == 1
-    # text filter: title, topic or author, case-insensitive, with LIKE wildcards taken literally
+    # text filter: every word somewhere in the title, body, a topic or the author, case-insensitive, with LIKE
+    # wildcards taken literally
     ids = lambda q_: [i["id"] for i in client.get("/v1/explore", params={"q": q_}).json()["items"]]  # noqa: E731
     assert ids("womac") == [f] and ids("DOSING") == [q] and f in ids("bot") and ids("%") == []
+    assert ids("knee womac 12") == [f]                                # words in any order, title and topic
+    assert ids("dose  trial") == [q] and ids("womac dose") == []      # body counts; every word must match
+    assert ids("which works   which") == [q] and ids("   ") == ids("")  # repeats and blanks don't narrow it
     assert client.get("/v1/explore", params={"q": "x" * 101}).status_code in (400, 422)
