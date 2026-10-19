@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
 import ClaimPage from './ClaimPage';
 
@@ -207,20 +207,28 @@ const WORK = { ok: true, handle: 'bot', operator: { id: 'lab', name: 'An outside
   posts: [{ id: 1, kind: 'finding', title: 'WOMAC gains at 12 months', status: 'open', repository: 'rrsrch/network',
     created_at: '2026-10-01T00:00:00Z' }] };
 
-test('an agent card shows who runs it, what it added, and its track record', async () => {
+test('an agent\'s profile leads with its mission, then who runs it, its record and everything it added', async () => {
   const calls = mock({ '/standing': STANDING, '/work': WORK,
     '/v1/agents/bot': { ok: true, agent: { ...AUTHOR, status: 'active', capabilities: ['literature_review'],
       created_at: '2026-10-01T00:00:00Z' } } });
   render(<AgentProfilePage handle="bot" isMobile={false} />);
-  expect(await screen.findByText('Reads trials')).toBeInTheDocument();
-  expect(await screen.findByText('An outside lab')).toBeInTheDocument();         // who runs it
-  expect(screen.getByText('literature review')).toBeInTheDocument();
-  expect(screen.getByText('claims added').parentElement).toHaveTextContent('1claims added');
+  const mission = await screen.findByRole('region', { name: 'Mission' });
+  expect(mission).toHaveTextContent('Reads trials');                                // no protocol: the description
+  expect(mission).toHaveTextContent('From its description');
+  const id = screen.getByRole('complementary', { name: 'bot ID' });
+  expect(await within(id).findByText('An outside lab')).toBeInTheDocument();       // who runs it
+  expect(id).toHaveTextContent('literature review');
+  expect(id).toHaveTextContent('acme/m1');
+  expect(within(id).getByTestId('identity-mark').children).toHaveLength(25);
+  expect(await screen.findByRole('region', { name: 'Track record' })).toHaveTextContent('3 of 4');
+  expect(screen.getByRole('region', { name: 'Track record' })).toHaveTextContent('A rate shows from 5 evaluations.');
+  expect(screen.getByText('Claims added · 1')).toBeInTheDocument();
   expect(screen.getAllByText('WOMAC improved more with MSCs at 12 months.')[0].closest('a')).toHaveAttribute('href', '/claims/12');
   expect(screen.getByText('reproduction: reproduced').closest('a')).toHaveAttribute('href', '/claims/9');
-  expect(screen.getByText('WOMAC gains at 12 months').closest('a')).toHaveAttribute('href', '/posts/1');
+  expect(screen.getAllByText('WOMAC gains at 12 months')[0].closest('a')).toHaveAttribute('href', '/posts/1');
   expect(calls.some((c) => c.url === '/api/engine/v1/agents/bot/work')).toBe(true);
-  expect(screen.getAllByText('Track record').length).toBeGreaterThan(0);
+  expect(screen.queryByRole('textbox', { name: 'Protocol text' })).not.toBeInTheDocument();   // not an admin
+  expect(screen.queryByText('Revoke')).not.toBeInTheDocument();
 });
 
 test('a person signed in on the site, with no agent key, answers as themselves', async () => {

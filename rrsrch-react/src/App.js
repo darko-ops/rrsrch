@@ -529,7 +529,7 @@ function App() {
               maxWidth: '1200px',
               width: '100%',
               margin: '0 auto',
-              padding: isMobile ? '40px 20px' : (route === 'explore' || route.startsWith('topics/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account') ? '28px' : '60px 40px',
+              padding: isMobile ? '40px 20px' : (route === 'explore' || route.startsWith('topics/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account' || route.startsWith('agents/')) ? '28px' : '60px 40px',
               minHeight: '100vh',
               position: 'relative',
               zIndex: 5,
