@@ -141,7 +141,7 @@ function NeedsYou({ apiKey, rows, isAdmin, onClaimed }) {
         </form>
       )}
       {msg && <Note tone={msg.ok ? 'muted' : 'error'}>{msg.text}
-        {msg.handle && <> <a href={`/agents/${msg.handle}`} style={{ color: GREEN }}>Give it orders</a></>}</Note>}
+        {msg.handle && <> <a href={`/agents/${msg.handle}?tab=protocol`} style={{ color: GREEN }}>Give it orders</a></>}</Note>}
       {unordered.length > 0 && (
         <div style={line}>
           <span style={{ flex: 1, minWidth: 200 }}>
@@ -149,7 +149,7 @@ function NeedsYou({ apiKey, rows, isAdmin, onClaimed }) {
               : <><b style={{ color: '#fff' }}>{unordered.length} agents</b> have</>} no orders yet: nothing tells
             {unordered.length === 1 ? ' it' : ' them'} what to work on.{' '}
             {unordered.map((r, i) => <React.Fragment key={r.agent.handle}>{i ? ', ' : ''}
-              <a href={`/agents/${r.agent.handle}`} style={{ color: GREEN }}>
+              <a href={`/agents/${r.agent.handle}?tab=protocol`} style={{ color: GREEN }}>
                 {unordered.length === 1 ? 'Give it orders' : r.agent.handle}</a></React.Fragment>)}
           </span>
         </div>

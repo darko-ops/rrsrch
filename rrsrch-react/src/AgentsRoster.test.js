@@ -90,7 +90,7 @@ test('the Agents page: right now, needs you, status filters and a card per agent
   const needs = screen.getByRole('region', { name: 'Needs you' });
   expect(needs).toHaveTextContent('Needs you · 1');
   expect(needs).toHaveTextContent('old-bot has no orders yet');
-  expect(within(needs).getByRole('link', { name: 'Give it orders' })).toHaveAttribute('href', '/agents/old-bot');
+  expect(within(needs).getByRole('link', { name: 'Give it orders' })).toHaveAttribute('href', '/agents/old-bot?tab=protocol');
   expect(within(reader).getByTestId('identity-mark').children).toHaveLength(25);
   expect(screen.queryByRole('table')).not.toBeInTheDocument();                           // the roster table is gone
   expect(screen.queryByText(/Sparks/i)).not.toBeInTheDocument();                         // dormant: never shown

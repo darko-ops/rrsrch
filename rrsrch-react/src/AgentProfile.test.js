@@ -40,7 +40,7 @@ function serve(me, puts = []) {
 }
 
 beforeEach(() => localStorage.setItem('rrsrch_engine_key', 'rrsrch_k'));
-afterEach(() => localStorage.clear());
+afterEach(() => { localStorage.clear(); window.history.replaceState(null, '', '/'); });
 
 test('the profile leads with the protocol\'s mission, then the ID panel, track record, trust and current work', async () => {
   serve({ handle: 'visitor', organization_id: 'elsewhere', org_role: 'member', scopes: ['read'] });
@@ -65,10 +65,23 @@ test('the profile leads with the protocol\'s mission, then the ID panel, track r
   expect(now).toHaveTextContent('Right now · 1');
   expect(within(now).getByText('42% responded at 24 months.').closest('a'))
     .toHaveAttribute('href', '#/agents?tab=tasks&repo=lab%2Fknee');
+  expect(screen.getByText('Everything it added')).toBeInTheDocument();                  // the overview has its posts
+  expect(screen.queryByRole('region', { name: 'Orders' })).not.toBeInTheDocument();
+  expect(screen.queryByText('Full standing')).not.toBeInTheDocument();
+  // the protocol tab: its orders, read-only for visitors, and in the address
+  fireEvent.click(screen.getByRole('tab', { name: 'Protocol' }));
+  expect(window.location.search).toBe('?tab=protocol');
   const orders = screen.getByRole('region', { name: 'Orders' });
   expect(orders).toHaveTextContent('Focus:');
-  expect(within(orders).queryByRole('textbox')).not.toBeInTheDocument();                 // read-only for visitors
-  expect(orders.compareDocumentPosition(now) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();  // below its work
+  expect(within(orders).queryByRole('textbox')).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Mission' })).not.toBeInTheDocument();
+  expect(screen.getByRole('complementary', { name: 'trial-reader ID' })).toBeInTheDocument();  // the ID panel stays
+  // more info: its full standing
+  fireEvent.click(screen.getByRole('tab', { name: 'More info' }));
+  expect(screen.getByText('Full standing')).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Orders' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+  expect(window.location.search).toBe('');
   expect(screen.queryByText('Revoke')).not.toBeInTheDocument();
   expect(id).not.toHaveTextContent('Keys');
   expect(global.fetch.mock.calls.some(([u]) => u.includes('/keys'))).toBe(false);
@@ -77,9 +90,8 @@ test('the profile leads with the protocol\'s mission, then the ID panel, track r
 test('an admin of the agent\'s organization gives it orders, sees its keys and can revoke it', async () => {
   const puts = serve({ handle: 'admin', organization_id: 'lab', org_role: 'admin', scopes: ['agents', 'read'] });
   render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
-  const orders = await screen.findByRole('region', { name: 'Orders' });
-  // right under the mission, as a form filled from the protocol
-  expect(screen.getByRole('region', { name: 'Mission' }).nextElementSibling).toBe(orders);
+  fireEvent.click(await screen.findByRole('tab', { name: 'Protocol' }));
+  const orders = screen.getByRole('region', { name: 'Orders' });                         // a form filled from the protocol
   expect(within(orders).getByRole('textbox', { name: 'Role' })).toHaveValue('Trial reader');
   expect(within(orders).getByRole('textbox', { name: 'Focus' })).toHaveValue('MSCs');
   const id = screen.getByRole('complementary', { name: 'trial-reader ID' });
@@ -95,6 +107,7 @@ test('an admin of the agent\'s organization gives it orders, sees its keys and c
   fireEvent.click(within(orders).getByRole('button', { name: 'Save orders' }));
   expect(await screen.findByText('Saved. trial-reader gets these orders at its next check-in.')).toBeInTheDocument();
   expect(puts).toEqual([['/v1/agents/trial-reader/protocol', { protocol: text }]]);
+  fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
   expect(screen.getByRole('region', { name: 'Mission' })).toHaveTextContent('Check dose claims.');
   expect(id).toHaveTextContent('Dose checker');
   fireEvent.click(within(id).getByRole('button', { name: 'Revoke' }));
@@ -116,4 +129,25 @@ test('an unknown handle says so', async () => {
   serve(null);
   render(<AgentProfilePage handle="nobody" isMobile={false} />);
   expect(await screen.findByText('No agent nobody.')).toBeInTheDocument();
+});
+
+test('an admin of an agent with no orders is sent to its protocol tab, and a ?tab= link opens on it', async () => {
+  serve({ handle: 'admin', organization_id: 'lab', org_role: 'admin', scopes: ['agents', 'read'] });
+  DATA['/v1/agents/bare'] = { agent: { ...AGENT, handle: 'bare', protocol: null } };
+  render(<AgentProfilePage handle="bare" isMobile={false} />);
+  const mission = await screen.findByRole('region', { name: 'Mission' });
+  expect(mission).toHaveTextContent('No orders yet.');
+  expect(await screen.findByRole('tab', { name: 'Protocol none yet' })).toBeInTheDocument();
+  fireEvent.click(within(mission).getByRole('button', { name: 'Give it orders' }));
+  expect(screen.getByRole('tab', { name: 'Protocol none yet' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('region', { name: 'Orders' })).toHaveTextContent('Orders · none yet');
+  delete DATA['/v1/agents/bare'];
+});
+
+test('a link to ?tab=more opens on its full standing', async () => {
+  serve(null);
+  window.history.replaceState(null, '', '/agents/trial-reader?tab=more');
+  render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
+  expect(await screen.findByText('Full standing')).toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: 'More info' })).toHaveAttribute('aria-selected', 'true');
 });
