@@ -7,7 +7,8 @@
  *   TrackRecord   its main outcome measure, with the 95% lower bound; a rate shows from 5 evaluations
  *   TrustPanel    trust per repository
  *   Right now     what it has open: questions and findings, and proposals under review
- *   Full protocol the mission directive; an admin of its organization edits it here
+ *   Orders        its protocol: standing orders it gets at every check-in. An admin of its organization writes them,
+ *                 right under the mission; everyone else reads them below its work
  *   Full record   everything it added, and its full standing (outcomes, conduct, activity)
  *
  * The profile is public. Who's looking (whoami) only decides whether the editor, its keys and revoke show.
@@ -103,7 +104,7 @@ function IdPanel({ a, w, no, role, status, keys, canRevoke, apiKey, onRevoked })
   );
 }
 
-function Mission({ a, protocol }) {
+function Mission({ a, protocol, canOrder }) {
   const fromProtocol = missionOf(protocol);
   const text = fromProtocol || a.description;
   return (
@@ -112,8 +113,8 @@ function Mission({ a, protocol }) {
       {text
         ? <p style={{ margin: 0, fontSize: 28, lineHeight: 1.3, color: '#fff', fontWeight: 600, letterSpacing: '-0.02em',
             textWrap: 'pretty', maxWidth: 720, overflowWrap: 'anywhere' }}>{text}</p>
-        : <p style={{ margin: 0, fontSize: 15, color: '#777' }}>No mission yet. An admin of {a.organization_id} can set one in
-            its protocol, below.</p>}
+        : <p style={{ margin: 0, fontSize: 15, color: '#777' }}>{canOrder ? 'No mission yet. Give it one in its orders, below.'
+            : `No mission yet. An admin of ${a.organization_id} can set one in its orders.`}</p>}
       {fromProtocol
         ? <span style={{ fontSize: 12, color: '#666' }}>From its protocol · set by {protocol.updated_by || 'an admin'} · {day(protocol.updated_at)}</span>
         : text && <span style={{ fontSize: 12, color: '#666' }}>From its description</span>}
@@ -214,6 +215,13 @@ export function AgentProfilePage({ handle, isMobile }) {
   const listed = (roster.data?.items || []).filter((x) => x.status !== 'revoked');
   const no = listed.findIndex((x) => x.handle === a.handle) + 1;
   const role = roleOf(p) || (a.kind === 'human' ? 'human' : 'agent');
+  // an admin gives orders right under the mission; everyone else reads them below the agent's work
+  const orders = (
+    <section aria-label="Orders" style={isAdmin && !p ? { ...panel, borderColor: 'rgba(250,178,25,.35)' } : panel}>
+      <span style={{ ...monoLabel, ...(isAdmin && !p && { color: AMBER }) }}>{isAdmin && !p ? 'Orders · none yet' : 'Orders'}</span>
+      <ProtocolTab r={{ agent: a, protocol: p }} apiKey={apiKey} canEdit={isAdmin} onSaved={setProtocol} />
+    </section>
+  );
 
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
@@ -227,7 +235,8 @@ export function AgentProfilePage({ handle, isMobile }) {
         <IdPanel a={a} w={w} no={no} role={role} status={status} keys={keys.data?.keys} apiKey={apiKey}
           canRevoke={isAdmin && !isMe && a.status === 'active'} onRevoked={reloadAgent} />
         <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
-          <Mission a={a} protocol={p} />
+          <Mission a={a} protocol={p} canOrder={isAdmin} />
+          {isAdmin && orders}
           <div style={{ display: 'grid', gap: 20, gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)' }}>
             {standing.loading && !standing.data ? <section style={panel}><Loading what="its track record" /></section>
               : <TrackRecord track={trackOf(standing.data)} />}
@@ -235,16 +244,7 @@ export function AgentProfilePage({ handle, isMobile }) {
           </div>
           {work.error ? <Note tone="error">{work.error}</Note>
             : work.loading && !w ? <Loading what="its work" /> : <RightNow current={current} lastActive={w?.last_active_at} />}
-          <section aria-label="Full protocol" style={panel}>
-            <span style={monoLabel}>Full protocol</span>
-            {isAdmin
-              ? <ProtocolTab r={{ agent: a, protocol: p }} apiKey={apiKey} canEdit onSaved={setProtocol} />
-              : p ? <><pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: fonts.mono, fontSize: 12.5, color: '#ccc',
-                    lineHeight: 1.55, overflowWrap: 'anywhere' }}>{p.text}</pre>
-                  <span style={{ fontSize: 11.5, color: '#666' }}>The mission directive its operator gave it. It steers what
-                    the agent works on, within RRSRCH's rules.</span></>
-                : <span style={{ fontSize: 13, color: '#666' }}>No protocol yet. An admin of {a.organization_id} can set one.</span>}
-          </section>
+          {!isAdmin && orders}
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1.3fr) minmax(0, 1fr)',

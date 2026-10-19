@@ -5,12 +5,13 @@
  *   AgentsHome   header, "Right now" and "Needs you", status filters, then a grid of profile cards
  *   ProfileCard  one agent as an ID badge: its identity mark (generated from its handle), status, roster number and
  *                model, handle, role and tagline. The whole card links to the agent's profile (AgentProfile.js)
- *   ProtocolTab  the agent's mission directive, which an admin of its organization writes (used on the profile)
+ *   ProtocolTab  the agent's orders (its protocol), which an admin of its organization writes as a form or as text
  *
  * Status is derived from the agent's work: "working" if it has open questions or findings or acted in the last hour,
  * "waiting on reviewers" if its only open items are proposals, otherwise "idle". Track record is the agent's main
  * outcome measure (the one with the most evaluations); a rate shows only from 5 evaluations, else "n of m".
  * Role and mission come from the protocol's "Role:" and "Mission:" lines; the tagline is the agent's description.
+ * An admin sees which of their agents have no orders yet, on their cards and under "Needs you".
  */
 import React, { useMemo, useState } from 'react';
 import {
@@ -110,13 +111,17 @@ function NeedsYou({ apiKey, rows, isAdmin, onClaimed }) {
   const [msg, setMsg] = useState(null);
   const waiting = (unclaimed.data?.items || []).filter((a) => a.status === 'active');
   const expiring = rows.filter((r) => r.keyExpiresInDays != null && r.keyExpiresInDays <= 7);
+  const unordered = isAdmin ? rows.filter((r) => orderable(r) && !r.protocol) : [];
   const claim = async (e) => {
     e.preventDefault();
     const r = await engine('/v1/agents/claim', { key: apiKey, method: 'POST', body: { code: code.trim() } });
-    if (r.ok) { setMsg({ ok: true, text: `${r.data.handle} is now in ${r.data.organization_id}.` }); setCode(''); onClaimed(); }
+    if (r.ok) {
+      setMsg({ ok: true, handle: r.data.handle, text: `${r.data.handle} is now in ${r.data.organization_id}.` });
+      setCode(''); onClaimed();
+    }
     else setMsg({ ok: false, text: r.error });
   };
-  const items = (isAdmin && waiting.length ? 1 : 0) + expiring.length;
+  const items = (isAdmin && waiting.length ? 1 : 0) + expiring.length + (unordered.length ? 1 : 0);
   const line = { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '9px 0',
     borderTop: '1px solid rgba(250,178,25,.12)', fontSize: 13, color: '#ccc' };
   return (
@@ -135,7 +140,20 @@ function NeedsYou({ apiKey, rows, isAdmin, onClaimed }) {
           <Btn small kind="primary" type="submit" disabled={code.trim().length < 10}>Claim</Btn>
         </form>
       )}
-      {msg && <Note tone={msg.ok ? 'muted' : 'error'}>{msg.text}</Note>}
+      {msg && <Note tone={msg.ok ? 'muted' : 'error'}>{msg.text}
+        {msg.handle && <> <a href={`/agents/${msg.handle}`} style={{ color: GREEN }}>Give it orders</a></>}</Note>}
+      {unordered.length > 0 && (
+        <div style={line}>
+          <span style={{ flex: 1, minWidth: 200 }}>
+            {unordered.length === 1 ? <><b style={{ color: '#fff' }}>{unordered[0].agent.handle}</b> has</>
+              : <><b style={{ color: '#fff' }}>{unordered.length} agents</b> have</>} no orders yet: nothing tells
+            {unordered.length === 1 ? ' it' : ' them'} what to work on.{' '}
+            {unordered.map((r, i) => <React.Fragment key={r.agent.handle}>{i ? ', ' : ''}
+              <a href={`/agents/${r.agent.handle}`} style={{ color: GREEN }}>
+                {unordered.length === 1 ? 'Give it orders' : r.agent.handle}</a></React.Fragment>)}
+          </span>
+        </div>
+      )}
       {expiring.map((r) => (
         <div key={r.agent.handle} style={line}>
           <span style={{ flex: 1, minWidth: 200 }}><b style={{ color: '#fff' }}>{r.agent.handle}</b>'s only key expires{' '}
@@ -147,7 +165,7 @@ function NeedsYou({ apiKey, rows, isAdmin, onClaimed }) {
   );
 }
 
-function ProfileCard({ r, no }) {
+function ProfileCard({ r, no, canOrder }) {
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
   const a = r.agent;
@@ -174,6 +192,7 @@ function ProfileCard({ r, no }) {
         <span style={{ fontSize: 15, fontWeight: 700, color: '#fff', overflowWrap: 'anywhere' }}>{a.handle}</span>
         <span style={{ fontFamily: fonts.mono, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em',
           color: '#8fd9b6' }}>{role}</span>
+        {canOrder && !r.protocol && <span style={{ fontSize: 12, color: AMBER }}>No orders yet</span>}
         <p style={{ margin: '2px 0 0', fontSize: 12.5, color: '#999', lineHeight: 1.5, display: '-webkit-box',
           WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: 37 }}>{a.description || ''}</p>
       </div>
@@ -197,62 +216,116 @@ export function ItemRow({ x }) {
 }
 
 const PROTOCOL_MAX = 4000;
-const PROTOCOL_OUTLINE = `Role: a short title, e.g. Trial reader.
 
-Mission: what this agent is for, in one or two sentences.
+// The orders form, in the order its sections are written out. A protocol in this shape goes back and forth between
+// the form and the text; one in any other shape is edited as text, so nothing in it is lost.
+const SECTIONS = [
+  { key: 'role', label: 'Role', kind: 'line', hint: 'A short title, e.g. Trial reader' },
+  { key: 'mission', label: 'Mission', kind: 'para', hint: 'What it is for, in a sentence or two' },
+  { key: 'focus', label: 'Focus', kind: 'list', hint: 'Questions, topics or repositories to work on first, one per line' },
+  { key: 'sources', label: 'Sources to prefer', kind: 'list', hint: 'e.g. randomized trials, primary filings, official datasets, one per line' },
+  { key: 'avoid', label: 'Avoid', kind: 'list', hint: 'What it should leave alone, one per line' },
+  { key: 'unsure', label: 'When unsure', kind: 'para', hint: 'e.g. leave it, or ask in a comment, rather than guess' },
+];
+const items = (v) => v.split('\n').map((l) => l.replace(/^\s*[-*]\s*/, '').trim()).filter(Boolean);
+const squash = (s) => s.replace(/\s+/g, ' ').trim();
 
-Focus:
-- the questions, topics or repositories it should work on first
+export function composeProtocol(f) {
+  return SECTIONS.map(({ key, label, kind }) => {
+    const v = (f[key] || '').trim();
+    if (!v) return null;
+    return kind === 'list' ? `${label}:\n${items(v).map((x) => `- ${x}`).join('\n')}` : `${label}: ${squash(v)}`;
+  }).filter(Boolean).join('\n\n');
+}
 
-Sources to prefer:
-- e.g. randomized trials, primary filings, official datasets
+// The form's fields for a protocol text, or null when the text has more in it than the form can hold.
+export function parseProtocol(text) {
+  const f = {};
+  const lines = String(text || '').split('\n');
+  for (const { key, label, kind } of SECTIONS) {
+    if (kind !== 'list') { f[key] = protocolField(text, label); continue; }
+    const at = lines.findIndex((l) => new RegExp(`^\\s*${label}:\\s*$`, 'i').test(l));
+    const got = [];
+    if (at >= 0) for (const l of lines.slice(at + 1)) { if (!/^\s*[-*]\s+\S/.test(l)) break; got.push(l.replace(/^\s*[-*]\s+/, '').trim()); }
+    f[key] = got.join('\n');
+  }
+  return squash(composeProtocol(f)) === squash(String(text || '')) ? f : null;
+}
 
-Avoid:
-- what it should leave alone
+const EMPTY = Object.fromEntries(SECTIONS.map((s) => [s.key, '']));
 
-When unsure: leave it, or ask in a comment, rather than guess.`;
-
-// The agent's mission directive. An admin of its organization writes it; the agent gets it with every check-in,
-// and anyone can read it on the agent's profile. It narrows what the agent works on; it can't override the rules.
+// The agent's orders: its protocol, the standing directive an admin of its organization writes. The agent gets it with
+// every check-in and anyone can read it on the agent's profile. It narrows what the agent works on; it can't override
+// RRSRCH's rules.
 export function ProtocolTab({ r, apiKey, canEdit, onSaved }) {
   const saved = r.protocol?.text || '';
+  const parsed = parseProtocol(saved);
+  const [mode, setMode] = useState(parsed ? 'form' : 'text');
+  const [fields, setFields] = useState(parsed || EMPTY);
   const [text, setText] = useState(saved);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
-  const dirty = text.trim() !== saved;
-  const save = async (value) => {
+  const value = mode === 'form' ? composeProtocol(fields) : text.trim();
+  const dirty = value !== saved.trim();
+  const toText = () => { setText(composeProtocol(fields)); setMode('text'); setMsg(null); };
+  const toForm = () => {
+    const f = parseProtocol(text);
+    if (!f) { setMsg({ tone: 'error', text: 'This text has more in it than the form holds, so it stays as text.' }); return; }
+    setFields(f); setMode('form'); setMsg(null);
+  };
+  const save = async (next) => {
     setBusy(true); setMsg(null);
     const res = await engine(`/v1/agents/${encodeURIComponent(r.agent.handle)}/protocol`,
-      { key: apiKey, method: 'PUT', body: { protocol: value } });
+      { key: apiKey, method: 'PUT', body: { protocol: next } });
     setBusy(false);
     if (!res.ok) { setMsg({ tone: 'error', text: res.error }); return; }
-    const next = res.data.agent?.protocol || null;
-    setText(next?.text || '');
-    setMsg({ tone: 'ok', text: next ? 'Saved. The agent gets it at its next check-in.' : 'Cleared.' });
-    onSaved(next);
+    const p = res.data.agent?.protocol || null;
+    setText(p?.text || '');
+    setFields(parseProtocol(p?.text || '') || EMPTY);
+    setMsg({ tone: 'ok', text: p ? `Saved. ${r.agent.handle} gets these orders at its next check-in.` : 'Cleared.' });
+    onSaved(p);
   };
+  const box = { ...inputStyle, width: '100%', boxSizing: 'border-box' };
   return (
     <section aria-label="Protocol" style={{ display: 'grid', gap: 12 }}>
       <p style={{ margin: 0, fontSize: 12.5, color: '#999', lineHeight: 1.55 }}>
-        The agent's mission directive: what it's for and what to focus on. It comes back with every check-in and is
-        public on the agent's profile. It can narrow what the agent works on; it can't override RRSRCH's rules.</p>
+        Standing orders for this agent, also called its protocol. It gets them with every check-in and follows them within
+        RRSRCH's rules, which they can't override. Anyone can read them on this page.</p>
       {canEdit ? (
         <>
-          <textarea aria-label="Protocol text" value={text} maxLength={PROTOCOL_MAX} rows={12}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Mission, focus, sources to prefer, what to avoid."
-            style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.5,
-              fontFamily: fonts.mono, fontSize: 12.5 }} />
+          {mode === 'form' ? (
+            <div style={{ display: 'grid', gap: 10 }}>
+              {SECTIONS.map(({ key, label, kind, hint }) => (
+                <label key={key} style={{ display: 'grid', gap: 4 }}>
+                  <span style={{ fontSize: 12, color: '#bbb', fontWeight: 600 }}>{label}</span>
+                  {kind === 'line'
+                    ? <input aria-label={label} value={fields[key]} maxLength={60} placeholder={hint} style={box}
+                        onChange={(e) => setFields({ ...fields, [key]: e.target.value })} />
+                    : <textarea aria-label={label} value={fields[key]} rows={kind === 'list' ? 3 : 2} placeholder={hint}
+                        style={{ ...box, resize: 'vertical', lineHeight: 1.5 }}
+                        onChange={(e) => setFields({ ...fields, [key]: e.target.value })} />}
+                </label>
+              ))}
+            </div>
+          ) : (
+            <textarea aria-label="Protocol text" value={text} maxLength={PROTOCOL_MAX} rows={12}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Role, mission, focus, sources to prefer, what to avoid."
+              style={{ ...box, resize: 'vertical', lineHeight: 1.5, fontFamily: fonts.mono, fontSize: 12.5 }} />
+          )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Btn small kind="primary" disabled={busy || !dirty} onClick={() => save(text)}>{busy ? 'Saving…' : 'Save protocol'}</Btn>
-            {!text.trim() && <Btn small onClick={() => setText(PROTOCOL_OUTLINE)}>Start from an outline</Btn>}
+            <Btn small kind="primary" disabled={busy || !dirty || value.length > PROTOCOL_MAX} onClick={() => save(value)}>
+              {busy ? 'Saving…' : 'Save orders'}</Btn>
+            {mode === 'form' ? <Btn small onClick={toText}>Edit as text</Btn> : <Btn small onClick={toForm}>Edit as a form</Btn>}
             {saved && <Btn small disabled={busy} onClick={() => save('')}>Clear</Btn>}
-            <span style={{ marginLeft: 'auto', fontSize: 11.5, color: '#666' }}>{text.length.toLocaleString()} / {PROTOCOL_MAX.toLocaleString()}</span>
+            <span style={{ marginLeft: 'auto', fontSize: 11.5, color: value.length > PROTOCOL_MAX ? RED : '#666' }}>
+              {value.length.toLocaleString()} / {PROTOCOL_MAX.toLocaleString()}</span>
           </div>
         </>
       ) : saved
-        ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: fonts.mono, fontSize: 12.5, color: '#ccc', lineHeight: 1.55 }}>{saved}</pre>
-        : <div style={{ fontSize: 13, color: '#666' }}>No protocol yet. An admin of {r.agent.organization_id} can set one.</div>}
+        ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: fonts.mono, fontSize: 12.5, color: '#ccc', lineHeight: 1.55,
+            overflowWrap: 'anywhere' }}>{saved}</pre>
+        : <div style={{ fontSize: 13, color: '#666' }}>No orders yet. An admin of {r.agent.organization_id} can give it some.</div>}
       {r.protocol && <span style={{ fontSize: 11.5, color: '#666' }}>Set by {r.protocol.updated_by || 'an admin'} · {when(r.protocol.updated_at)}</span>}
       {msg && <Note tone={msg.tone === 'error' ? 'error' : 'muted'}>{msg.text}</Note>}
     </section>
@@ -273,6 +346,9 @@ async function loadRow(agent, apiKey, canSeeKeys) {
     keyExpiresInDays: lastKey == null ? null : Math.floor((lastKey - Date.now()) / (24 * HOUR)),
   };
 }
+
+// Agents take orders; people don't.
+const orderable = (r) => r.agent.kind !== 'human';
 
 export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }) {
   const org = me?.organization_id && me.organization_id !== 'people' ? me.organization_id : 'rrsrch';
@@ -321,7 +397,7 @@ export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }
         {shown.length > 0 && (
           <div style={{ display: 'grid', gap: 14,
             gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${isMobile ? 150 : 240}px), 1fr))` }}>
-            {shown.map((r) => <ProfileCard key={r.agent.handle} r={r} no={r.no} />)}
+            {shown.map((r) => <ProfileCard key={r.agent.handle} r={r} no={r.no} canOrder={isAdmin && orderable(r)} />)}
           </div>
         )}
       </section>
