@@ -924,16 +924,17 @@ function MergeRequests({ apiKey, repo, isMobile }) {
 // -- the shell: a sidebar of pages (design handoff: agents pages, §1) ---------------------------------------
 
 const PAGES = {
-  agents: 'Agents', add: 'Add an agent', review: 'Review', bounties: 'Bounties', inbox: 'Inbox',
+  agents: 'Agents', add: 'Add an agent', tasks: 'Tasks', bounties: 'Bounties',
   atlas: 'Atlas', account: 'Account',
 };
 const GROUPS = [
   ['Your agents', ['agents', 'add']],
-  ['Work', ['review', 'bounties', 'inbox']],
+  ['Work', ['tasks', 'bounties']],
   ['Network', ['atlas']],
 ];
-// the review queue and merge requests were two pages for one job; links to either open the one Review page
-const LEGACY_TABS = { queue: 'review', merge: 'review', tasks: 'review', keys: 'account' };   // keys live in Account   // tasks retired (docs/SIMPLIFY.md)
+// Tasks is one page for what's waiting on you: what's addressed to you (the old Inbox), then what's waiting for review
+// (the old Review page, itself the review queue and merge requests). Links to any of them open Tasks.
+const LEGACY_TABS = { queue: 'tasks', merge: 'tasks', review: 'tasks', inbox: 'tasks', keys: 'account' };   // keys live in Account
 // pages kept but out of the sidebar (docs/SIMPLIFY.md): links still open them
 const SIMPLIFIED_AWAY = ['atlas'];
 
@@ -948,8 +949,9 @@ function TabRow({ active, onPick, me, health, counts, hidden = [] }) {
   const ids = GROUPS.flatMap(([, list]) => list).filter((id) => !hidden.includes(id));
   const c = counts || {};
   const waiting = c.queue == null && c.merge == null ? undefined : (c.queue || 0) + (c.merge || 0);
-  const count = { agents: c.agents, review: waiting, inbox: c.inbox_unread };
-  const tone = { agents: '#666', review: waiting ? AMBER : '#666', inbox: c.inbox_unread ? GREEN : '#666' };
+  const count = { agents: c.agents, tasks: waiting };
+  const tone = { agents: '#666', tasks: waiting ? AMBER : '#666' };
+  const unread = { tasks: c.inbox_unread };
   return (
     <nav aria-label="Agents pages" style={{ display: 'flex', gap: 4, alignItems: 'center', borderBottom: '1px solid #222',
       paddingBottom: 12, flexWrap: 'wrap' }}>
@@ -962,7 +964,10 @@ function TabRow({ active, onPick, me, health, counts, hidden = [] }) {
             background: on ? 'rgba(255,255,255,0.06)' : 'transparent', color: on ? '#fff' : '#999',
             boxShadow: on ? `inset 0 -2px 0 ${GREEN}` : 'none' }}>
             {PAGES[id]}
-            {count[id] != null && <span style={{ fontFamily: fonts.mono, fontSize: 11, color: tone[id] }}>{count[id]}</span>}
+            {count[id] != null && <span title={id === 'tasks' ? 'waiting for review' : undefined}
+              style={{ fontFamily: fonts.mono, fontSize: 11, color: tone[id] }}>{count[id]}</span>}
+            {unread[id] > 0 && <span title="new for you" style={{ fontFamily: fonts.mono, fontSize: 11, color: GREEN }}>
+              {unread[id]} new</span>}
           </button>
         );
       })}
@@ -1151,10 +1156,12 @@ export default function Dashboard({ isMobile, initialTab }) {
         <ManageAgents apiKey={acting} me={me} {...repoProps} />
       </div>
     );
-  } else if (tab === 'review') {
+  } else if (tab === 'tasks') {
     page = (
-      <RepoPage title="Review" subtitle="Everything in this repository waiting for review: proposed changes, then claims already in it that nobody has reviewed yet. The repository's policy decides what is accepted." {...repoProps}>
-        {!acting && <Note>Reading is open to everyone. {SIGN_IN} to review.</Note>}
+      <RepoPage title="Tasks" subtitle="What's addressed to you, then everything in this repository waiting for review: proposed changes, then claims already in it that nobody has reviewed yet. The repository's policy decides what is accepted." {...repoProps}>
+        {!acting && <Note>Reading is open to everyone. {SIGN_IN} to review and to see what's addressed to you.</Note>}
+        {acting && <InboxPage apiKey={acting} me={me} isMobile={isMobile} embedded
+          onUnreadChange={(n) => setCounts((c) => ({ ...(c || {}), inbox_unread: n }))} />}
         <MergeRequests apiKey={acting} repo={repo} isMobile={isMobile} />
         <ClaimQueue apiKey={acting} repo={repo} />
       </RepoPage>
@@ -1163,9 +1170,6 @@ export default function Dashboard({ isMobile, initialTab }) {
     page = <AddAgentPage doc={link.get('doc')} />;
   } else if (tab === 'bounties') {
     page = <BountiesPage apiKey={acting} me={me} isMobile={isMobile} focus={link.get('bounty')} {...repoProps} />;
-  } else if (tab === 'inbox') {
-    page = <InboxPage apiKey={acting} me={me} isMobile={isMobile}
-      onUnreadChange={(n) => setCounts((c) => ({ ...(c || {}), inbox_unread: n }))} />;
   } else if (tab === 'atlas') {
     page = <AtlasPage apiKey={acting} isMobile={isMobile} focusClaim={link.get('claim')} {...repoProps} />;
   } else {
@@ -1185,7 +1189,7 @@ export default function Dashboard({ isMobile, initialTab }) {
           && me?.org_role === 'admin') ? [] : ['bounties'])].filter((id) => id !== tab)} />
       <main style={{ minWidth: 0 }}>
         <React.Suspense fallback={<Loading what="the page" />}>{page}</React.Suspense>
-        {repos.error && ['review', 'atlas'].includes(tab) && <Note tone="error">{repos.error}</Note>}
+        {repos.error && ['tasks', 'atlas'].includes(tab) && <Note tone="error">{repos.error}</Note>}
       </main>
     </div>
   );

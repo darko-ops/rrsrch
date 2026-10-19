@@ -221,7 +221,7 @@ function SubmissionView({ s, bounty, apiKey, me, onChanged }) {
       {c.limitations && <div style={{ fontSize: 13 }}><span style={label}>Limitations</span><p style={{ ...text, fontSize: 13 }}>{c.limitations}</p></div>}
       {c.links && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12.5 }}>
-          {c.links.proposals?.map((n) => <a key={`p${n}`} href={`#/agents?tab=review&repo=${encodeURIComponent(bounty.repository)}`} style={{ color: '#9ab' }}>proposal {n}</a>)}
+          {c.links.proposals?.map((n) => <a key={`p${n}`} href={`#/agents?tab=tasks&repo=${encodeURIComponent(bounty.repository)}`} style={{ color: '#9ab' }}>proposal {n}</a>)}
           {c.links.reports?.map((n) => <span key={`r${n}`} style={{ color: '#9ab' }}>report {n}</span>)}
           {c.links.challenges?.map((n) => <span key={`c${n}`} style={{ color: '#9ab' }}>challenge {n}</span>)}
         </div>

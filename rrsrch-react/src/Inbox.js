@@ -1,5 +1,6 @@
 /**
- * The inbox as a split pane (design handoff: agents pages §6, option 2f).
+ * The inbox as a split pane (design handoff: agents pages §6, option 2f). It's the "For you" section at the top of the
+ * Tasks page (`embedded`), above what's waiting for review in the repository.
  *
  * Left: everything addressed to you from GET /v1/inbox (review requests and notifications, typed, newest first,
  * with read state). Right: a preview where you act without leaving the inbox: review a merge request, reply to a
@@ -20,7 +21,7 @@ const DONE = 'Done. Moved out of your unread list.';
 
 export function pageFor(target) {
   const [kind, id] = String(target || '').split(':');
-  return { post: `/posts/${id}`, claim: `/claims/${id}`, mr: '#/agents?tab=review' }[kind] || null;
+  return { post: `/posts/${id}`, claim: `/claims/${id}`, mr: '#/agents?tab=tasks' }[kind] || null;
 }
 
 const typeLabel = (type) => {
@@ -121,7 +122,7 @@ function UpdatePreview({ item, apiKey, onDone }) {
   );
 }
 
-export default function InboxPage({ apiKey, me, isMobile, onUnreadChange }) {
+export default function InboxPage({ apiKey, me, isMobile, onUnreadChange, embedded = false }) {
   const [box] = useLoad(() => (apiKey ? engine('/v1/inbox?limit=100', { key: apiKey })
     : Promise.resolve({ ok: true, data: { items: [], unread: 0 } })), [apiKey]);
   const [items, setItems] = useState([]);
@@ -151,11 +152,11 @@ export default function InboxPage({ apiKey, me, isMobile, onUnreadChange }) {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '360px minmax(0, 1fr)', border: '1px solid #232323',
-      borderRadius: 14, minHeight: isMobile ? 0 : 640, overflow: 'hidden' }}>
+      borderRadius: 14, minHeight: isMobile ? 0 : embedded ? 360 : 640, overflow: 'hidden' }}>
       <div style={{ background: 'rgba(10,10,10,0.5)', borderRight: isMobile ? 'none' : '1px solid #232323',
         borderBottom: isMobile ? '1px solid #232323' : 'none' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: '1px solid #1a1a1a' }}>
-          <span style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>Inbox</span>
+          <span style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>{embedded ? 'For you' : 'Inbox'}</span>
           <span style={{ fontFamily: fonts.mono, fontSize: 11, color: GREEN }}>{unread} unread</span>
           <button type="button" onClick={markAll} disabled={!unread} style={{ marginLeft: 'auto', background: 'none',
             border: 'none', color: unread ? '#9ab' : '#555', cursor: unread ? 'pointer' : 'default', fontSize: 12.5,

@@ -64,7 +64,7 @@ test('the profile leads with the protocol\'s mission, then the ID panel, track r
   const now = await screen.findByRole('region', { name: 'Right now' });
   expect(now).toHaveTextContent('Right now · 1');
   expect(within(now).getByText('42% responded at 24 months.').closest('a'))
-    .toHaveAttribute('href', '#/agents?tab=review&repo=lab%2Fknee');
+    .toHaveAttribute('href', '#/agents?tab=tasks&repo=lab%2Fknee');
   const protocol = screen.getByRole('region', { name: 'Full protocol' });
   expect(protocol).toHaveTextContent('Focus:');
   expect(within(protocol).queryByRole('textbox')).not.toBeInTheDocument();               // read-only for visitors
