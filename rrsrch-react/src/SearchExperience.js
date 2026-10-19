@@ -7,6 +7,7 @@ import { Search, Loader2, ExternalLink, X, Bot, CircleUser } from 'lucide-react'
 import { Molecule } from './icons';
 import { readSearchHistory, pushSearchHistory } from './searchHistory';
 import JoinSignal from './JoinSignal';
+import NetworkResults from './NetworkSearch';
 
 const fonts = {
   main: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
@@ -307,7 +308,7 @@ function SearchBox({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          aria-label="Ask a research question"
+          aria-label="Search RRSRCH"
           style={{
             flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none',
             color: '#fff', fontSize: compact ? (isMobile ? 14 : 15) : (isMobile ? 15 : 16),
@@ -345,7 +346,7 @@ function SearchBox({
   );
 }
 
-function Landing({ isMobile, query, onQueryChange, onSearch, searching, history, onPickHistory }) {
+function Landing({ isMobile, query, onQueryChange, onSearch, searching, history, onPickHistory, placeholder }) {
   const recent = (history || []).slice(0, 6);
   return (
     <div style={{
@@ -383,7 +384,7 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, history,
           onSubmit={onSearch}
           searching={searching}
           isMobile={isMobile}
-          placeholder="Ask a research question. Answers cite their evidence."
+          placeholder={placeholder}
         />
       </div>
 
@@ -2406,7 +2407,7 @@ export function TopBar({
             searching={searching}
             isMobile={isMobile}
             compact
-            placeholder="Ask a research question. Answers cite their evidence."
+            placeholder={SEARCH_PLACEHOLDER}
           />
         </div>
       )}
@@ -2497,7 +2498,56 @@ function readUserProfile() {
   return {};
 }
 
+const SEARCH_PLACEHOLDER = 'Search claims and questions, or ask the network';
+
+// The home page: a search over what the network holds (NetworkSearch.js), and asking it when nothing does.
 export default function SearchExperience({
+  isMobile, scrollContainerRef, onAgents, onAccount, initialSearch, onInitialSearchDone,
+}) {
+  const [query, setQuery] = useState('');
+  const [submitted, setSubmitted] = useState('');
+  const [history, setHistory] = useState(() => readSearchHistory());
+
+  const goHome = () => {
+    setSubmitted('');
+    setQuery('');
+    scrollContainerRef?.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  const runSearch = (text) => {
+    const q = (typeof text === 'string' ? text : '').trim();
+    if (!q) return;
+    setHistory(pushSearchHistory(q));
+    setQuery(q);
+    setSubmitted(q);
+    scrollContainerRef?.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // A search typed in the header on another page lands here and runs once.
+  useEffect(() => {
+    if (!initialSearch) return;
+    onInitialSearchDone?.();
+    runSearch(initialSearch.q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSearch]);
+
+  return (
+    <>
+      <TopBar isMobile={isMobile} showSearch={!!submitted} query={query} onQueryChange={setQuery} onSearch={runSearch}
+        searching={false} onHome={goHome} onAgents={onAgents} onAccount={onAccount} />
+      {submitted
+        ? <div style={{ background: 'rgba(0,0,0,0.55)', minHeight: '100vh' }}>
+            <NetworkResults key={submitted} query={submitted} isMobile={isMobile} />
+          </div>
+        : <Landing isMobile={isMobile} query={query} onQueryChange={setQuery} onSearch={runSearch} searching={false}
+            history={history} onPickHistory={runSearch} placeholder={SEARCH_PLACEHOLDER} />}
+    </>
+  );
+}
+
+// The answer search that was the home page until October 2026: a model-written answer, web and literature results.
+// Off the home page now, since an instant answer skips the review the network exists for. Deleted, with its
+// server routes, in the next change.
+export function AnswerSearch({
   isMobile, scrollContainerRef, onAgents, onAccount, initialSearch, onInitialSearchDone,
 }) {
   const [query, setQuery] = useState('');
@@ -2755,6 +2805,7 @@ export default function SearchExperience({
           searching={searching}
           history={history}
           onPickHistory={(q) => runSearch(q)}
+          placeholder="Ask a research question. Answers cite their evidence."
         />
       )}
 
