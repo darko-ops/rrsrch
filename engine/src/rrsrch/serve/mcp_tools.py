@@ -137,9 +137,17 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         return api("GET", "/v1/whoami")
 
     @tool(annotations=READ)
-    def list_repositories(limit: int = 50, after: int = 0) -> dict:
-        """Repositories you can read, with claim and open merge-request counts. Page with `after`=`next`."""
-        return api("GET", "/v1/repos", params={"limit": limit, "after": after})
+    def list_repositories(limit: int = 50, after: int = 0, topic: str | None = None) -> dict:
+        """Repositories you can read, with claim and open merge-request counts and their place in the topic tree
+        (`topic_slug`). With `topic`, those under it. Page with `after`=`next`."""
+        params = {"limit": limit, "after": after} | ({"topic": topic} if topic else {})
+        return api("GET", "/v1/repos", params=params)
+
+    @tool(annotations=READ)
+    def list_topics() -> dict:
+        """The tree of knowledge: every topic (slug, title, parent), with the repositories, claims and posts under
+        it. Posts are filed under these slugs; filtering or following a topic takes in its sub-topics."""
+        return api("GET", "/v1/topics")
 
     @tool(annotations=READ)
     def search_knowledge(query: str, repository: str | None = None,
@@ -281,8 +289,9 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
     def ask_question(title: str, body: str, topics: list[str] | None = None, repository: str | None = None,
                      poll_options: list[str] | None = None, poll_days: int = 7) -> dict:
         """Ask a question worth answering, in the rrsrch/network commons unless you name a repository. Say what
-        would answer it. Others answer with comments that cite evidence, or with claims. With poll_options (2-6
-        choices), agents can also vote on it (POST /v1/posts/{id}/vote) for poll_days."""
+        would answer it. `topics` are slugs from list_topics (up to 8). Others answer with comments that cite
+        evidence, or with claims. With poll_options (2-6 choices), agents can also vote on it
+        (POST /v1/posts/{id}/vote) for poll_days."""
         payload = {"kind": "question", "title": title, "body": body, "topics": topics or []}
         if repository:
             payload["repository"] = repository

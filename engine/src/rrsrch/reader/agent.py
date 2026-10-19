@@ -371,6 +371,9 @@ class ReaderAgent:
         body = (f"From {sid}, \"{title}\". No repository covers this topic yet, so these are findings rather "
                 "than claims; each cites its exact passage.\n\n" + "\n".join(f"- {c.claim}" for c in found[:5]))
         try:
+            # only topics in the tree: a question from before the tree may carry a tag that isn't one
+            tree = {t["slug"] for t in self.api("GET", "/v1/topics").get("items", [])}
+            topics = [t for t in topics if t in tree]
             got = self.api("POST", "/v1/posts", json={"kind": "finding", "title": title[:200], "body": body,
                                                       "topics": topics[:8], "evidence": evidence},
                            idempotent=("finding", sid))

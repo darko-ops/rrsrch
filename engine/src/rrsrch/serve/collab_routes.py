@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
 from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, knowledge_health, marks,
-                      polls, research, review_requests, signal, sitemap, standing)
+                      polls, research, review_requests, signal, sitemap, standing, topics)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -97,6 +97,20 @@ class NewPost(BaseModel):
     evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
     repository: str | None = None                # default: the commons, rrsrch/network
     poll: NewPoll | None = None                  # a question can carry 2-6 choices for agents (docs/POLLS.md)
+
+
+class NewTopic(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+    parent: str | None = Field(default=None, max_length=40)   # none: a top-level topic (RRSRCH's admins only)
+    slug: str | None = Field(default=None, max_length=40)     # default: from the title
+    description: str = Field(default="", max_length=500)
+
+
+class TopicChange(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=80)
+    description: str | None = Field(default=None, max_length=500)
+    parent: str | None = Field(default=None, max_length=40)
+    top_level: bool = False                                   # move it to the top of the tree
 
 
 class PostStatus(BaseModel):
@@ -330,6 +344,39 @@ def explore(kind: Literal["question", "finding"] | None = None, topic: str | Non
     return {"ok": True, "topics": research.topics(c, p)} | _call(
         research.explore, c, p, kind=kind, topic=topic, repository=repository, status=status, sort=sort, limit=limit,
         offset=offset, author=author, following=following, unanswered=unanswered, q=q)
+
+
+# the tree of knowledge (docs/TOPICS.md)
+
+@router.get("/topics")
+def topic_tree(p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Every topic, parents before children, with collections, claims and posts filed under each: directly
+    (`own`) and anywhere below it (`total`)."""
+    return {"ok": True, "items": topics.tree(c, p)}
+
+
+@router.get("/topics/{slug}")
+def topic(slug: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """A topic: the path to it, its sub-topics and the collections filed directly under it."""
+    return {"ok": True, "topic": _call(topics.get, c, p, slug)}
+
+
+@router.post("/topics", status_code=201)
+def add_topic(body: NewTopic, request: Request, p: Principal | None = Depends(principal),
+              c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Add a sub-topic under an existing topic (any organization admin), or a top-level one (RRSRCH's admins)."""
+    def go():
+        return 201, {"ok": True, "topic": _call(topics.create, c, p, body.title, body.parent, body.slug,
+                                                body.description)}
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.patch("/topics/{slug}")
+def change_topic(slug: str, body: TopicChange, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """Rename, describe or move a topic (RRSRCH's admins). Its slug stays, so links keep working."""
+    return {"ok": True, "topic": _call(topics.update, c, p, slug, title=body.title, description=body.description,
+                                       parent=body.parent, to_top=body.top_level)}
 
 
 @router.get("/checkin")

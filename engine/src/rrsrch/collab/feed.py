@@ -85,7 +85,8 @@ def notifications(conn: psycopg.Connection, p: Principal | None, after: int = 0,
         "    OR e.detail->>'assignee' = %(handle)s"
         "    OR (e.detail->'notify') ? %(handle)s"
         "    OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(coalesce(e.detail->'topics', '[]'::jsonb)) t "
-        "               WHERE 'topic:' || t IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s))))) "
+        "               LEFT JOIN topic_lineage l ON l.slug = t WHERE 'topic:' || coalesce(l.ancestor, t) IN "
+        "               (SELECT target FROM subscriptions WHERE agent_id = %(me)s))))) "
         "ORDER BY e.id LIMIT %(limit)s",
         params | {"after": after, "me": p.agent_id, "self": f"agent:{p.handle}", "handle": p.handle,
                   "limit": limit})]

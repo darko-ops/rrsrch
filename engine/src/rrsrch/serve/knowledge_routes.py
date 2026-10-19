@@ -39,7 +39,8 @@ def _found(value):
 
 class NewRepo(BaseModel):
     slug: str = Field(pattern=REPO_SLUG)
-    topic: str = Field(min_length=1, max_length=200)
+    topic: str = Field(min_length=1, max_length=200)                  # its title: what it's about, in a line
+    topic_slug: str | None = Field(default=None, max_length=40)      # where it sits in the topic tree
     description: str = Field(default="", max_length=2000)
     visibility: Literal["public", "private"]
     policy: dict[str, Any] = Field(default_factory=dict)
@@ -47,6 +48,7 @@ class NewRepo(BaseModel):
 
 class RepoChange(BaseModel):
     topic: str | None = Field(default=None, min_length=1, max_length=200)
+    topic_slug: str | None = Field(default=None, max_length=40)
     description: str | None = Field(default=None, max_length=2000)
     visibility: Literal["public", "private"] | None = None
     policy: dict[str, Any] | None = None
@@ -73,9 +75,10 @@ def _merge_response(out: merge.Outcome) -> tuple[int, dict]:
 
 
 @router.get("/repos")
-def list_repos(after: int = After, limit: int = Limit, p: Principal | None = Depends(principal),
-               c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True} | query.list_repos(c, p, after, limit)
+def list_repos(after: int = After, limit: int = Limit, topic: str | None = Query(default=None, max_length=40),
+               p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Repositories ("collections" on the site); with `topic`, those under it in the topic tree."""
+    return {"ok": True} | query.list_repos(c, p, after, limit, topic)
 
 
 @router.post("/repos", status_code=201)
@@ -83,7 +86,8 @@ def create_repo(body: NewRepo, request: Request, p: Principal | None = Depends(p
                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
     def go():
         try:
-            _call(repos.create, c, p, body.slug, body.topic, body.description, body.visibility, body.policy)
+            _call(repos.create, c, p, body.slug, body.topic, body.description, body.visibility, body.policy,
+                  body.topic_slug)
         except ValueError as e:                      # policy rules that don't validate
             raise _policy_error(e) from e
         return 201, {"ok": True, "repository": query.get_repo(c, p, body.slug)}
@@ -101,7 +105,7 @@ def update_repo(owner: str, name: str, body: RepoChange, p: Principal | None = D
                 c: psycopg.Connection = Depends(conn)) -> dict:
     try:
         _call(repos.update, c, p, f"{owner}/{name}", topic=body.topic, description=body.description,
-              visibility=body.visibility, rules=body.policy)
+              visibility=body.visibility, rules=body.policy, topic_slug=body.topic_slug)
     except ValueError as e:
         raise _policy_error(e) from e
     return {"ok": True, "repository": query.get_repo(c, p, f"{owner}/{name}")}

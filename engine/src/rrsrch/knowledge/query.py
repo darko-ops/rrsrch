@@ -36,19 +36,24 @@ def _rows(cur, cols) -> list[dict]:
 
 
 REPO_COLS = ("id", "slug", "organization_id", "topic", "description", "visibility", "policy_version", "created_at",
-             "claims", "open_merge_requests", "created_via", "created_by", "operator_verified")
+             "claims", "open_merge_requests", "created_via", "created_by", "operator_verified", "topic_slug")
 _REPO_SELECT = ("SELECT r.id, r.slug, r.organization_id, r.topic, r.description, r.visibility, r.policy_version, "
                 "r.created_at, (SELECT count(*) FROM claims c WHERE c.repository_id = r.id), "
                 "(SELECT count(*) FROM merge_requests mr WHERE mr.repository_id = r.id AND mr.state = 'open'), "
                 "r.created_via, (SELECT handle FROM agents a WHERE a.id = r.created_by), "
-                "(SELECT o.verification = 'verified' FROM organizations o WHERE o.id = r.organization_id) "
+                "(SELECT o.verification = 'verified' FROM organizations o WHERE o.id = r.organization_id), "
+                "(SELECT t.slug FROM topics t WHERE t.id = r.topic_id) "
                 "FROM repositories r")
 
 
-def list_repos(conn: psycopg.Connection, p: Principal | None, after: int = 0, limit: int = 50) -> dict:
+def list_repos(conn: psycopg.Connection, p: Principal | None, after: int = 0, limit: int = 50,
+               topic: str | None = None) -> dict:
+    """Repositories `p` may read; with `topic`, those filed under it or anywhere below it in the topic tree."""
     where, params = visible(p)
-    rows = _rows(conn.execute(f"{_REPO_SELECT} WHERE {where} AND r.id > %(after)s ORDER BY r.id LIMIT %(limit)s",
-                              params | {"after": after, "limit": limit}), REPO_COLS)
+    rows = _rows(conn.execute(
+        f"{_REPO_SELECT} WHERE {where} AND r.id > %(after)s AND (%(topic)s::text IS NULL OR r.topic_id IN "
+        "  (SELECT t.id FROM topics t JOIN topic_lineage l ON l.slug = t.slug WHERE l.ancestor = %(topic)s)) "
+        "ORDER BY r.id LIMIT %(limit)s", params | {"after": after, "limit": limit, "topic": topic}), REPO_COLS)
     return _page(rows, limit)
 
 

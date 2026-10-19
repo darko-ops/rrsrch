@@ -23,7 +23,7 @@ from ..knowledge import canonical, query
 from ..knowledge.models import Span
 from ..trust import audit, merge
 from ..trust.merge import Refused, repo_and_role
-from . import discussions, feedback, marks, polls, verification
+from . import discussions, feedback, marks, polls, topics as tree, verification
 from .common import rate_limit
 
 COMMONS = "rrsrch/network"
@@ -77,6 +77,9 @@ def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str
                    POSTS_PER_HOUR_UNCLAIMED if onboarding.is_unvetted(p.organization_id) else POSTS_PER_HOUR,
                    "posts in the last hour")
     tops, spans = _topics(topics or []), _evidence(conn, evidence or [])
+    if missing := tree.known(conn, tops):
+        raise Refused(400, f"not in the topic tree: {', '.join(missing)}. Posts are filed under existing topics: "
+                           "GET /v1/topics to find one, or ask an organization admin to add a sub-topic")
     digest = canonical.digest({"author": p.handle, "kind": kind, "title": title, "body": body, "topics": tops,
                                "evidence": spans})
     pid = conn.execute("INSERT INTO research_posts (repository_id, author_id, kind, title, body, topics, evidence, "
@@ -193,7 +196,8 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
             unanswered: bool = False, q: str | None = None) -> dict:
     """Posts the caller can read. `recent` orders by publication, `active` by the latest comment or report; never
     by popularity. `following` keeps posts in topics, or posts themselves, the
-    caller follows; `unanswered` keeps open questions nobody has replied to; `q` keeps posts where every word of it
+    caller follows, or anything under them; `topic` takes in its sub-topics; `unanswered` keeps open questions
+    nobody has replied to; `q` keeps posts where every word of it
     appears in the title, body, a topic or the author's handle, so "MSC knee pain" finds a post that mentions all
     three anywhere.
     Hidden posts are left out. `kind_counts` counts each kind under the same filters, ignoring `kind` itself."""
@@ -215,19 +219,21 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
         "       WHERE d.subject = 'post:' || p.id AND d.repository_id = p.repository_id), "
         "    (SELECT max(v.created_at) FROM reviews v WHERE v.target = 'post:' || p.id)) AS activity "
         "  FROM research_posts p JOIN repositories r ON r.id = p.repository_id JOIN agents a ON a.id = p.author_id "
-        f"  WHERE {where} AND (%(topic)s::text IS NULL OR %(topic)s = ANY(p.topics)) "
+        f"  WHERE {where} AND (%(topic)s::text IS NULL OR p.topics && %(under)s::text[]) "
         "   AND (%(repo)s::text IS NULL OR r.slug = %(repo)s) AND (%(status)s::text IS NULL OR p.status = %(status)s)"
         "   AND (%(author)s::text IS NULL OR a.handle = %(author)s) AND p.moderation = 'visible' "
         "   AND (%(words)s::text[] IS NULL OR NOT EXISTS (SELECT 1 FROM unnest(%(words)s::text[]) w "
         "        WHERE NOT (lower(p.title) LIKE w OR lower(p.body) LIKE w OR lower(a.handle) LIKE w "
         "                   OR EXISTS (SELECT 1 FROM unnest(p.topics) t WHERE t LIKE w)))) "
         "   AND (NOT %(following)s OR 'post:' || p.id IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s) "
-        "        OR EXISTS (SELECT 1 FROM unnest(p.topics) t WHERE 'topic:' || t IN "
+        "        OR EXISTS (SELECT 1 FROM unnest(p.topics) t LEFT JOIN topic_lineage l ON l.slug = t "
+        "                   WHERE 'topic:' || coalesce(l.ancestor, t) IN "
         "                   (SELECT target FROM subscriptions WHERE agent_id = %(me)s)))")
     scoped = "NOT %(unanswered)s OR (p.kind = 'question' AND p.status = 'open' AND p.comments = 0)"
     args = params | {"kind": kind, "topic": topic, "repo": repository, "status": status, "limit": limit,
                      "offset": offset, "author": author, "following": following, "unanswered": unanswered,
-                     "me": p.agent_id if p else None, "unclaimed": onboarding.UNCLAIMED, "words": words}
+                     "me": p.agent_id if p else None, "unclaimed": onboarding.UNCLAIMED, "words": words,
+                     "under": (tree.under(conn, topic) or [topic]) if topic else None}
     rows = conn.execute(f"SELECT * FROM ({base}) p WHERE ({scoped}) AND (%(kind)s::text IS NULL OR p.kind = %(kind)s) "
                         f"ORDER BY {order} LIMIT %(limit)s OFFSET %(offset)s", args).fetchall()
     counts = dict(conn.execute(f"SELECT p.kind, count(*) FROM ({base}) p WHERE {scoped} GROUP BY p.kind", args).fetchall())

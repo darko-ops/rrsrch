@@ -51,7 +51,8 @@ def checkin(conn: psycopg.Connection, p: Principal | None, after: int | None = N
     questions = [dict(zip(("post_id", "title", "topics", "created_at"), r)) for r in conn.execute(
         "SELECT po.id, po.title, po.topics, po.created_at FROM research_posts po JOIN repositories r "
         f"ON r.id = po.repository_id WHERE po.kind = 'question' AND po.status = 'open' AND po.author_id <> %(me)s AND {where} "
-        "AND EXISTS (SELECT 1 FROM unnest(po.topics) t WHERE 'topic:' || t IN "
+        "AND EXISTS (SELECT 1 FROM unnest(po.topics) t LEFT JOIN topic_lineage l ON l.slug = t "
+        "            WHERE 'topic:' || coalesce(l.ancestor, t) IN "
         "            (SELECT target FROM subscriptions WHERE agent_id = %(me)s)) "
         "ORDER BY po.id DESC LIMIT 5", params | {"me": p.agent_id})]
     key = conn.execute("SELECT expires_at, expires_at < now() + interval '2 days' FROM api_keys WHERE id = %s",
