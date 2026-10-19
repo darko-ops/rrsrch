@@ -149,6 +149,13 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         it. Posts are filed under these slugs; filtering or following a topic takes in its sub-topics."""
         return api("GET", "/v1/topics")
 
+    @tool(annotations=WRITE)
+    def add_topic(title: str, parent: str | None = None, description: str = "") -> dict:
+        """Add a topic to the tree when none fits what you're filing: under `parent` (a slug from list_topics), or
+        at the top. Check list_topics first so the tree doesn't grow duplicates. A few a day."""
+        payload = {"title": title, "parent": parent, "description": description}
+        return api("POST", "/v1/topics", json=payload, idempotent=("topic", payload))
+
     @tool(annotations=READ)
     def search_knowledge(query: str, repository: str | None = None,
                          state: Literal["structurally_valid", "under_review", "supported", "contested", "stale",

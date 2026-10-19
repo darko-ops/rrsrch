@@ -18,10 +18,10 @@ MAX_LIMIT = 200
 
 
 def visible(p: Principal | None, alias: str = "r") -> tuple[str, dict]:
-    """A WHERE fragment true for repositories `p` may read."""
+    """A WHERE fragment true for repositories `p` may read. Retired (deleted) ones are nobody's to read."""
     if p is None or p.status != "active" or "read" not in p.scopes:
-        return f"{alias}.visibility = 'public'", {}
-    return (f"({alias}.visibility = 'public' "
+        return f"({alias}.visibility = 'public' AND {alias}.deleted_at IS NULL)", {}
+    return (f"{alias}.deleted_at IS NULL AND ({alias}.visibility = 'public' "
             f"OR EXISTS (SELECT 1 FROM memberships m WHERE m.repository_id = {alias}.id AND m.agent_id = %(vis_agent)s) "
             f"OR ({alias}.organization_id = %(vis_org)s AND %(vis_admin)s))"), \
         {"vis_agent": p.agent_id, "vis_org": p.organization_id, "vis_admin": p.org_role == "admin"}

@@ -85,6 +85,8 @@ def create(conn: psycopg.Connection, p: Principal | None, slug: str, topic: str,
         raise Refused(403, "repositories belong to an organization: get claimed by an operator first")
     if ids.get_repo(conn, slug):
         raise Refused(409, f"{slug} already exists")
+    if conn.execute("SELECT 1 FROM repositories WHERE slug = %s", (slug,)).fetchone():
+        raise Refused(409, f"{slug} was used by a deleted collection; choose another name")
     policy = Policy.model_validate(rules)
     human = _human(conn, p)
     if visibility == "public" and not human:
@@ -167,3 +169,21 @@ def update(conn: psycopg.Connection, p: Principal | None, slug: str, *, topic: s
     audit.append(conn, "repository.update", f"repo:{slug}", actor_id=p.agent_id, repository_id=repo.id,
                  policy_version=version, detail=changes)
     return version
+
+
+def delete(conn: psycopg.Connection, p: Principal | None, slug: str, confirm: str) -> None:
+    """Retire a repository: gone from every list, read and action, its history kept (migration 0041). An admin of
+    the repository (or of its organization) does it, naming it again in `confirm`."""
+    repo = ids.get_repo(conn, slug)
+    role = ids.role_in(conn, p.agent_id if p else None, repo.id) if repo else None
+    if repo is None or not access.decide(p, Action.READ, repo, role):
+        raise Refused(404, "not found")
+    d = access.decide(p, Action.ADMINISTER, repo, role)
+    if not d:
+        raise Refused(401 if p is None else 403, d.reason)
+    if confirm != slug:
+        raise Refused(400, f"to delete it, confirm with its full name: {slug}")
+    claims = conn.execute("SELECT count(*) FROM claims WHERE repository_id = %s", (repo.id,)).fetchone()[0]
+    conn.execute("UPDATE repositories SET deleted_at = now(), deleted_by = %s WHERE id = %s", (p.agent_id, repo.id))
+    audit.append(conn, "repository.delete", f"repo:{slug}", actor_id=p.agent_id, repository_id=repo.id,
+                 detail={"claims": claims})

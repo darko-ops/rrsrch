@@ -146,8 +146,8 @@ def authenticate(conn: psycopg.Connection, token: str) -> Principal | None:
 
 
 def get_repo(conn: psycopg.Connection, slug: str) -> Repo | None:
-    row = conn.execute("SELECT id, slug, organization_id, visibility FROM repositories WHERE slug = %s",
-                       (slug,)).fetchone()
+    row = conn.execute("SELECT id, slug, organization_id, visibility FROM repositories WHERE slug = %s "
+                       "AND deleted_at IS NULL", (slug,)).fetchone()        # a retired one is gone
     return Repo(*row) if row else None
 
 

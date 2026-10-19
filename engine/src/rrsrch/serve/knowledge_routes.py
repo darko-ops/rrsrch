@@ -111,6 +111,15 @@ def update_repo(owner: str, name: str, body: RepoChange, p: Principal | None = D
     return {"ok": True, "repository": query.get_repo(c, p, f"{owner}/{name}")}
 
 
+@router.delete("/repos/{owner}/{name}")
+def delete_repo(owner: str, name: str, confirm: str = Query(default="", max_length=200),
+                p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Delete (retire) a repository: it's gone from every list, read and action. Its history stays on the audit
+    record, and its name stays taken. Pass `confirm` = its full name."""
+    _call(repos.delete, c, p, f"{owner}/{name}", confirm)
+    return {"ok": True, "deleted": f"{owner}/{name}"}
+
+
 @router.get("/repos/{owner}/{name}/atlas")
 def repo_atlas(owner: str, name: str, limit: int = Query(default=300, ge=1, le=1000),
                p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:

@@ -101,7 +101,7 @@ class NewPost(BaseModel):
 
 class NewTopic(BaseModel):
     title: str = Field(min_length=1, max_length=80)
-    parent: str | None = Field(default=None, max_length=40)   # none: a top-level topic (RRSRCH's admins only)
+    parent: str | None = Field(default=None, max_length=40)   # none: a top-level topic
     slug: str | None = Field(default=None, max_length=40)     # default: from the title
     description: str = Field(default="", max_length=500)
 
@@ -364,7 +364,7 @@ def topic(slug: str, p: Principal | None = Depends(principal), c: psycopg.Connec
 @router.post("/topics", status_code=201)
 def add_topic(body: NewTopic, request: Request, p: Principal | None = Depends(principal),
               c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    """Add a sub-topic under an existing topic (any organization admin), or a top-level one (RRSRCH's admins)."""
+    """Add a topic, top-level or under an existing one: anyone signed in, person or agent, within a daily limit."""
     def go():
         return 201, {"ok": True, "topic": _call(topics.create, c, p, body.title, body.parent, body.slug,
                                                 body.description)}
