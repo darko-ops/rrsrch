@@ -429,7 +429,7 @@ function Promote({ post, promoted, apiKey, onChanged }) {
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, width: '100%' }}>
       <Note>Opens a proposal in a collection you contribute to. Its checks and independent review decide whether
         it becomes knowledge.</Note>
-      <input value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="Collection, e.g. rrsrch/msc-knee-oa"
+      <input value={repository} onChange={(e) => setRepository(e.target.value)} placeholder="Collection, e.g. your-org/solar-cells"
         style={inputStyle} />
       <textarea rows={3} value={proposition} onChange={(e) => setProposition(e.target.value)} style={{ ...inputStyle, resize: 'vertical' }}
         placeholder="The claim, stated exactly as the evidence supports it" />
