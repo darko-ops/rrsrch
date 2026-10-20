@@ -2,7 +2,8 @@
  * The Agents page (design handoff: Agents page, ID-badge profile cards, option 1b), without Sparks: Sparks stay
  * dormant and out of view until contributions can be measured reliably (docs/SIMPLIFY.md).
  *
- *   AgentsHome   header, "Right now" and "Needs you", status filters, then a grid of profile cards
+ *   AgentsHome   header, "Right now" and "Needs you", status filters, then a grid of profile cards: AI agents only,
+ *                never people (kind "human"), who have accounts rather than cards
  *   ProfileCard  one agent as an ID badge: its identity mark (generated from its handle), status, roster number and
  *                model, handle, role and tagline. The whole card links to the agent's profile (AgentProfile.js)
  *   ProtocolTab  the agent's orders (its protocol), which an admin of its organization writes as a form or as text
@@ -83,16 +84,18 @@ export const missionOf = (protocol) => protocolField(protocol?.text, 'Mission');
 export const pct = (x) => `${Math.round(x * 100)}%`;
 export const serial = (no, model) => [no ? `No. ${String(no).padStart(3, '0')}` : null, model].filter(Boolean).join(' · ');
 
-function RightNow({ org }) {
-  const [feed] = useLoad(() => engine(`/v1/organizations/${encodeURIComponent(org)}/activity?limit=3`), [org]);
-  const items = feed.data?.items || [];
+// people's own activity isn't shown here: the Agents page is about AI agents (`agents`: their handles)
+function RightNow({ org, agents }) {
+  const [feed] = useLoad(() => engine(`/v1/organizations/${encodeURIComponent(org)}/activity?limit=12`), [org]);
+  const items = agents ? (feed.data?.items || []).filter((e) => agents.has(e.handle)).slice(0, 3) : [];
+  const loading = feed.loading || !agents;            // wait for the roster, so people never flash in
   return (
     <section aria-label="Right now" style={{ ...panelStyle, padding: '14px 16px', display: 'grid', gap: 8, minWidth: 0 }}>
       <span style={{ ...monoLabel, color: GREEN, display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ width: 7, height: 7, borderRadius: 999, background: GREEN, boxShadow: '0 0 0 4px rgba(0,255,136,.15)' }} />
         Right now</span>
-      {feed.loading && <span style={{ fontSize: 12.5, color: '#666' }}>Loading…</span>}
-      {!feed.loading && items.length === 0 && <span style={{ fontSize: 12.5, color: '#666' }}>Nothing yet. Your agents' work shows up here as it happens.</span>}
+      {loading && <span style={{ fontSize: 12.5, color: '#666' }}>Loading…</span>}
+      {!loading && items.length === 0 && <span style={{ fontSize: 12.5, color: '#666' }}>Nothing yet. Your agents' work shows up here as it happens.</span>}
       {items.map((e) => (
         <div key={`${e.kind}${e.id}`} style={{ display: 'grid', gridTemplateColumns: '58px minmax(0,1fr)', gap: 8, alignItems: 'baseline' }}>
           <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#666' }}>{clock(e.at)}</span>
@@ -111,7 +114,7 @@ function NeedsYou({ apiKey, rows, isAdmin, onClaimed }) {
   const [msg, setMsg] = useState(null);
   const waiting = (unclaimed.data?.items || []).filter((a) => a.status === 'active');
   const expiring = rows.filter((r) => r.keyExpiresInDays != null && r.keyExpiresInDays <= 7);
-  const unordered = isAdmin ? rows.filter((r) => orderable(r) && !r.protocol) : [];
+  const unordered = isAdmin ? rows.filter((r) => !r.protocol) : [];
   const claim = async (e) => {
     e.preventDefault();
     const r = await engine('/v1/agents/claim', { key: apiKey, method: 'POST', body: { code: code.trim() } });
@@ -170,7 +173,7 @@ function ProfileCard({ r, no, canOrder }) {
   const [focus, setFocus] = useState(false);
   const a = r.agent;
   const s = statusStyle(r.status);
-  const role = roleOf(r.protocol) || (a.kind === 'human' ? 'human' : 'agent');
+  const role = roleOf(r.protocol) || 'agent';
   return (
     <a href={`/agents/${a.handle}`} aria-label={`${a.handle}, ${s.label}`}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
@@ -347,16 +350,14 @@ async function loadRow(agent, apiKey, canSeeKeys) {
   };
 }
 
-// Agents take orders; people don't.
-const orderable = (r) => r.agent.kind !== 'human';
-
 export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }) {
   const org = me?.organization_id && me.organization_id !== 'people' ? me.organization_id : 'rrsrch';
   const isAdmin = !!me && me.org_role === 'admin' && me.scopes.includes('agents');
   const [roster, reload] = useLoad(async () => {
     const list = await engine(`/v1/agents?organization=${encodeURIComponent(org)}&limit=200`);
     if (!list.ok) return list;
-    const agents = (list.data.items || []).filter((a) => a.status !== 'revoked');
+    // AI agents only: people (kind "human") have accounts, not cards here
+    const agents = (list.data.items || []).filter((a) => a.status !== 'revoked' && a.kind !== 'human');
     const rows = await Promise.all(agents.map((a) => loadRow(a, apiKey, !!me && (isAdmin || me.handle === a.handle))));
     return { ok: true, data: rows.map((r, i) => ({ ...r, no: i + 1 })) };
   }, [org, apiKey]);
@@ -374,7 +375,7 @@ export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }
         and manage your own agents. Until then this shows RRSRCH's.</Note>}
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0,1fr)' : '1fr 1fr', gap: 20 }}>
-        <RightNow org={org} />
+        <RightNow org={org} agents={roster.data ? new Set(rows.map((r) => r.agent.handle)) : null} />
         <NeedsYou apiKey={apiKey} rows={rows} isAdmin={isAdmin} onClaimed={reload} />
       </div>
 
@@ -397,7 +398,7 @@ export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }
         {shown.length > 0 && (
           <div style={{ display: 'grid', gap: 14,
             gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${isMobile ? 150 : 240}px), 1fr))` }}>
-            {shown.map((r) => <ProfileCard key={r.agent.handle} r={r} no={r.no} canOrder={isAdmin && orderable(r)} />)}
+            {shown.map((r) => <ProfileCard key={r.agent.handle} r={r} no={r.no} canOrder={isAdmin} />)}
           </div>
         )}
       </section>

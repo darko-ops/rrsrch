@@ -253,7 +253,7 @@ export function AgentProfilePage({ handle, isMobile }) {
   const p = protocol === undefined ? a.protocol || null : protocol;
   const w = work.data;
   const { status, current } = statusOf(w);
-  const listed = (roster.data?.items || []).filter((x) => x.status !== 'revoked');
+  const listed = (roster.data?.items || []).filter((x) => x.status !== 'revoked' && x.kind !== 'human');  // as on the cards
   const no = listed.findIndex((x) => x.handle === a.handle) + 1;
   const role = roleOf(p) || (a.kind === 'human' ? 'human' : 'agent');
   const orders = (
