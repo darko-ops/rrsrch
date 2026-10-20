@@ -1,6 +1,7 @@
 """Prescience (docs/PRESCIENCE.md): the four gauges under calculation hc-v2, against the design's acceptance tests."""
 import psycopg
 import pytest
+from test_agent_network import signup
 from test_trust_db import world  # noqa: F401  (world is a fixture)
 
 from rrsrch.collab import humanity
@@ -228,4 +229,70 @@ def test_perspectives_are_searchable_and_their_text_is_only_data(world):
 def test_every_gauge_has_a_versioned_question(world, gauge):
     client, h, url = world
     g = index(client, gauge)
-    assert g["title"] == humanity.GAUGES[gauge] and g["question_version"] >= 1 and len(g["question"]) > 30
+    assert g["core"] and g["title"] == humanity.GAUGES[gauge] and g["question_version"] >= 1 and len(g["question"]) > 30
+
+
+# -- gauges agents propose ---------------------------------------------------------------------------------------------
+
+Q = "How confident are you that most of the world will have reliable clean electricity by 2045?"
+
+
+def propose(client, who, title="Clean Power", question=Q, topic="climate"):
+    return client.post("/v1/gauges", headers=who, json={"title": title, "question": question, "topic": topic})
+
+
+def test_a_claimed_agent_proposes_a_gauge_scored_like_the_core_four(world):
+    client, h, url = world
+    lab = agent(url, "lab", "lab-1")
+    r = propose(client, lab)
+    assert r.status_code == 201, r.json()
+    g = r.json()["gauge"]
+    assert (g["gauge"], g["core"], g["topic"], g["topic_label"], g["proposed_by"]) == ("clean-power", False, "climate",
+                                                                                     "Climate", "lab-1")
+    assert g["question"] == Q and g["question_version"] == 1 and g["index"]["status"] == "awaiting"
+    listed = client.get("/v1/gauges").json()["items"]
+    assert [x["gauge"] for x in listed][:4] == list(humanity.GAUGES) and listed[4]["gauge"] == "clean-power"
+    assert all(x["core"] for x in listed[:4]) and listed[0]["proposed_by"] is None
+    for who, s in ((lab, 80), (agent(url, "lab2", "lab2-1"), 30)):
+        assert vote(client, who, s, gauge="clean-power").status_code == 201
+    g = index(client, "clean-power")
+    assert (g["index"]["score"], g["spread"], g["title"]) == (55.0, 50, "Clean Power")
+    assert client.get("/v1/gauges").json()["items"][4]["spread"] == 50
+
+
+def test_proposals_are_checked_and_limited(world):
+    client, h, url = world
+    lab = agent(url, "lab", "lab-1")
+    assert propose(client, lab, topic="sports").status_code in (400, 422)
+    assert propose(client, lab, question="Will it work?").status_code in (400, 422)                     # too short
+    assert propose(client, lab, question="Clean electricity for most of the world by 2045, broadly.").status_code == 400
+    assert propose(client, lab, question=index(client)["question"]).status_code == 409                   # the core one
+    assert propose(client, h["ext"]).status_code == 403                                                  # a person
+    assert propose(client, h["bot"]).status_code == 403                                                  # RRSRCH's own
+    scout = {"Authorization": f"Bearer {signup(client, 'scout').json()['key']}"}
+    assert propose(client, scout).status_code == 403                                                     # unclaimed
+    assert propose(client, lab).status_code == 201
+    assert propose(client, lab, title="Another", question=Q.replace("2045", "2050")).status_code == 429  # one a week
+    assert propose(client, agent(url, "lab", "lab-2"), title="Second", question=Q.replace("2045", "2055")).status_code == 201
+    r = propose(client, agent(url, "lab", "lab-3"), title="Third", question=Q.replace("2045", "2060"))
+    assert r.status_code == 429 and "per operator" in r.json()["error"]
+    assert propose(client, agent(url, "other", "other-1"), title="Clean Power",
+                   question=Q.replace("2045", "2070")).json()["gauge"]["gauge"] == "clean-power-2"   # a free key
+
+
+def test_rrsrch_retires_a_proposed_gauge_and_its_votes_stay(world):
+    client, h, url = world
+    lab = agent(url, "lab", "lab-1")
+    propose(client, lab)
+    assert vote(client, lab, 70, gauge="clean-power").status_code == 201
+    assert client.post("/v1/gauges/clean-power/retire", headers=lab, json={"reason": "spam"}).status_code == 403
+    assert client.post(f"/v1/gauges/{HC}/retire", headers=h["admin"], json={"reason": "no"}).status_code == 400
+    assert client.post("/v1/gauges/clean-power/retire", headers=h["admin"], json={"reason": "duplicate"}).status_code == 200
+    assert "clean-power" not in [x["gauge"] for x in client.get("/v1/gauges").json()["items"]]
+    assert client.get("/v1/gauges/clean-power").status_code == 404
+    assert vote(client, agent(url, "z", "z-1"), 50, gauge="clean-power").status_code == 404
+    with psycopg.connect(url) as c:
+        assert c.execute("SELECT count(*) FROM hc_votes WHERE gauge = 'clean-power'").fetchone()[0] == 1
+        assert [r[0] for r in c.execute("SELECT action FROM audit_events WHERE target = 'gauge:clean-power' ORDER BY id")] \
+            == ["gauge.propose", "gauge.retire"]
+        assert audit.verify(c) == []
