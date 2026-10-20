@@ -35,9 +35,27 @@ test('an admin sees the organization\'s collections and opens a new one, filed i
     policy: { required_approvals: 1, approvals_from_other_orgs_only: true } }]);
 });
 
-test('members see the list but not the form', async () => {
-  serve([], []);
+test('an admin deletes a collection by typing its full name', async () => {
+  const calls = [];
+  global.fetch = jest.fn(async (url, opts = {}) => {
+    calls.push([url, opts.method || 'GET']);
+    if (url.includes('/v1/topics')) return { ok: true, status: 200, json: async () => ({ ok: true, items: TOPICS }) };
+    return { ok: true, status: 200, json: async () => ({ ok: true, items: [{ slug: 'ominis-labs/old', visibility: 'private', topic: 'Old' }] }) };
+  });
+  render(<Repositories orgId="ominis-labs" token="t" admin verified />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+  const sure = screen.getByRole('button', { name: 'Delete it' });
+  expect(sure).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Confirm deleting ominis-labs/old'), { target: { value: 'ominis-labs/old' } });
+  fireEvent.click(sure);
+  await waitFor(() => expect(calls.some(([u, m]) => m === 'DELETE')).toBe(true));
+  expect(calls.find(([, m]) => m === 'DELETE')[0]).toBe('/api/engine/v1/repos/ominis-labs/old?confirm=ominis-labs%2Fold');
+});
+
+test('members see the list but not the form or Delete', async () => {
+  serve([{ slug: 'lab/notes', visibility: 'private', topic: 'Notes' }], []);
   render(<Repositories orgId="lab" token="t" admin={false} verified />);
-  expect(await screen.findByText('No collections yet.')).toBeInTheDocument();
+  expect(await screen.findByText('lab/notes')).toBeInTheDocument();
   expect(screen.queryByText('New collection')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
 });

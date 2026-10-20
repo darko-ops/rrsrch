@@ -5,7 +5,7 @@
  *   TreeNav      the whole tree on the left: expand and collapse, filter by name, counts of what's under each
  *   TopicIndex   #/topics: the top-level topics with their sub-topics
  *   TopicView    /topics/<slug>: the path to it, its sub-topics and collections, then the questions and findings
- *                filed anywhere under it. An organization admin can add a sub-topic here.
+ *                filed anywhere under it. Anyone signed in can add a sub-topic here, or a topic on the index.
  *
  * Collections are repositories in the API.
  */
@@ -114,6 +114,7 @@ function TopicCards({ items, tree }) {
 }
 
 function TopicIndex({ tree, isMobile }) {
+  const apiKey = actingKey();
   return (
     <div style={{ display: 'grid', gap: 18, minWidth: 0 }}>
       <header style={{ display: 'grid', gap: 6, paddingBottom: 16, borderBottom: '1px solid #222' }}>
@@ -122,39 +123,41 @@ function TopicIndex({ tree, isMobile }) {
           sub-topics, collections of reviewed claims, and the questions and findings filed under it.</span>
       </header>
       <TopicCards items={tree.children(null)} tree={tree} />
+      {apiKey && <AddTopic parent={null} apiKey={apiKey} />}
     </div>
   );
 }
 
-// -- adding a sub-topic (organization admins) -----------------------------------------------------------------------
+// -- adding a topic or sub-topic (anyone signed in) ----------------------------------------------------------------
 
-function AddSubtopic({ parent, apiKey }) {
+function AddTopic({ parent, apiKey }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  if (!open) return <div><Btn small onClick={() => setOpen(true)}>Add a sub-topic</Btn></div>;
+  if (!open) return <div><Btn small onClick={() => setOpen(true)}>{parent ? 'Add a sub-topic' : 'Add a topic'}</Btn></div>;
   const send = async () => {
     setBusy(true); setErr('');
     const r = await engine('/v1/topics', { key: apiKey, method: 'POST',
-      body: { title: title.trim(), parent: parent.slug, description: description.trim() } });
+      body: { title: title.trim(), parent: parent ? parent.slug : null, description: description.trim() } });
     setBusy(false);
     if (!r.ok) { setErr(r.error); return; }
     await reloadTopics();
     goTo(`/topics/${r.data.topic.slug}`);
   };
   return (
-    <section aria-label="Add a sub-topic" style={{ ...panel, gap: 8 }}>
-      <span style={monoLabel}>New sub-topic under {parent.title}</span>
-      <input aria-label="Sub-topic title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={80}
-        placeholder="e.g. Hip osteoarthritis" style={inputStyle} />
-      <input aria-label="Sub-topic description" value={description} onChange={(e) => setDescription(e.target.value)}
+    <section aria-label={parent ? 'Add a sub-topic' : 'Add a topic'} style={{ ...panel, gap: 8 }}>
+      <span style={monoLabel}>{parent ? `New sub-topic under ${parent.title}` : 'New top-level topic'}</span>
+      <input aria-label="Topic title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={80}
+        placeholder={parent ? 'e.g. Hip osteoarthritis' : 'e.g. Biology'} style={inputStyle} />
+      <input aria-label="Topic description" value={description} onChange={(e) => setDescription(e.target.value)}
         maxLength={500} placeholder="What it covers, in a line (optional)" style={inputStyle} />
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <Btn small kind="primary" disabled={busy || !title.trim()} onClick={send}>Add it</Btn>
         <Btn small onClick={() => setOpen(false)}>Cancel</Btn>
-        <span style={{ fontSize: 11.5, color: '#666' }}>Anyone can see it. RRSRCH may rename or move it to keep the tree tidy.</span>
+        <span style={{ fontSize: 11.5, color: '#666' }}>Anyone can see it; check the tree for one that fits first.
+          RRSRCH may rename or move it to keep the tree tidy.</span>
       </div>
       {err && <Note tone="error">{err}</Note>}
     </section>
@@ -166,13 +169,10 @@ function AddSubtopic({ parent, apiKey }) {
 function TopicView({ slug, tree, isMobile }) {
   const apiKey = actingKey();
   const [got] = useLoad(() => engine(`/v1/topics/${encodeURIComponent(slug)}`, { key: apiKey }), [slug, apiKey]);
-  const [me] = useLoad(() => (apiKey ? engine('/v1/whoami', { key: apiKey }) : Promise.resolve({ ok: true, data: null })), [apiKey]);
   const follows = useFollows(apiKey);
   if (got.loading && !got.data) return <Loading what="the topic" />;
   if (got.error) return <Note tone="error">{got.error === 'not found' ? `No topic ${slug}.` : got.error}</Note>;
   const t = got.data.topic;
-  const who = me.data;
-  const canAdd = !!who && who.org_role === 'admin' && !['people', 'unclaimed'].includes(who.organization_id);
   const following = follows.following(`topic:${slug}`);
   const children = t.children.map((c) => tree.bySlug.get(c.slug) || c);
 
@@ -202,7 +202,7 @@ function TopicView({ slug, tree, isMobile }) {
           <TopicCards items={children} tree={tree} />
         </section>
       )}
-      {canAdd && <AddSubtopic parent={t} apiKey={apiKey} />}
+      {apiKey && <AddTopic parent={t} apiKey={apiKey} />}
 
       <section aria-label="Collections" style={{ display: 'grid', gap: 10 }}>
         <span style={monoLabel}>Collections here · {t.collections.length}</span>

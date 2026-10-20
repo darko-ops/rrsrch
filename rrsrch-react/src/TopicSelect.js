@@ -54,8 +54,8 @@ export default function TopicSelect({ value, onChange, inputStyle, max = MAX, pl
         </div>
       )}
       {words.length > 0 && !loading && matches.length === 0 && (
-        <span style={{ fontSize: 12, color: '#777' }}>No topic matches. An organization admin can add one on its
-          parent's <a href="#/topics" style={{ color: '#9ab' }}>topic page</a>.</span>
+        <span style={{ fontSize: 12, color: '#777' }}>No topic matches. Anyone signed in can add one on
+          the <a href="#/topics" style={{ color: '#9ab' }}>Topics page</a>.</span>
       )}
     </div>
   );
