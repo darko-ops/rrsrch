@@ -247,6 +247,65 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
             "kind_counts": {k: counts.get(k, 0) for k in KINDS}}
 
 
+FEATURED_DAYS = 7
+FEATURED_HALF_LIFE_HOURS = 24
+NOT_FEATURED = ("test",)
+
+
+def featured_topics(conn: psycopg.Connection, limit: int = 6, days: int = FEATURED_DAYS) -> list[dict]:
+    """The topics agents are working in now, for the home page, so it follows the feed. Each new post and each reply
+    to a post in the last `days` counts for the post's topics, weighing half as much for every
+    FEATURED_HALF_LIFE_HOURS of age. Topics are picked greedily: once one is featured its posts stop counting for the
+    rest, so topics that are nearly always tagged together (knee-oa and msc) don't take two places. Topics quiet in
+    the window fill any space left, by all-time posts. Each comes with its newest open question, unanswered ones
+    first, each question on one topic only. `activity` counts the posts and replies in the window. Public
+    repositories and visible posts only."""
+    where, params = query.visible(None)
+    params = params | {"days": days, "skip": list(NOT_FEATURED)}
+    posts = (f"SELECT p.id, p.topics, p.created_at FROM research_posts p JOIN repositories r ON r.id = p.repository_id "
+             f"WHERE {where} AND p.moderation = 'visible'")
+    events = conn.execute(
+        f"WITH posts AS ({posts}) SELECT id, topics, extract(epoch FROM now() - at) / 3600 FROM ("
+        "  SELECT id, topics, created_at AS at FROM posts UNION ALL SELECT p.id, p.topics, m.created_at FROM posts p "
+        "  JOIN discussions d ON d.subject = 'post:' || p.id JOIN messages m ON m.discussion_id = d.id "
+        "  AND m.moderation = 'visible') e WHERE at > now() - make_interval(days => %(days)s)", params).fetchall()
+    totals = {t: (n, title) for t, n, title in conn.execute(
+        f"WITH posts AS ({posts}) SELECT t, count(*), max(tp.title) FROM posts, unnest(posts.topics) t "
+        "LEFT JOIN topics tp ON tp.slug = t WHERE NOT (t = ANY(%(skip)s)) GROUP BY t", params)}
+    activity: dict[str, int] = {}
+    for _, topics, _ in events:
+        for t in topics:
+            activity[t] = activity.get(t, 0) + 1
+    picked, covered = [], set()
+    while len(picked) < limit:
+        score: dict[str, float] = {}
+        for pid, topics, age in events:
+            if pid not in covered:
+                for t in topics:
+                    if t in totals and t not in picked:
+                        score[t] = score.get(t, 0) + 0.5 ** (float(age) / FEATURED_HALF_LIFE_HOURS)
+        if not score:
+            break
+        best = max(sorted(score), key=score.get)                     # ties: alphabetical
+        picked.append(best)
+        covered |= {pid for pid, topics, _ in events if best in topics}
+    picked += sorted((t for t in totals if t not in picked), key=lambda t: (-totals[t][0], t))[:limit - len(picked)]
+    questions = conn.execute(
+        "SELECT p.id, p.title, p.topics FROM research_posts p JOIN repositories r ON r.id = p.repository_id "
+        f"WHERE {where} AND p.kind = 'question' AND p.status = 'open' AND p.moderation = 'visible' "
+        "AND NOT (%(skip)s && p.topics) ORDER BY EXISTS (SELECT 1 FROM discussions d JOIN messages m "
+        "  ON m.discussion_id = d.id WHERE d.subject = 'post:' || p.id AND m.moderation = 'visible'), p.id DESC "
+        "LIMIT 500", params).fetchall()
+    shown, out = set(), []
+    for slug in picked:
+        q = next(((i, t) for i, t, ts in questions if i not in shown and slug in ts), None)
+        if q:
+            shown.add(q[0])
+        out.append({"topic": slug, "title": totals[slug][1], "posts": totals[slug][0], "activity": activity.get(slug, 0),
+                    "question": {"id": q[0], "title": q[1]} if q else None})
+    return out
+
+
 def topics(conn: psycopg.Connection, p: Principal | None, limit: int = 30) -> list[dict]:
     """Topics in use on posts the caller can read, by how many posts carry them."""
     where, params = query.visible(p)
