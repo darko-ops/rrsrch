@@ -26,9 +26,10 @@ def test_each_kind_of_activity_earns_once_it_passes_the_checks(world):
     assert vote(client, lab, 64).status_code == 201                                                  # +1
     assert vote(client, lab, 40, gauge="ai-safety").status_code == 201                              # +1
     s = sparks(client, "lab-1")
-    kinds = sorted(e["ref"].split(":")[0] for e in s["entries"])
+    kinds = sorted(e["ref"].split(":")[0] for e in s["entries"] if not e["ref"].startswith("range:"))
     assert kinds == ["finding", "gauge_vote", "gauge_vote", "question", "reply"]
-    assert (s["balance"], s["from_activity"], s["from_quality"], s["earned_7d"]) == (6, 6, 0, 6)
+    ranges = sum(e["ref"].startswith("range:") for e in s["entries"])               # 4 kinds this week: 3 for range
+    assert ranges == 3 and (s["balance"], s["from_activity"], s["from_quality"], s["earned_7d"]) == (9, 9, 0, 9)
 
 
 def test_activity_is_capped_each_day(world):
@@ -51,12 +52,12 @@ def test_quality_earns_more_and_hidden_spam_costs(world):
         assert client.post("/v1/feedback", headers=agent(url, f"m{i}", f"m{i}-1"),
                            json={"target": f"post:{pid}", "value": 1}).status_code in (200, 201)
     s = sparks(client, "lab-1")
-    assert (s["from_activity"], s["from_quality"]) == (1, 1)                  # asked; marked useful by 3 others
+    assert (s["from_activity"], s["from_quality"]) == (1, 2)                  # asked; marked useful by 3 others, who responded
     spam = post(client, lab, kind="question", title="Buy cheap followers now")
     rid = client.post("/v1/reports", headers=h["ext"], json={"target": f"post:{spam}", "reason": "spam"}).json()["report_id"]
     assert client.post(f"/v1/reports/{rid}/resolve", headers=h["admin"], json={"action": "hide"}).status_code == 200
     s = sparks(client, "lab-1")
-    assert (s["from_activity"], s["penalties"], s["balance"]) == (1, 5, -3)   # the spam's credit gone, and 5 more
+    assert (s["from_activity"], s["penalties"], s["balance"]) == (1, 5, -2)   # the spam's credit gone, and 5 more
     assert any(e["ref"] == f"penalty:post:{spam}" and e["delta"] == -5 for e in s["entries"])
 
 
@@ -102,3 +103,50 @@ def test_check_ins_suggest_gauges_agents_proposed_too(world):
     assert got.status_code == 201, got.text
     gauges = client.get("/v1/checkin", headers=lab).json()["suggested"]["gauges"]
     assert [(g["gauge"], g["core"]) for g in gauges][-1] == (got.json()["gauge"]["gauge"], False)
+
+
+def test_range_earns_a_spark_a_week_for_each_different_kind_of_work(world):
+    client, h, url = world
+    lab = agent(url, "lab", "lab-1")
+    post(client, lab, kind="question", title="First question")                    # question
+    post(client, lab, kind="question", title="Second question")                   # the same kind: no range
+    post(client, lab, title="Cited finding", evidence=[SPAN])                     # finding: +1 range
+    assert vote(client, lab, 64).status_code == 201                               # gauge vote: +1 range
+    s = sparks(client, "lab-1")
+    ranges = [e for e in s["entries"] if e["ref"].startswith("range:")]
+    assert len(ranges) == 2 and all(e["delta"] == 1 for e in ranges)
+    assert s["from_activity"] == 1 + 1 + 2 + 1 + 2                               # outside the daily cap's count
+
+
+def test_responses_from_other_operators_earn_and_disagreement_earns_more(world):
+    client, h, url = world
+    lab = agent(url, "lab", "lab-1")
+    pid = post(client, lab, kind="question", title="Will grid batteries beat gas peakers on cost by 2030?")
+    same_org = agent(url, "lab", "lab-2")                                         # the author's own operator: never counts
+    client.post("/v1/comments", headers=same_org, json={"target": f"post:{pid}", "body": "Agree."})
+    others = [agent(url, f"o{i}", f"o{i}-1") for i in range(5)]
+    for i, who in enumerate(others):                                              # 2 useful, 2 needs work, 1 reply
+        if i < 4:
+            assert client.post("/v1/feedback", headers=who, json={"target": f"post:{pid}",
+                                                                  "value": 1 if i < 2 else -1}).status_code in (200, 201)
+        else:
+            client.post("/v1/comments", headers=who, json={"target": f"post:{pid}", "body": "It depends on the market."})
+    s = sparks(client, "lab-1")
+    refs = {e["ref"]: e["delta"] for e in s["entries"]}
+    assert refs[f"responses:post:{pid}:2"] == 1 and refs[f"responses:post:{pid}:5"] == 1   # 5 responders, not 6
+    assert f"responses:post:{pid}:10" not in refs
+    assert refs[f"contested:post:{pid}"] == 3                                     # marked both ways by 2 or more
+    assert s["from_quality"] == 2 + 3
+
+
+def test_a_proposed_gauge_that_splits_its_voters_earns_its_proposer(world):
+    client, h, url = world
+    lab = agent(url, "lab", "lab-1")
+    got = client.post("/v1/gauges", headers=lab, json={
+        "title": "Fusion power", "topic": "climate",
+        "question": "How confident are you that fusion will supply grid power commercially within 25 years?"})
+    key = got.json()["gauge"]["gauge"]
+    for i, score in enumerate((10, 20, 50, 70, 85)):
+        assert vote(client, agent(url, f"v{i}", f"v{i}-1"), score, gauge=key).status_code == 201
+    refs = {e["ref"]: e["delta"] for e in sparks(client, "lab-1")["entries"]}
+    assert refs[f"contested:gauge:{key}"] == 3                                     # 5 voters, 75 points apart
