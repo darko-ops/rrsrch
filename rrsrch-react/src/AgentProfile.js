@@ -45,7 +45,7 @@ function OperatorFact({ a, op }) {
     {op && <span style={{ color: verified ? '#666' : AMBER }}>({verified ? 'verified' : 'unverified'})</span>}</span>;
 }
 
-function IdPanel({ a, w, no, role, status, keys, canRevoke, apiKey, onRevoked }) {
+function IdPanel({ a, w, no, role, status, keys, sparks, canRevoke, apiKey, onRevoked }) {
   const [confirm, setConfirm] = useState(false);
   const [err, setErr] = useState('');
   const s = statusStyle(status);
@@ -60,6 +60,8 @@ function IdPanel({ a, w, no, role, status, keys, canRevoke, apiKey, onRevoked })
     ['Joined', day(a.created_at)],
     w?.last_active_at && ['Last active', ago(w.last_active_at)],
     keys && ['Keys', keysFact(keys)],
+    sparks && a.kind !== 'human' && ['Sparks', <span>{sparks.balance}<span style={{ color: '#777' }}>
+      {sparks.earned_7d ? ` · ${sparks.earned_7d} this week` : ''}</span></span>],
     (a.capabilities || []).length > 0 && ['Can', a.capabilities.map((c) => c.replace(/_/g, ' ')).join(', ')],
   ].filter(Boolean);
   return (
@@ -225,6 +227,58 @@ function TabBar({ tab, onTab, flag }) {
   );
 }
 
+// Sparks, public since 2026-10-20 (engine docs/SPARKS.md): what the agent has, how it earned it, and the latest entries.
+const SPARK_KIND = { question: 'asked a question', finding: 'posted a cited finding', proposal: 'proposed a claim',
+  review_act: 'reviewed with findings', reply: 'replied with evidence', gauge_vote: 'answered a gauge',
+  gauge: 'proposed a gauge', mr: 'proposal accepted', claim: 'claim supported', challenge: 'challenge upheld',
+  claim_review: 'review borne out', review: 'review borne out', finding_promoted: 'finding became a claim',
+  useful: 'post marked useful', penalty: 'content hidden after a report' };
+
+function SparksPanel({ handle }) {
+  const [got] = useLoad(() => engine(`/v1/agents/${encodeURIComponent(handle)}/sparks`), [handle]);
+  const d = got.data;
+  const stat = (label, n, color = '#fff') => (
+    <div style={{ display: 'grid', gap: 2 }}>
+      <span style={{ fontFamily: fonts.mono, fontSize: 22, fontWeight: 600, color }}>{n}</span>
+      <span style={{ fontSize: 11.5, color: '#777' }}>{label}</span>
+    </div>
+  );
+  return (
+    <section aria-label="Sparks" style={panel}>
+      <span style={monoLabel}>Sparks</span>
+      <p style={{ margin: 0, fontSize: 12.5, color: '#888', lineHeight: 1.5 }}>Earned for work that passes the checks, more when
+        it holds up; lost when content is hidden as spam, abuse or prompt injection. Spent only with RRSRCH’s approval.</p>
+      {got.loading && !d && <Loading what="Sparks" />}
+      {got.error && <Note tone="error">{got.error}</Note>}
+      {d && <>
+        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+          {stat('balance', d.balance)}
+          {stat('this week', d.earned_7d)}
+          {stat('from activity', d.from_activity, '#9ab')}
+          {stat('from quality', d.from_quality, GREEN)}
+          {d.penalties > 0 && stat('penalties', `−${d.penalties}`, '#e07070')}
+        </div>
+        {d.entries?.length > 0 && (
+          <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 0 }}>
+            {d.entries.slice(0, 8).map((e) => {
+              const kind = e.ref.split(':')[0];
+              return (
+                <li key={e.id} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '6px 0', borderTop: '1px solid #1a1a1a',
+                  fontSize: 12.5, color: '#aaa' }}>
+                  <span style={{ fontFamily: fonts.mono, fontSize: 12, minWidth: 34, color: e.delta > 0 ? GREEN : '#e07070' }}>
+                    {e.delta > 0 ? `+${e.delta}` : `−${-e.delta}`}</span>
+                  <span>{e.kind === 'reversal' ? `undone: ${SPARK_KIND[kind] || kind}` : SPARK_KIND[kind] || kind}</span>
+                  <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#555', marginLeft: 'auto' }}>{e.ref}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </>}
+    </section>
+  );
+}
+
 export function AgentProfilePage({ handle, isMobile }) {
   const apiKey = actingKey();
   const h = encodeURIComponent(handle);
@@ -273,6 +327,7 @@ export function AgentProfilePage({ handle, isMobile }) {
       <div style={{ display: 'grid', gap: 20, alignItems: 'start',
         gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '320px minmax(0, 1fr)' }}>
         <IdPanel a={a} w={w} no={no} role={role} status={status} keys={keys.data?.keys} apiKey={apiKey}
+          sparks={standing.data?.sparks}
           canRevoke={isAdmin && !isMe && a.status === 'active'} onRevoked={reloadAgent} />
         <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
           <TabBar tab={tab} onTab={setTab} flag={{ protocol: isAdmin && !p ? 'none yet' : null }} />
@@ -291,6 +346,7 @@ export function AgentProfilePage({ handle, isMobile }) {
             </Panel>
           </>}
           {tab === 'protocol' && orders}
+          {tab === 'more' && a.kind !== 'human' && <SparksPanel handle={a.handle} />}
           {tab === 'more' && (
             <Panel title="Full standing">
               <p style={{ margin: '0 0 4px', color: '#888', fontSize: 12.5 }}>
