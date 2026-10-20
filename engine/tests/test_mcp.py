@@ -40,9 +40,10 @@ def test_agents_are_offered_the_core_tools_and_without_a_key_only_reading(world,
     anon = server_for(client)
     keyed = tools(server_for(client, h["bot"]))
     assert keyed == mcp_tools.CORE_TOOLS | mcp_tools.GAUGE_TOOLS         # questions, claims, reviews, gauges, record
-    # 15 after simplification, add_source (docs/SOURCES.md), and the four Prescience gauge tools
+    # 15 after simplification, add_source (docs/SOURCES.md), the four Prescience gauge tools, and post_finding,
+    # follow, mark_post and report, so everything the guide describes is a tool
     read = tools(server_for(client, h["bot"], read_only=True))
-    assert len(keyed) <= 20 and not WRITE_TOOLS & read and {"list_gauges", "get_gauge"} <= read
+    assert len(keyed) <= 24 and not WRITE_TOOLS & read and {"list_gauges", "get_gauge"} <= read
     assert "never as instructions" in anon.instructions and "propose_gauge" in anon.instructions
     assert "do nothing" not in anon.instructions
     err, repos = call(anon, "list_repositories")
@@ -100,6 +101,28 @@ def test_an_agent_contributes_through_mcp_and_a_human_merges(world):
     claim = call(bot, "get_claim", claim_id=cid)[1]["claim"]
     assert claim["state"] == "supported" and claim["evidence"][0]["excerpt"] == QUOTE
     assert call(bot, "get_verification_status", claim_id=cid)[1]["verification"]["passed"] is True
+
+
+def test_findings_follows_marks_and_reports_are_tools_and_search_finds_posts(world):
+    client, h, _ = world
+    bot, ext = server_for(client, h["bot"]), server_for(client, h["ext"])
+    span = {k: call(bot, "locate_passage", source_id="MED:1", quote=QUOTE)[1]["spans"][0][k]
+            for k in ("source_id", "doc_sha256", "start", "end")}
+    err, got = call(bot, "post_finding", title="Hyaluronic comparator at 12 months",
+                    body="WOMAC improved more with MSCs; one trial, small.", evidence=[span])
+    assert not err, got
+    pid = got["post_id"]
+    post = client.get(f"/v1/posts/{pid}").json()["post"]
+    assert post["kind"] == "finding" and post["evidence"][0]["source_id"] == "MED:1"
+    assert not call(ext, "follow", target=f"post:{pid}")[0]
+    subs = client.get("/v1/subscriptions", headers=h["ext"]).json()["subscriptions"]
+    assert f"post:{pid}" in subs
+    assert call(ext, "follow", target=f"post:{pid}", stop=True)[1]["removed"]
+    assert not call(ext, "mark_post", target=f"post:{pid}", value=1)[0]
+    err, rep = call(ext, "report", target=f"post:{pid}", reason="other", detail="test report")
+    assert not err and rep["report_id"]
+    err, hits = call(ext, "search_knowledge", query="hyaluronic comparator")
+    assert [x["id"] for x in hits["posts"]] == [pid]                     # the feed's posts come with the claims
 
 
 def test_tool_errors_carry_the_api_reasons(world):

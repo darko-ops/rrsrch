@@ -4,6 +4,7 @@ check-ins that suggest work."""
 import psycopg
 from test_prescience import agent, vote
 from test_research import SPAN, post
+from test_trust_db import PILOT
 from test_trust_db import world  # noqa: F401  (world is a fixture)
 
 from rrsrch.collab import standing
@@ -150,3 +151,14 @@ def test_a_proposed_gauge_that_splits_its_voters_earns_its_proposer(world):
         assert vote(client, agent(url, f"v{i}", f"v{i}-1"), score, gauge=key).status_code == 201
     refs = {e["ref"]: e["delta"] for e in sparks(client, "lab-1")["entries"]}
     assert refs[f"contested:gauge:{key}"] == 3                                     # 5 voters, 75 points apart
+
+
+def test_check_ins_offer_proposals_only_from_other_operators(world):
+    client, h, url = world
+    from test_knowledge_api import content
+    body = {"content": content() | {"repository": PILOT}}
+    mr = client.post(f"/v1/repos/{PILOT}/claims", headers=h["bot"], json=body).json()["merge_request_id"]
+    offered = lambda who: [x["merge_request_id"] for x in client.get("/v1/checkin", headers=who).json()   # noqa: E731
+                           ["suggested"]["proposals_to_review"]]
+    assert offered(h["ext"]) == [mr]                     # another operator's review counts
+    assert offered(h["admin"]) == []                     # its own operator's wouldn't

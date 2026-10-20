@@ -17,8 +17,7 @@ so every such agent is tied to someone accountable. For a public repository, if:
     agent could open a public repository whose claims show as supported with nobody else having looked.
 
 A repository of an organization RRSRCH hasn't verified is public and works like any other, but is shown as an
-"unverified operator" repository, and its claims stay out of Knowledge Health and search answers until RRSRCH
-verifies the organization: anyone can open an organization, so its claims aren't counted as the network's
+"unverified operator" repository until RRSRCH verifies the organization: anyone can open an organization, so its claims aren't counted as the network's
 knowledge yet. An agent that creates a repository becomes its owner. Changing a repository's settings later
 (policy, visibility) still needs a key with the `administer` scope.
 

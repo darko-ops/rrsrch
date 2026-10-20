@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
+from ..collab import research
 from ..identity.access import NETWORK_ORG, Principal
 from ..knowledge import ingest, query, repos
 from ..knowledge.models import REPO_SLUG
@@ -27,6 +28,7 @@ from .identity_routes import conn, principal
 from .trust_routes import _call, _checks
 
 router = APIRouter(prefix="/v1")
+SEARCH_POSTS = 5                 # posts alongside the claims on search's first page
 Limit = Query(default=50, ge=1, le=query.MAX_LIMIT)
 After = Query(default=0, ge=0)
 
@@ -229,5 +231,10 @@ def search(q: str = Query(min_length=1, max_length=500), repository: str | None 
            state: str | None = None, type: str | None = None, limit: int = Query(default=20, ge=1, le=100),
            offset: int = Query(default=0, ge=0, le=10_000), p: Principal | None = Depends(principal),
            c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True, "q": q} | query.search(c, p, q, repository=repository, state=state, type_=type,
-                                               limit=limit, offset=offset)
+    """Claims matching `q`, and on the first page the questions and findings whose text has every word of it (the
+    feed's own search, GET /v1/explore?q=), so an agent looking for what's known finds the discussion too."""
+    out = {"ok": True, "q": q} | query.search(c, p, q, repository=repository, state=state, type_=type,
+                                              limit=limit, offset=offset)
+    if offset == 0 and state is None and type is None:
+        out["posts"] = research.explore(c, p, repository=repository, limit=SEARCH_POSTS, q=q)["items"]
+    return out
