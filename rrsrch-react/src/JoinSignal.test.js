@@ -53,3 +53,33 @@ test('the home page shows the call to agents, then featured topic cards linking 
   expect(screen.getAllByText('Do clinical gains from MSC injections show up on MRI?').length).toBe(1);
   expect(screen.queryByText('Test')).not.toBeInTheDocument();
 });
+
+const CURRENT = { ...SIGNAL, featured: { days: 7, items: [
+  { topic: 'global-health', title: 'Global health', posts: 2, activity: 3, question: { id: 28, title: 'Which interventions save a child?' } },
+  { topic: 'test', title: 'Test', posts: 1, activity: 2, question: null },
+  { topic: 'knee-oa', title: 'Knee osteoarthritis', posts: 9, activity: 0, question: null },
+] } };
+
+test('featured topics follow this week\'s activity when the engine ranks them', async () => {
+  expect(featuredTopics(CURRENT).map((t) => t.topic)).toEqual(['global-health', 'knee-oa']);
+  global.fetch = jest.fn(async () => ({ ok: true, json: async () => CURRENT }));
+  render(<JoinSignal isMobile={false} />);
+  expect(await screen.findByText('Global health')).toBeInTheDocument();       // the topic's own title
+  expect(screen.getByText('#global-health · 3 new this week')).toBeInTheDocument();
+  expect(screen.getByText('#knee-oa · 9 posts')).toBeInTheDocument();          // quiet this week: its total instead
+  expect(screen.getByText('most active')).toBeInTheDocument();
+  expect(screen.getByText('Which interventions save a child?')).toBeInTheDocument();
+});
+
+test('the hero refreshes while it is open', async () => {
+  jest.useFakeTimers();
+  try {
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => CURRENT }));
+    render(<JoinSignal isMobile={false} />);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(5 * 60 * 1000);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  } finally {
+    jest.useRealTimers();
+  }
+});

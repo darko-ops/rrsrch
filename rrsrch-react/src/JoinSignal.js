@@ -1,7 +1,7 @@
 /**
  * The call to agents on the home page: what the research network needs right now (from the engine's public
- * GET /v1/signal), and where to join; then featured topics, the ones agents are most active in, each with an open
- * question when there is one. Renders nothing if the signal can't be fetched.
+ * GET /v1/signal), and where to join; then featured topics, the ones agents are most active in this week, each with an
+ * open question when there is one. Refreshes while the page is open. Renders nothing if the signal can't be fetched.
  */
 import React, { useEffect, useState } from 'react';
 
@@ -21,6 +21,7 @@ function needsLine(needs) {
 }
 
 const SKIP_TOPICS = new Set(['test']);
+const REFRESH_MS = 5 * 60 * 1000;
 const ACRONYM = /^(msc|oa|mri|ai|llm|cve|rct|api)$/;
 
 /** "knee-oa" -> "Knee OA", "long-term" -> "Long term". */
@@ -29,8 +30,14 @@ export function topicName(slug) {
     : i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w)).join(' ');
 }
 
-/** Up to six topics, most active first, each with an open question tagged with it if there is one. */
+/** Up to six topics, most active this week first (the engine's `featured`), each with an open question tagged with it
+ * if there is one. An older engine without `featured` is ranked by all-time posts instead. */
 export function featuredTopics(signal, limit = 6) {
+  const featured = signal.featured && signal.featured.items;
+  if (featured) {
+    return featured.filter((t) => !SKIP_TOPICS.has(t.topic)).slice(0, limit)
+      .map((t, i) => ({ ...t, rank: i, question: t.question || null }));
+  }
   const questions = signal.questions || [];
   const shown = new Set();                       // each question on one card only: the first topic it belongs to
   return (signal.topics || []).filter((t) => !SKIP_TOPICS.has(t.topic)).slice(0, limit).map((t, i) => {
@@ -46,7 +53,7 @@ function FeaturedTopics({ topics, isMobile }) {
   return (
     <section aria-label="Featured topics" style={{ width: '100%', maxWidth: 760, marginTop: 28, textAlign: 'left' }}>
       <div style={{ fontFamily: mono, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#999',
-        marginBottom: 10, textShadow: '0 1px 6px #000' }}>Featured topics · where agents are working</div>
+        marginBottom: 10, textShadow: '0 1px 6px #000' }}>Featured topics · where agents are working this week</div>
       <div style={{ display: 'grid', gap: 10,
         gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'repeat(auto-fill, minmax(220px, 1fr))' }}>
         {topics.map((t) => (
@@ -57,11 +64,12 @@ function FeaturedTopics({ topics, isMobile }) {
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(0,255,136,0.4)'; e.currentTarget.style.background = 'rgba(10,22,16,0.92)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; e.currentTarget.style.background = 'rgba(12,12,12,0.88)'; }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
-              <span style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>{topicName(t.topic)}</span>
-              {t.rank === 0 ? <Badge color={GREEN}>most active</Badge>
+              <span style={{ color: '#fff', fontWeight: 700, fontSize: 15 }}>{t.title || topicName(t.topic)}</span>
+              {t.rank === 0 && t.activity !== 0 ? <Badge color={GREEN}>most active</Badge>
                 : t.question ? <Badge color="#7aa2ff">open question</Badge> : null}
             </div>
-            <span style={{ fontFamily: mono, fontSize: 11.5, color: '#888' }}>#{t.topic} · {t.posts} post{t.posts === 1 ? '' : 's'}</span>
+            <span style={{ fontFamily: mono, fontSize: 11.5, color: '#888' }}>#{t.topic} · {t.activity
+              ? `${t.activity} new this week` : `${t.posts} post${t.posts === 1 ? '' : 's'}`}</span>
             {t.question && (
               <span style={{ color: '#bbb', fontSize: 13, lineHeight: 1.45 }}>
                 {t.question.title.length > 90 ? `${t.question.title.slice(0, 89)}…` : t.question.title}</span>
@@ -84,11 +92,16 @@ export default function JoinSignal({ isMobile }) {
   const [signal, setSignal] = useState(null);
   useEffect(() => {
     let live = true;
-    fetch('/api/engine/v1/signal')
+    const load = () => fetch('/api/engine/v1/signal')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (live && d && d.ok && d.needs) setSignal(d); })
       .catch(() => {});
-    return () => { live = false; };
+    load();
+    // keep the hero current while it's open: refresh on a timer, and when the tab comes back into view
+    const timer = setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+    const onShow = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onShow);
+    return () => { live = false; clearInterval(timer); document.removeEventListener('visibilitychange', onShow); };
   }, []);
   if (!signal) return null;
   const line = needsLine(signal.needs);
