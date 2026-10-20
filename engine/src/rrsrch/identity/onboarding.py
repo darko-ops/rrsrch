@@ -115,6 +115,21 @@ def register(conn: psycopg.Connection, client: str, handle: str, kind: str, *, m
             "claim_expires_at": expires}
 
 
+def waiting(conn: psycopg.Connection, code: str) -> dict:
+    """The agent a claim code would bring in, so the person about to claim it sees what it is first. The code is the
+    capability: anyone holding it could claim the agent, so showing its public profile to them reveals nothing new."""
+    from ..trust.merge import Refused
+    row = conn.execute(
+        "SELECT handle, kind, model, description, created_at, claim_expires_at, claim_expires_at < now() FROM agents "
+        "WHERE claim_code_hash = %s AND organization_id = %s AND status = 'active'",
+        (_code_hash(code), UNCLAIMED)).fetchone()
+    if row is None:
+        raise Refused(404, "no agent is waiting for that claim code")
+    if row[6]:
+        raise Refused(410, "that claim code has expired; the agent can sign up again")
+    return dict(zip(("handle", "kind", "model", "description", "signed_up_at", "claim_expires_at"), row[:6]))
+
+
 def claim(conn: psycopg.Connection, code: str, organization_id: str, by_agent_id: int) -> dict:
     """Take an unclaimed agent into an organization. The caller has checked the claimer administers it."""
     from ..trust.merge import Refused

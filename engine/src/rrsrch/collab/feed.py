@@ -2,9 +2,10 @@
 
 Notifications are read from the audit chain, so an agent hears only about
 what was actually recorded, and only in repositories it can read. An agent
-gets events on what it subscribed to (a repository, claim, merge request or
-post), review requests addressed to it, and events about itself, never its
-own actions. Agents poll with `after`; there are no webhooks yet.
+gets events on what it subscribed to (a repository, claim, merge request,
+post, topic, or another agent's work), review requests addressed to it, and
+events about itself, never its own actions. Following an agent brings only
+what that agent did in repositories the follower can read. Agents poll with `after`; there are no webhooks yet.
 
 Contribution histories are counts with their denominators, per repository
 the viewer can read: no single score (SPEC-v2 §11.3).
@@ -22,14 +23,15 @@ from ..knowledge import query
 from ..trust.merge import Refused
 
 TARGET = re.compile(r"^(repo:(?P<repo>[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*)|(?P<kind>claim|mr|post):(?P<id>[0-9]+)"
-                    r"|topic:(?P<topic>[a-z0-9][a-z0-9-]{0,39}))$")
+                    r"|topic:(?P<topic>[a-z0-9][a-z0-9-]{0,39})|agent:(?P<agent>[a-z0-9][a-z0-9-]{0,62}))$")
+TARGETS = "repo:org/name, claim:N, mr:N, post:N, topic:name or agent:handle"
 _TABLES = {"claim": "claims", "mr": "merge_requests", "post": "research_posts"}
 
 
 def _target_repo(conn, target: str) -> int | None:
     m = TARGET.match(target)
     if m is None:
-        raise Refused(400, "target must be repo:org/name, claim:N, mr:N, post:N or topic:name")
+        raise Refused(400, f"target must be {TARGETS}")
     if m["repo"]:
         repo = ids.get_repo(conn, m["repo"])
         return repo.id if repo else None
@@ -43,6 +45,16 @@ def subscribe(conn: psycopg.Connection, p: Principal | None, target: str) -> Non
     if target.startswith("topic:"):                       # topics span repositories; the feed filters per event
         if not TARGET.match(target):
             raise Refused(400, "a topic is lowercase letters, digits and dashes")
+        conn.execute("INSERT INTO subscriptions (agent_id, target) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                     (p.agent_id, target))
+        return
+    if target.startswith("agent:"):                       # an agent's work, wherever the follower can read it
+        m = TARGET.match(target)
+        agent = ids.get_agent(conn, m["agent"]) if m else None
+        if agent is None or agent["status"] != "active":
+            raise Refused(404, "no such agent")
+        if agent["id"] == p.agent_id:
+            raise Refused(400, "you can't follow yourself")
         conn.execute("INSERT INTO subscriptions (agent_id, target) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                      (p.agent_id, target))
         return
@@ -62,6 +74,10 @@ def unsubscribe(conn: psycopg.Connection, p: Principal | None, target: str) -> b
                         (p.agent_id, target)).rowcount == 1
 
 
+def followers(conn: psycopg.Connection, handle: str) -> int:
+    return conn.execute("SELECT count(*) FROM subscriptions WHERE target = %s", (f"agent:{handle}",)).fetchone()[0]
+
+
 def subscriptions(conn: psycopg.Connection, p: Principal) -> list[str]:
     return [t for (t,) in conn.execute("SELECT target FROM subscriptions WHERE agent_id = %s ORDER BY target",
                                        (p.agent_id,))]
@@ -79,6 +95,7 @@ def notifications(conn: psycopg.Connection, p: Principal | None, after: int = 0,
         "  e.target = %(self)s"
         "  OR (e.repository_id IS NOT NULL AND " + where + " AND ("
         "    e.target IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)"
+        "    OR 'agent:' || a.handle IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)"
         "    OR 'repo:' || r.slug IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)"
         "    OR 'claim:' || (e.detail->>'claim_id') IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)"
         "    OR e.detail->>'reviewer' = %(handle)s"

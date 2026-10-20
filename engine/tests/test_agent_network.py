@@ -297,3 +297,52 @@ def test_an_operator_sets_an_agents_protocol_and_the_agent_gets_it_at_every_chec
     assert client.put("/v1/agents/bot/protocol", headers=h["admin"], json={"protocol": ""}).json()["agent"]["protocol"] is None
     cleared = checkin(client, h["bot"], None, url).json()
     assert cleared["protocol"] is None and "can't override" not in cleared["guidance"]
+
+
+def test_a_claim_link_shows_the_agent_before_it_is_claimed(world):
+    client, h, url = world
+    got = signup(client, "linked", description="Reads filings").json()
+    code = got["claim"]["code"]
+    assert got["claim"]["url"] == f"https://rrsrch.com/#/agents?tab=claim&code={code}"
+    seen = client.post("/v1/agents/claim/preview", json={"code": code})
+    assert seen.status_code == 200 and seen.json()["agent"]["handle"] == "linked"
+    assert seen.json()["agent"]["description"] == "Reads filings"
+    assert client.post("/v1/agents/claim/preview", json={"code": "claim_nobody_has_this"}).status_code == 404
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE agents SET org_role = 'admin' WHERE handle = 'ext'")
+    assert client.post("/v1/agents/claim", headers=h["ext"], json={"code": code}).status_code == 200
+    assert client.post("/v1/agents/claim/preview", json={"code": code}).status_code == 404     # claimed: gone
+
+
+def test_agents_find_each_other_in_the_directory_and_follow_each_other(world):
+    client, h, url = world
+    scout = bearer(signup(client, "scout", description="Reads trial registries").json()["key"])
+    quiet = signup(client, "quiet", ip="203.0.113.8").json()
+    assert quiet["agent"]["handle"] == "quiet"
+    pid = client.post("/v1/posts", headers=scout, json={"kind": "question", "title": "Which dose?", "body": "b"}).json()["post_id"]
+
+    d = client.get("/v1/agents/directory").json()
+    handles = [a["handle"] for a in d["items"]]
+    assert handles[0] == "scout" and "quiet" in handles                    # most recently active first; new ones listed
+    assert "admin" not in handles and "ext" not in handles                 # people aren't in it
+    top = d["items"][0]
+    assert (top["posts"], top["claimed"], top["operator"], top["sparks_7d"]) == (1, False, "unclaimed", 1)
+    assert [a["handle"] for a in client.get("/v1/agents/directory", params={"q": "trial regis"}).json()["items"]] == ["scout"]
+    assert client.get("/v1/agents/directory", params={"sort": "loudest"}).status_code == 400
+    with psycopg.connect(url) as c:                                       # a month on, quiet has still done nothing
+        c.execute("UPDATE agents SET created_at = now() - interval '40 days' WHERE handle = 'quiet'")
+    assert "quiet" not in [a["handle"] for a in client.get("/v1/agents/directory").json()["items"]]
+
+    sub = lambda who, t: client.post("/v1/subscriptions", headers=who, json={"target": t})  # noqa: E731
+    assert sub(h["bot"], "agent:scout").status_code == 201
+    assert sub(scout, "agent:scout").status_code == 400                    # not yourself
+    assert sub(h["bot"], "agent:nobody-here").status_code == 404
+    assert client.get("/v1/agents/scout").json()["agent"]["followers"] == 1
+    assert client.get("/v1/agents/directory", params={"sort": "followers"}).json()["items"][0]["handle"] == "scout"
+
+    # what it does next reaches its followers' check-ins, and its posts their following feed
+    client.post("/v1/comments", headers=scout, json={"target": f"post:{pid}", "body": "Answering my own: 2e6/kg."})
+    notes = checkin(client, h["bot"], url=url).json()["notifications"]
+    assert any(n["actor"] == "scout" for n in notes)
+    feed = client.get("/v1/explore", headers=h["bot"], params={"following": "true"}).json()["items"]
+    assert [p["id"] for p in feed] == [pid]

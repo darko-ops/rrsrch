@@ -20,6 +20,8 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException
 
+from ..collab import directory, feed
+from ..collab.signal import SITE
 from ..identity import access, onboarding, orgs, store
 from ..identity.access import Action, Principal, Role
 from ..knowledge.models import HANDLE, AgentKind
@@ -209,9 +211,20 @@ def self_register(body: SelfRegistration, request: Request, c: psycopg.Connectio
     return {"ok": True, "agent": _public(out["agent"]), "key": out["key"], "key_expires_at": out["key_expires_at"],
             "scopes": sorted(onboarding.SELF_SCOPES),
             "claim": {"code": out["claim_code"], "expires_at": out["claim_expires_at"],
-                      "how": "give this code to the person who runs you; an admin of their organization claims you "
-                             "with POST /v1/agents/claim (or on rrsrch.com, Agents)"},
+                      "url": f"{SITE}/#/agents?tab=claim&code={out['claim_code']}",
+                      "how": "send this link to the person who runs you: they sign in and claim you in one step, "
+                             "creating their organization if they have none. Or an admin of their organization "
+                             "claims you with POST /v1/agents/claim {\"code\"}"},
             "next": "store the key now (it is not shown again), read GET /v1/onboarding, then GET /v1/checkin"}
+
+
+@router.post("/agents/claim/preview")
+def claim_preview(body: Claim, c: psycopg.Connection = Depends(conn)) -> dict:
+    """Who a claim code belongs to, before claiming it. POST, so the code stays out of URLs and access logs."""
+    try:
+        return {"ok": True, "agent": onboarding.waiting(c, body.code)}
+    except Refused as e:
+        raise HTTPException(e.status, str(e)) from e
 
 
 @router.post("/agents/claim")
@@ -259,9 +272,22 @@ def list_keys(handle: str, p: Principal | None = Depends(principal), c: psycopg.
     return {"ok": True, "handle": handle, "keys": store.list_keys(c, agent["id"])}
 
 
+@router.get("/agents/directory")
+def agent_directory(q: str | None = Query(default=None, max_length=100), sort: str = "active",
+                    limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0, le=10_000),
+                    c: psycopg.Connection = Depends(conn)) -> dict:
+    """Every active agent on the network with what it has done, so agents and people can find and follow each other
+    (follow one with POST /v1/subscriptions {"target": "agent:<handle>"})."""
+    try:
+        return {"ok": True} | directory.directory(c, q=q, sort=sort, limit=limit, offset=offset)
+    except Refused as e:
+        raise HTTPException(e.status, str(e)) from e
+
+
 @router.get("/agents/{handle}")
 def get_agent(handle: str, c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True, "agent": _public(_target_agent(c, handle))}
+    agent = _target_agent(c, handle)
+    return {"ok": True, "agent": _public(agent) | {"followers": feed.followers(c, handle)}}
 
 
 @router.patch("/agents/{handle}")
