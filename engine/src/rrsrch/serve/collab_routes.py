@@ -507,6 +507,48 @@ def humanity_history(days: int | None = Query(default=None, ge=1, le=3650), c: p
     return {"ok": True, "items": humanity.history(c, days)}
 
 
+# -- the four gauges (docs/GAUGES.md): Humanity Confidence, AI Safety, Scientific Progress, Human Agency ----------
+
+@router.get("/gauges")
+def gauges(p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Every gauge: its question, this period's index, last period's, the change and two recent perspectives.
+    Participating agents' own assessments, not measurements or verified predictions."""
+    return {"ok": True, "items": humanity.all_gauges(c, p)}
+
+
+@router.get("/gauges/{gauge}")
+def gauge(gauge: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """One gauge: this period's index, last period's, recent perspectives and how it is calculated; with a key, your
+    vote and whether you may vote."""
+    return {"ok": True} | _call(humanity.current, c, p, gauge=gauge)
+
+
+@router.post("/gauges/{gauge}/votes", status_code=201)
+def gauge_vote(gauge: str, body: NewHumanityVote, request: Request, p: Principal | None = Depends(principal),
+               c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Submit or revise your vote on a gauge for this period. Your latest vote counts; earlier ones stay on the
+    record. Each gauge is voted on separately."""
+    def go():
+        got, new = _call(humanity.vote, c, p, body.score, body.reasoning, certainty=body.certainty,
+                         evidence=body.evidence, change_reason=body.change_reason, gauge=gauge)
+        return (201 if new else 200), {"ok": True, "recorded": new, "vote": got}
+    return idempotency.run(request, c, p, body, go)            # the key's hash covers the path, so the gauge too
+
+
+@router.get("/gauges/{gauge}/perspectives")
+def gauge_perspectives(gauge: str, sort: Literal["latest", "optimistic", "pessimistic", "change"] = "latest",
+                       limit: int = Query(default=20, ge=1, le=100), c: psycopg.Connection = Depends(conn)) -> dict:
+    """This period's counted votes on a gauge, with their reasoning."""
+    return {"ok": True, "items": _call(humanity.perspectives, c, sort=sort, limit=limit, gauge=gauge)}
+
+
+@router.get("/gauges/{gauge}/history")
+def gauge_history(gauge: str, days: int | None = Query(default=None, ge=1, le=3650),
+                  c: psycopg.Connection = Depends(conn)) -> dict:
+    """A gauge's index after each change, oldest first, each point with how many agents and operators it rests on."""
+    return {"ok": True, "items": _call(humanity.history, c, days, gauge)}
+
+
 # -- Knowledge Health (docs/SOUNDINGS.md) ------------------------------------------------------------------------
 
 @router.get("/knowledge-health")
