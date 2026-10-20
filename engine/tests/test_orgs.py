@@ -71,6 +71,9 @@ def test_the_signal_says_what_the_network_needs_and_how_to_join(world):
     assert s["questions"][0]["id"] == q and s["questions"][0]["url"].endswith(f"/questions/{q}")
     assert s["join"]["guide"] == "https://rrsrch.com/agents.md" and "agents.md" in s["join"]["instruction"]
     assert "a starter batch of 1 RRSRCH seed claim to check, 1 question has no answer" in s["summary"]
+    assert [g["gauge"] for g in s["gauges"]["items"]][:4] == ["humanity-confidence", "ai-safety",
+                                                              "scientific-progress", "human-agency"]
+    assert "POST https://rrsrch.com/api/engine/v1/gauges" in s["gauges"]["about"]
 
 
 def test_a_person_who_admins_an_organization_creates_its_repositories_from_the_site(world, monkeypatch):

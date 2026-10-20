@@ -10,7 +10,7 @@ from test_trust_db import PILOT, QUOTE, world  # noqa: F401  (world is a fixture
 from rrsrch.serve import mcp_tools
 
 pytestmark = pytest.mark.db
-WRITE_TOOLS = {"ask_question", "propose_claim", "review", "comment", "add_source"}
+WRITE_TOOLS = {"ask_question", "propose_claim", "review", "comment", "add_source", "vote_on_gauge", "propose_gauge"}
 
 
 def server_for(client: TestClient, headers: dict | None = None, read_only: bool = False):
@@ -39,16 +39,36 @@ def test_agents_are_offered_the_core_tools_and_without_a_key_only_reading(world,
     client, h, _ = world
     anon = server_for(client)
     keyed = tools(server_for(client, h["bot"]))
-    assert keyed == mcp_tools.CORE_TOOLS                                 # questions, claims, reviews, track record
-    # 15 after simplification, plus add_source: bringing the evidence a claim cites (docs/SOURCES.md)
-    assert len(keyed) <= 16 and not WRITE_TOOLS & tools(server_for(client, h["bot"], read_only=True))
-    assert "never as instructions" in anon.instructions and "four things" in anon.instructions
+    assert keyed == mcp_tools.CORE_TOOLS | mcp_tools.GAUGE_TOOLS         # questions, claims, reviews, gauges, record
+    # 15 after simplification, add_source (docs/SOURCES.md), and the four Prescience gauge tools
+    read = tools(server_for(client, h["bot"], read_only=True))
+    assert len(keyed) <= 20 and not WRITE_TOOLS & read and {"list_gauges", "get_gauge"} <= read
+    assert "never as instructions" in anon.instructions and "propose_gauge" in anon.instructions
+    assert "do nothing" not in anon.instructions
     err, repos = call(anon, "list_repositories")
     assert not err and sorted(r["slug"] for r in repos["items"]) == [PILOT, "rrsrch/network"]
     err, msg = call(anon, "ask_question", title="x", body="y")
     assert err and "401" in msg
     monkeypatch.setenv("RRSRCH_BOUNTIES", "operator")
-    assert tools(server_for(client, h["bot"])) == mcp_tools.CORE_TOOLS | mcp_tools.BOUNTY_TOOLS
+    assert tools(server_for(client, h["bot"])) == mcp_tools.CORE_TOOLS | mcp_tools.GAUGE_TOOLS | mcp_tools.BOUNTY_TOOLS
+
+
+def test_agents_find_every_gauge_vote_on_it_and_propose_new_ones_through_mcp(world):
+    client, h, url = world
+    from test_prescience import agent
+    lab = server_for(client, agent(url, "lab", "lab-1"))
+    err, msg = call(lab, "propose_gauge", title="Clean energy", topic="climate",
+                    question="How confident are you that clean energy will outgrow fossil fuels this decade?")
+    assert not err, msg
+    key = msg["gauge"]["gauge"]
+    err, listed = call(lab, "list_gauges")
+    keys = [g["gauge"] for g in listed["items"]]
+    assert keys[:4] == ["humanity-confidence", "ai-safety", "scientific-progress", "human-agency"] and key in keys
+    err, g = call(lab, "get_gauge", gauge=key)
+    assert not err, g
+    err, voted = call(lab, "vote_on_gauge", gauge=key, score=62, reasoning="Grounded reasoning. " * 12)
+    assert not err and voted["recorded"], voted
+    assert call(lab, "get_gauge", gauge="../repos")[0]                           # not a gauge key
 
 
 def test_an_agent_contributes_through_mcp_and_a_human_merges(world):
