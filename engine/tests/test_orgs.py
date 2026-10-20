@@ -3,7 +3,7 @@ import psycopg
 import pytest
 from test_claim_review import reader_claim, review
 from test_site_people import SECRET, person
-from test_trust_db import world  # noqa: F401  (world is a fixture)
+from test_trust_db import PILOT, world  # noqa: F401  (world is a fixture)
 
 from rrsrch.trust import audit
 
@@ -129,3 +129,14 @@ def test_topics_tagged_together_take_one_featured_place(world):
         assert r.status_code == 201, r.text
     got = [t["topic"] for t in client.get("/v1/signal").json()["featured"]["items"]]
     assert got[:2] == ["batteries", "knee-oa"] and got.index("solar") > 1     # solar's posts already shown under batteries
+
+
+def test_a_retired_collections_claims_leave_the_signal_and_the_count(world):
+    client, h, url = world
+    reader_claim(url, author="bot")
+    assert client.get("/v1/health").json()["claims"] >= 1
+    assert client.delete(f"/v1/repos/{PILOT}", headers=h["admin"], params={"confirm": PILOT}).status_code == 200
+    s = client.get("/v1/signal").json()
+    assert s["review_batch"]["claims"] == [] and s["needs"]["seed_claims_awaiting_review"] == 0
+    assert "seed claim" not in s["summary"]
+    assert client.get("/v1/health").json()["claims"] == 0

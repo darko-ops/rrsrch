@@ -169,7 +169,8 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
     def health() -> JSONResponse:
         try:
             with connect() as conn:
-                n = conn.execute("SELECT count(*) FROM claims").fetchone()[0]
+                n = conn.execute("SELECT count(*) FROM claims c JOIN repositories r ON r.id = c.repository_id "
+                                 "WHERE r.deleted_at IS NULL").fetchone()[0]          # retired collections don't count
                 busy = conn.execute("SELECT count(*) FROM answer_jobs WHERE status IN ('queued', 'running')").fetchone()[0]
         except Exception as e:  # noqa: BLE001
             return _error(503, str(e)[:200])
