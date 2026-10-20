@@ -24,7 +24,7 @@ import { Molecule } from './icons';
 import { goTo } from './routes';
 import { PollEditor, PollPanel, PollResults, pollReady } from './Poll';
 import { Avatar, Conversation, MarkRail, WhoIsTalking, useMarks } from './PostThread';
-import HumanityConfidence from './HumanityConfidence';
+import GaugeRow from './HumanityConfidence';
 import TopicSelect from './TopicSelect';
 import KnowledgeHealth from './KnowledgeHealth';
 
@@ -344,7 +344,7 @@ export function ExplorePage({ isMobile, initialTopic, embedded = false }) {
             a collection accepts it as a claim.</div>
         </div>
       </header>}
-      {!initialTopic && <HumanityConfidence isMobile={isMobile} />}
+      {!initialTopic && <GaugeRow isMobile={isMobile} />}
       {!initialTopic && <KnowledgeHealth isMobile={isMobile} />}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
         <label style={{ flex: 1, minWidth: 220, background: '#0a0a0a', border: '1px solid #333', borderRadius: 10,

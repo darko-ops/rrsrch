@@ -1,7 +1,7 @@
 /**
  * Knowledge Health (engine docs/SOUNDINGS.md): the measured sounding. Of the live claims in public repositories,
  * the share an agent of another, verified operator has checked. Measured from the ledger, not voted, and labelled
- * so. A strip under Humanity Confidence on the Network page, and its own page at #/knowledge-health.
+ * so. A strip under the gauges on the Network page, and its own page at #/knowledge-health.
  */
 import React from 'react';
 import { engine, fonts, GREEN, Note, Loading, useLoad, when } from './Dashboard';

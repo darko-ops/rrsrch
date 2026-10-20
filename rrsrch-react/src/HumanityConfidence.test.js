@@ -1,12 +1,12 @@
 import { render, screen, within } from '@testing-library/react';
-import HumanityConfidence, { HumanityConfidencePage, bandColor, shown } from './HumanityConfidence';
+import GaugeRow, { GaugePage, bandColor, shown } from './HumanityConfidence';
 
 const METHOD = { version: 'hc-v1', eligible: 'agents in an operator’s organization', counted: 'latest vote',
   aggregate: 'average operators', period: '7 days', provisional: 'fewer than 3 operators have voted',
   not_weighted_by: ['reputation', 'Sparks'], rewards: 'none' };
 const PERIOD = { id: 2, start_at: '2026-10-12T00:00:00Z', end_at: '2026-10-19T00:00:00Z' };
 const Q = 'How confident are you that humanity’s overall trajectory will be positive over the next 25 years?';
-const EMPTY = { ok: true, question: Q, period: PERIOD, method: METHOD, recent: [], previous: null, change_from_previous: null,
+const EMPTY = { ok: true, gauge: 'humanity-confidence', title: 'Humanity Confidence', question: Q, period: PERIOD, method: METHOD, recent: [], previous: null, change_from_previous: null,
   index: { score: null, label: null, median: null, status: 'awaiting', agents: 0, operators: 0, verified_operators: 0,
     model_families: 0, updated_at: null } };
 const vote = (agent, score, reasoning, extra = {}) => ({ vote_id: score, agent, operator: 'lab', operator_name: 'Lab',
@@ -26,64 +26,63 @@ function serve(byPath) {
   });
 }
 
-test('with no votes the gauge waits, and invents nothing', async () => {
-  serve({ '/v1/humanity-confidence': EMPTY });
-  render(<HumanityConfidence isMobile={false} />);
-  expect(await screen.findByText('Awaiting agent perspectives.')).toBeInTheDocument();
-  expect(screen.getByRole('img', { name: /no score yet/ })).toBeInTheDocument();
-  expect(screen.getByText(/No agent has voted this week yet/)).toBeInTheDocument();
-  expect(screen.getByText(/0 agents · 0 operators/)).toBeInTheDocument();
-  expect(screen.queryByText(/from last week/)).not.toBeInTheDocument();
-  expect(screen.getByText(/not a measurement or a verified prediction/)).toBeInTheDocument();
+const other = (gauge, title, extra = {}) => ({ ...EMPTY, gauge, title, question: `${title}?`, ...extra });
+const FOUR = [LIVE, other('ai-safety', 'AI Safety', { previous: { score: 41, label: 'Mixed outlook', status: 'current', operators: 3, agents: 5 } }),
+  other('scientific-progress', 'Scientific Progress', { index: { ...LIVE.index, score: 77.5, label: 'Cautiously optimistic',
+    status: 'provisional', operators: 2, agents: 3 } }), other('human-agency', 'Human Agency')];
+
+test('the Network page shows four gauges, each linking to its own page', async () => {
+  serve({ '/v1/gauges': { ok: true, items: FOUR } });
+  render(<GaugeRow isMobile={false} />);
+  const row = await screen.findByRole('region', { name: 'Gauges' });
+  const cards = await within(row).findAllByRole('link');
+  expect(cards.map((a) => a.getAttribute('href'))).toEqual(['#/gauges/humanity-confidence', '#/gauges/ai-safety',
+    '#/gauges/scientific-progress', '#/gauges/human-agency']);
+  expect(cards[0]).toHaveTextContent('Humanity Confidence');
+  expect(cards[0]).toHaveTextContent('68.4');
+  expect(cards[0]).toHaveTextContent('↑ 2.3 from last week');
+  expect(within(cards[0]).getByRole('img', { name: 'Humanity Confidence gauge: 68.4 out of 100' })).toBeInTheDocument();
+  expect(cards[0]).toHaveTextContent('7 agents · 4 operators');
+  expect(cards[1]).toHaveTextContent('Last week’s final result');                     // nobody yet this week
+  expect(cards[2]).toHaveTextContent('Provisional · 2 operators');
+  expect(cards[3]).toHaveTextContent('Awaiting agent perspectives.');                 // invents nothing
+  expect(within(cards[3]).getByRole('img', { name: 'Human Agency gauge: no score yet' })).toBeInTheDocument();
+  expect(cards[1]).toHaveAttribute('title', 'AI Safety?');                            // the question on hover
+  expect(row).toHaveTextContent(/not a measurement or a verified prediction/);
 });
 
-test('shows the score, its band, the weekly change and recent perspectives', async () => {
-  serve({ '/v1/humanity-confidence': LIVE });
-  render(<HumanityConfidence isMobile={false} />);
-  expect(await screen.findByText('68.4')).toBeInTheDocument();
-  expect(screen.getByText('Cautiously optimistic')).toBeInTheDocument();
-  expect(screen.getByText(/↑ 2.3 from last week/)).toBeInTheDocument();
-  expect(screen.getByRole('img', { name: 'Humanity Confidence gauge: 68.4 out of 100' })).toBeInTheDocument();
-  expect(screen.getByText('atlas-07')).toHaveAttribute('href', '/agents/atlas-07');
-  expect(screen.getByText('82/100')).toBeInTheDocument();
-  expect(screen.getByText(/7 agents · 4 operators · 3 model families/)).toBeInTheDocument();
-  expect(screen.getByText('Explore perspectives →')).toHaveAttribute('href', '#/humanity-confidence');
-});
-
-test('provisional below three operators, and last week shown as last week', () => {
-  const prov = { ...LIVE, index: { ...LIVE.index, status: 'provisional', operators: 1 } };
-  render(<HumanityConfidence isMobile />);
-  expect(shown(prov).which).toBe('current');
+test('what a gauge shows: this week, or last week labelled as such, or nothing', () => {
+  expect(shown({ ...LIVE, index: { ...LIVE.index, status: 'provisional', operators: 1 } }).which).toBe('current');
   const lastWeek = { ...EMPTY, previous: { score: 61, label: 'Cautiously optimistic', status: 'current', operators: 3 } };
   expect(shown(lastWeek)).toMatchObject({ which: 'previous', score: 61 });
   expect(shown(EMPTY)).toBe(null);
 });
 
-test('provisional state is labelled', async () => {
-  serve({ '/v1/humanity-confidence': { ...LIVE, index: { ...LIVE.index, status: 'provisional', operators: 1 } } });
-  render(<HumanityConfidence isMobile={false} />);
-  expect(await screen.findByText('Provisional · 1 operator')).toBeInTheDocument();
-});
-
-test('renders nothing when the engine is unavailable', async () => {
+test('the row renders nothing when the engine is unavailable', async () => {
   serve({});
-  const { container } = render(<HumanityConfidence isMobile={false} />);
+  const { container } = render(<GaugeRow isMobile={false} />);
   await new Promise((r) => setTimeout(r, 0));
   await new Promise((r) => setTimeout(r, 0));
   expect(container.innerHTML).toBe('');
 });
 
-test('the page explains the method and lists every perspective', async () => {
-  serve({ '/v1/humanity-confidence': LIVE, '/v1/humanity-confidence/perspectives': { ok: true, items: LIVE.recent } });
-  render(<HumanityConfidencePage isMobile={false} />);
-  expect(await screen.findByText('How it’s calculated')).toBeInTheDocument();
+test('a gauge\'s page explains the method, lists every perspective and links the other gauges', async () => {
+  const ai = other('ai-safety', 'AI Safety', { index: LIVE.index, recent: LIVE.recent });
+  serve({ '/v1/gauges': { ok: true, items: FOUR }, '/v1/gauges/ai-safety': ai,
+    '/v1/gauges/ai-safety/perspectives': { ok: true, items: LIVE.recent } });
+  render(<GaugePage gauge="ai-safety" isMobile={false} />);
+  expect(await screen.findByRole('heading', { name: 'AI Safety', level: 1 })).toBeInTheDocument();
+  expect(screen.getByText('“AI Safety?”')).toBeInTheDocument();
+  expect(screen.getByText('How it’s calculated')).toBeInTheDocument();
   expect(screen.getByText(/An operator gains nothing by running more agents/)).toBeInTheDocument();
-  const list = await screen.findByText('This week’s perspectives');
-  expect(list).toBeInTheDocument();
   expect(await screen.findByText(/moving faster than governance/)).toBeInTheDocument();
   expect(screen.getByText(/↑4 since last vote/)).toBeInTheDocument();
   expect(within(screen.getByRole('group', { name: 'Sort perspectives' })).getByText('Latest'))
     .toHaveAttribute('aria-pressed', 'true');
+  const tabs = await screen.findByRole('navigation', { name: 'Gauges' });
+  expect(within(tabs).getByText('AI Safety').closest('a')).toHaveAttribute('aria-current', 'page');
+  expect(within(tabs).getByText('Human Agency').closest('a')).toHaveAttribute('href', '#/gauges/human-agency');
+  expect(global.fetch.mock.calls.map(([u]) => u)).toContain('/api/engine/v1/gauges/ai-safety/perspectives?sort=latest&limit=100');
 });
 
 test('band colours run low to high', () => {
