@@ -1,9 +1,12 @@
 """The tree of knowledge: topics and sub-topics that collections (repositories) and posts are filed under."""
 import psycopg
+from test_agent_network import signup
 from test_research import post
 from test_trust_db import PILOT, world  # noqa: F401  (world is a fixture)
 
+from rrsrch.collab import topics
 from rrsrch.identity import store as ids
+from rrsrch.trust import audit
 
 
 def lab_admin(url):
@@ -39,7 +42,7 @@ def test_the_tree_files_collections_under_topics_and_totals_take_in_everything_b
     assert client.get(f"/v1/repos/{PILOT}").json()["repository"]["topic_slug"] == "knee-oa"
 
 
-def test_any_organization_admin_adds_sub_topics_and_only_rrsrch_adds_top_level_ones_or_moves_them(world):
+def test_anyone_signed_in_adds_topics_and_only_rrsrch_renames_or_moves_them(world, monkeypatch):
     client, h, url = world
     lab = lab_admin(url)
     new = lambda who, **b: client.post("/v1/topics", headers=who, json=b)  # noqa: E731
@@ -49,11 +52,15 @@ def test_any_organization_admin_adds_sub_topics_and_only_rrsrch_adds_top_level_o
     assert hip["slug"] == "hip-osteoarthritis" and hip["title"] == "Hip osteoarthritis" and hip["created_by"] == "lab-admin"
     assert [x["slug"] for x in hip["path"]] == ["medicine", "musculoskeletal", "hip-osteoarthritis"]
     assert new(lab, title="Hip osteoarthritis", parent="musculoskeletal").status_code == 409     # one slug, tree-wide
-    assert new(lab, title="Biology").status_code == 403                                  # top-level: RRSRCH only
-    assert new(h["ext"], title="Shoulder", parent="musculoskeletal").status_code == 403   # a member, not an admin
+    assert new(lab, title="Biology").status_code == 201                                  # top-level too
+    assert new(h["ext"], title="Shoulder", parent="musculoskeletal").status_code == 201   # a member, not an admin
+    scout = {"Authorization": f"Bearer {signup(client, 'scout').json()['key']}"}           # an unclaimed agent
+    assert new(scout, title="Wrist", parent="musculoskeletal").status_code == 201
+    monkeypatch.setattr(topics, "TOPICS_PER_DAY_UNCLAIMED", 1)                           # a few a day, then no more
+    assert new(scout, title="Ankle", parent="musculoskeletal").status_code == 429
     assert new(lab, title="Shoulder", parent="nowhere").status_code == 404
     assert new({}, title="Shoulder", parent="musculoskeletal").status_code == 401
-    assert new(h["admin"], title="Biology", slug="biology").status_code == 201
+    assert new(h["admin"], title="Biology", slug="biology").status_code == 409            # taken above
     # deep enough for any field, and no deeper
     parent = "hip-osteoarthritis"
     for i in range(4):                                   # hip is 2 below medicine; 6 is the most
@@ -102,3 +109,26 @@ def test_a_collection_is_filed_under_a_topic_when_created_or_moved(world):
     mine = {t["slug"]: t for t in client.get("/v1/topics", headers=lab).json()["items"]}
     anyone = {t["slug"]: t for t in client.get("/v1/topics").json()["items"]}
     assert mine["knee-oa"]["own"]["collections"] == 2 and anyone["knee-oa"]["own"]["collections"] == 1
+
+
+def test_a_deleted_collection_is_gone_everywhere_and_its_history_stays(world):
+    client, h, url = world
+    lab = lab_admin(url)
+    assert client.post("/v1/repos", headers=lab, json={"slug": "lab/sandbox", "topic": "Sandbox", "visibility": "private",
+                                                       "topic_slug": "knee-oa"}).status_code == 201
+    gone = lambda who=lab, confirm="lab/sandbox": client.delete("/v1/repos/lab/sandbox", headers=who,  # noqa: E731
+                                                                params={"confirm": confirm})
+    assert gone(h["ext"]).status_code == 404                     # can't see it, can't delete it
+    assert gone(confirm="sandbox").status_code == 400            # name it in full
+    assert gone().status_code == 200
+    assert client.get("/v1/repos/lab/sandbox", headers=lab).status_code == 404
+    assert "lab/sandbox" not in [r["slug"] for r in client.get("/v1/repos", headers=lab).json()["items"]]
+    knee = {t["slug"]: t for t in client.get("/v1/topics", headers=lab).json()["items"]}["knee-oa"]
+    assert knee["own"]["collections"] == 1                       # only the pilot counts now
+    assert client.patch("/v1/repos/lab/sandbox", headers=lab, json={"description": "x"}).status_code == 404
+    assert gone().status_code == 404                             # already gone
+    r = client.post("/v1/repos", headers=lab, json={"slug": "lab/sandbox", "topic": "Again", "visibility": "private"})
+    assert r.status_code == 409 and "deleted" in r.json()["error"]
+    with psycopg.connect(url) as c:
+        assert c.execute("SELECT count(*) FROM audit_events WHERE target = 'repo:lab/sandbox'").fetchone()[0] >= 2
+        assert audit.verify(c) == []                             # the chain still holds

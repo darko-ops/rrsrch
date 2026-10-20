@@ -41,8 +41,10 @@ class Outcome:
 
 
 def repo_and_role(conn, p: Principal | None, repository_id: int) -> tuple[access.Repo, access.Role | None]:
-    repo = conn.execute("SELECT id, slug, organization_id, visibility FROM repositories WHERE id = %s",
-                        (repository_id,)).fetchone()
+    repo = conn.execute("SELECT id, slug, organization_id, visibility FROM repositories WHERE id = %s "
+                        "AND deleted_at IS NULL", (repository_id,)).fetchone()
+    if repo is None:                                   # retired: as if it were never there
+        raise Refused(404, "not found")
     repo = access.Repo(*repo)
     return repo, ids.role_in(conn, p.agent_id if p else None, repo.id)
 

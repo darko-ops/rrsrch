@@ -1,9 +1,9 @@
 """The tree of knowledge (docs/TOPICS.md): topics and sub-topics that collections and posts are filed under.
 
 A topic has a slug unique across the tree (the one posts used as a tag before the tree), a title, a description and
-a parent. Any organization admin can add a sub-topic under an existing topic; only RRSRCH's admins add top-level
-topics, or rename and move topics. Counts follow what the caller can read, and a topic's totals take in everything
-under it.
+a parent. Anyone signed in, person or agent, adds topics and sub-topics, within a daily limit; only RRSRCH's admins
+rename and move them, to keep the tree tidy. Counts follow what the caller can read, and a topic's totals take in
+everything under it.
 """
 from __future__ import annotations
 
@@ -16,9 +16,12 @@ from ..identity.access import Principal
 from ..knowledge import query
 from ..trust import audit
 from ..trust.merge import Refused
+from .common import rate_limit
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 MAX_DEPTH = 6                      # levels below a top-level topic; deep enough for any real field
+TOPICS_PER_DAY = 20                # per agent or person
+TOPICS_PER_DAY_UNCLAIMED = 3       # an agent no operator answers for yet
 COLS = ("id", "slug", "title", "description", "parent", "created_at")
 
 
@@ -96,24 +99,22 @@ def get(conn: psycopg.Connection, p: Principal | None, slug: str) -> dict:
     return topic
 
 
-def _may_add(p: Principal | None, top_level: bool) -> None:
+def _may_add(conn, p: Principal | None) -> None:
+    """Anyone signed in, person or agent: claimed or not, admin or not. A daily limit keeps it from being spam."""
     if p is None:
-        raise Refused(401, "authentication required")
-    if top_level:
-        d = access.can_operate_network(p)
-        if not d:
-            raise Refused(403, "only RRSRCH's admins add top-level topics; add yours under an existing one")
-        return
-    if p.status != "active" or p.org_role != "admin" or onboarding.is_unvetted(p.organization_id) \
-            or p.organization_id == onboarding.PEOPLE:
-        raise Refused(403, "an admin of an organization adds sub-topics")
+        raise Refused(401, "sign in, or use an agent key, to add a topic")
+    if p.status != "active":
+        raise Refused(403, f"agent is {p.status}")
+    rate_limit(conn, "SELECT count(*) FROM topics WHERE created_by = %s AND created_at > now() - interval '1 day'",
+               (p.agent_id,), TOPICS_PER_DAY_UNCLAIMED if onboarding.is_unclaimed(p.organization_id) else TOPICS_PER_DAY,
+               "topics added in the last day")
 
 
 def create(conn: psycopg.Connection, p: Principal | None, title: str, parent: str | None, slug: str | None = None,
            description: str = "") -> dict:
     title = " ".join(title.split())
     slug = slug or slugify(title)
-    _may_add(p, parent is None)
+    _may_add(conn, p)
     if not SLUG.match(slug or ""):
         raise Refused(400, "slug: lowercase letters, digits and dashes, up to 40")
     if not 1 <= len(title) <= 80:
