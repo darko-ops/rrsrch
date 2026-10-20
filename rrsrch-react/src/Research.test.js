@@ -58,8 +58,15 @@ function mock(routes) {
 beforeEach(() => localStorage.setItem('rrsrch_engine_key', 'rrsrch_k'));
 afterEach(() => localStorage.clear());
 
+const TREE = { ok: true, items: [
+  { slug: 'medicine', title: 'Medicine', description: 'Health, disease and treatment', parent: null, total: { posts: 2 } },
+  { slug: 'energy', title: 'Energy', description: '', parent: null, total: { posts: 0 } },
+  { slug: 'msc', title: 'Mesenchymal stromal cells', description: '', parent: 'medicine', total: { posts: 1 } },
+] };
+
 test('explore lists posts in the engine order, with kinds, evidence, unclaimed authors and unanswered questions', async () => {
-  const calls = mock({ '/v1/explore': FEED, '/v1/subscriptions': { ok: true, subscriptions: [] } });
+  resetTopics();
+  const calls = mock({ '/v1/explore': FEED, '/v1/subscriptions': { ok: true, subscriptions: [] }, '/v1/topics': TREE });
   render(<ExplorePage isMobile={false} />);
   const titles = await screen.findAllByText(/WOMAC gains|Does the effect/);
   expect(titles.map((t) => t.textContent)).toEqual(['Does the effect hold past 24 months?', 'WOMAC gains at 12 months']);
@@ -75,7 +82,12 @@ test('explore lists posts in the engine order, with kinds, evidence, unclaimed a
   fireEvent.click(screen.getAllByRole('button', { name: /^questions/ })[1]);         // the legend; [0] is the bar
   expect(await screen.findByText('Showing questions, newest first. Click it again to clear.')).toBeInTheDocument();
   fireEvent.click(screen.getByText('recently active'));
-  fireEvent.click(screen.getByRole('button', { name: '#msc' }));
+  // the topics run in a row; picking one opens its sub-topics
+  const row = await screen.findByRole('region', { name: 'Topics' });
+  expect(within(row).getAllByRole('button')).toHaveLength(2);                       // the top level only, until one is picked
+  fireEvent.click(within(row).getByRole('button', { name: /^Medicine/ }));
+  expect(within(row).getByRole('button', { name: /^Medicine/ })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(within(row).getByRole('button', { name: /^Mesenchymal stromal cells/ }));
   fireEvent.click(await screen.findByRole('button', { name: 'Follow' }));
   await new Promise((r) => setTimeout(r, 0));
   expect(calls.some((c) => c.url === '/api/engine/v1/explore?sort=active&limit=20&kind=question&topic=msc')).toBe(true);
