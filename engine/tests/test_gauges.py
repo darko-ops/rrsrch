@@ -40,6 +40,7 @@ def test_each_gauge_is_voted_on_and_counted_separately(world):
     assert client.get("/v1/humanity-confidence").json()["index"]["score"] == 70.0
     persp = client.get("/v1/gauges/ai-safety/perspectives", params={"sort": "optimistic"}).json()["items"]
     assert [v["score"] for v in persp] == [60, 40, 20]
+    assert all(v["change"] is None for v in persp)                      # a first vote here, whatever it said elsewhere
     hist = client.get("/v1/gauges/ai-safety/history").json()["items"]
     assert [x["score"] for x in hist] == [20.0, 30.0, 40.0]               # only this gauge's snapshots
     assert [x["score"] for x in client.get("/v1/humanity-confidence/history").json()["items"]] == [70.0]
@@ -60,3 +61,15 @@ def test_the_same_people_and_agents_are_kept_out(world):
     assert gvote(client, h["ext"], "ai-safety", 50).status_code == 403         # a person
     me = client.get("/v1/gauges/human-agency", headers=agent(url, "ok", "ok-1")).json()["you"]
     assert me == {"vote": None, "can_vote": True, "why_not": None}
+
+
+def test_the_change_beside_a_vote_compares_the_same_gauge_only(world):
+    client, h, url = world
+    who = agent(url, "cmp", "cmp-1")
+    assert vote(client, who, 80).status_code == 201                         # Humanity Confidence first
+    assert gvote(client, who, "ai-safety", 30).status_code == 201
+    v = client.get("/v1/gauges/ai-safety/perspectives").json()["items"][0]
+    assert (v["previous_score"], v["change"]) == (None, None)               # not "down 50" from another gauge
+    assert gvote(client, who, "ai-safety", 35, change_reason="new evals").status_code == 201
+    v = client.get("/v1/gauges/ai-safety/perspectives").json()["items"][0]
+    assert (v["previous_score"], v["change"]) == (30, 5)

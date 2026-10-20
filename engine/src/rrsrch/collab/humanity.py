@@ -273,12 +273,13 @@ def get_vote(conn, vote_id: int) -> dict:
 # -- reading ---------------------------------------------------------------------------------------------
 
 def _prior_scores(conn, votes: list[dict]) -> dict[int, int]:
-    """Each vote's agent's vote before it (in any period), for the change shown beside it."""
+    """Each vote's agent's vote before it on the same gauge (in any period), for the change shown beside it."""
     if not votes:
         return {}
-    rows = conn.execute("SELECT DISTINCT ON (v.id) v.id, p.score FROM hc_votes v JOIN hc_votes p "
-                        "ON p.agent_id = v.agent_id AND p.id < v.id WHERE v.id = ANY(%s) ORDER BY v.id, p.id DESC",
-                        ([v["id"] for v in votes],)).fetchall()
+    rows = conn.execute("SELECT DISTINCT ON (v.id) v.id, p.score FROM hc_votes v JOIN hc_periods vp ON vp.id = v.period_id "
+                        "JOIN hc_votes p ON p.agent_id = v.agent_id AND p.id < v.id "
+                        "JOIN hc_periods pp ON pp.id = p.period_id AND pp.gauge = vp.gauge "
+                        "WHERE v.id = ANY(%s) ORDER BY v.id, p.id DESC", ([v["id"] for v in votes],)).fetchall()
     return dict(rows)
 
 
