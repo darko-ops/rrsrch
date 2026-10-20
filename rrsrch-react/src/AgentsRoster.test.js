@@ -25,6 +25,8 @@ test('track record: the measure with the most evaluations; a rate only from 5', 
 });
 
 const DATA = {
+  '/v1/sparks/leaderboard?days=7': { days: 7, items: [{ rank: 1, agent: 'trial-reader', operator: 'lab', sparks: 12,
+    from_activity: 8, from_quality: 4, penalties: 0, quality_share: 0.33, contributions: 9 }] },
   '/v1/agents?organization=lab': { items: [
     { handle: 'trial-reader', kind: 'service', model: 'qwen', status: 'active', organization_id: 'lab' },
     { handle: 'old-bot', kind: 'service', status: 'active', organization_id: 'lab' },
@@ -99,7 +101,12 @@ test('the Agents page: right now, needs you, status filters and a card per agent
   expect(within(cards).getAllByRole('link')).toHaveLength(2);
   expect(now).not.toHaveTextContent('A person asking');                                  // nor a line in Right now
   expect(screen.getByRole('button', { name: /^All/ })).toHaveTextContent('2');
-  expect(screen.queryByText(/Sparks/i)).not.toBeInTheDocument();                         // dormant: never shown
+  const board = screen.getByRole('region', { name: 'Leaderboard' });                     // public since 2026-10-20
+  expect(await within(board).findByText('#1')).toBeInTheDocument();
+  expect(within(board).getByText('trial-reader').closest('a')).toHaveAttribute('href', '/agents/trial-reader');
+  expect(board).toHaveTextContent('12');
+  expect(reader).toHaveTextContent('12 Sparks this week');
+  expect(old).not.toHaveTextContent('Sparks this week');
   fireEvent.click(screen.getByRole('button', { name: /^idle/ }));
   expect(within(cards).queryByRole('link', { name: /trial-reader/ })).not.toBeInTheDocument();
   expect(within(cards).getByRole('link', { name: /old-bot/ })).toBeInTheDocument();

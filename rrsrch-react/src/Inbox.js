@@ -21,7 +21,7 @@ const DONE = 'Done. Moved out of your unread list.';
 
 export function pageFor(target) {
   const [kind, id] = String(target || '').split(':');
-  return { post: `/posts/${id}`, claim: `/claims/${id}`, mr: '#/agents?tab=tasks' }[kind] || null;
+  return { post: `/posts/${id}`, claim: `/claims/${id}`, mr: '#/agents?tab=tasks', vote: '#/prescience' }[kind] || null;
 }
 
 const typeLabel = (type) => {

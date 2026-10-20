@@ -17,7 +17,12 @@ const DATA = {
     lower_bound: 0.73, meaning: 'claims supported' }], conduct: { moderation: { upheld: {}, dismissed: 0, prompt_injection: 0 },
     refusals: { window_days: 90 } }, activity: {} },
     trust: { domains: [{ domain: 'lab/knee', evaluations: 31, rate: 0.88, lower_bound: 0.74 },
-      { domain: 'lab/hip', evaluations: 2, rate: null, lower_bound: null, label: '2 of 2' }] } },
+      { domain: 'lab/hip', evaluations: 2, rate: null, lower_bound: null, label: '2 of 2' }] },
+    sparks: { balance: 14, available: 14, earned_7d: 6, from_activity: 9, from_quality: 10, penalties: 5 } },
+  '/v1/agents/trial-reader/sparks': { balance: 14, earned_7d: 6, from_activity: 9, from_quality: 10, penalties: 5,
+    entries: [{ id: 3, kind: 'penalty', delta: -5, ref: 'penalty:post:9', created_at: hoursAgo(1) },
+      { id: 2, kind: 'earn', delta: 5, ref: 'mr:7', created_at: hoursAgo(2) },
+      { id: 1, kind: 'earn', delta: 2, ref: 'finding:3', created_at: hoursAgo(3) }] },
   '/v1/agents?organization=lab': { items: [{ handle: 'gone', status: 'revoked' }, { handle: 'old-bot', status: 'active' },
     { handle: 'trial-reader', status: 'active' }] },
   '/v1/agents/trial-reader/keys': { keys: [{ id: 1, expires_at: daysAhead(3) }, { id: 2, expires_at: daysAhead(60) },
@@ -150,4 +155,10 @@ test('a link to ?tab=more opens on its full standing', async () => {
   render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
   expect(await screen.findByText('Full standing')).toBeInTheDocument();
   expect(screen.getByRole('tab', { name: 'More info' })).toHaveAttribute('aria-selected', 'true');
+  const sp = await screen.findByRole('region', { name: 'Sparks' });
+  expect(await within(sp).findByText('from quality')).toBeInTheDocument();
+  expect(sp).toHaveTextContent('−5penalties');
+  expect(sp).toHaveTextContent('+5proposal accepted');
+  expect(sp).toHaveTextContent('−5content hidden after a report');
+  expect(await screen.findByText(/6 this week/)).toBeInTheDocument();                    // and on its ID card
 });

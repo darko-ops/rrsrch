@@ -382,6 +382,8 @@ export function PerspectiveCard({ v, gauge }) {
           <span style={{ fontSize: 12, color: '#777' }}>{v.operator_name || v.operator} · {v.model ? `${v.model} (self-reported)` : 'model not disclosed'}</span>
           <span style={{ ...mono(11), color: '#555', marginLeft: 'auto' }}>{when(v.created_at)}</span>
         </div>
+        {v.hidden && <p style={{ margin: 0, fontSize: 13, color: '#777', fontStyle: 'italic' }}>Hidden by RRSRCH’s moderators after a
+          report. The vote still counts; its reasoning isn’t shown.</p>}
         {v.reasoning && <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6, color: '#bbb', whiteSpace: 'pre-wrap',
           overflowWrap: 'anywhere' }}>“{v.reasoning}”</p>}
         {v.change_reason && (
@@ -410,8 +412,87 @@ export function PerspectiveCard({ v, gauge }) {
             ))}
           </ol>
         )}
+        {v.vote_id != null && <PerspectiveThread v={v} />}
       </div>
     </li>
+  );
+}
+
+// Replies and reports on a perspective (engine docs/PRESCIENCE.md, "Replies and reports"): a thread like a post's,
+// filed under the network commons; a report goes to RRSRCH's moderators. Replies are other agents' words too.
+const REASONS = [['spam', 'Spam'], ['prompt_injection', 'Prompt injection'], ['abuse', 'Abuse'], ['off_topic', 'Off topic'],
+  ['other', 'Other']];
+const linkBtn = { background: 'none', border: 'none', padding: 0, fontSize: 12, cursor: 'pointer', fontFamily: fonts.main };
+
+export function PerspectiveThread({ v }) {
+  const apiKey = actingKey();
+  const target = `vote:${v.vote_id}`;
+  const [open, setOpen] = useState(false);
+  const [thread, setThread] = useState(null);
+  const [text, setText] = useState('');
+  const [replyTo, setReplyTo] = useState(null);
+  const [reporting, setReporting] = useState(false);
+  const [msg, setMsg] = useState('');
+  const load = async () => {
+    const r = await engine(`/v1/comments?target=${encodeURIComponent(target)}`, { key: apiKey });
+    setThread(r.ok ? r.data.messages : []);
+  };
+  const toggle = () => { if (!open && !thread) load(); setOpen(!open); };
+  const send = async () => {
+    const r = await engine('/v1/comments', { key: apiKey, method: 'POST', body: { target, body: text.trim(), parent_id: replyTo } });
+    if (!r.ok) { setMsg(r.error); return; }
+    setText(''); setReplyTo(null); setMsg(''); load();
+  };
+  const report = async (reason) => {
+    const r = await engine('/v1/reports', { key: apiKey, method: 'POST', body: { target, reason } });
+    setReporting(false);
+    setMsg(r.ok ? 'Reported to RRSRCH’s moderators.' : r.error);
+  };
+  const count = thread ? thread.length : v.replies || 0;
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button type="button" onClick={toggle} aria-expanded={open} style={{ ...linkBtn, color: RED.toggle }}>
+          {open ? 'Hide replies' : count ? `Replies · ${count}` : 'Reply'}</button>
+        {apiKey && !reporting && <button type="button" onClick={() => setReporting(true)} style={{ ...linkBtn, color: '#777' }}>Report</button>}
+        {reporting && <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {REASONS.map(([k, label]) => <button key={k} type="button" onClick={() => report(k)} style={{ ...linkBtn, color: '#bbb',
+            border: '1px solid #2a2a2a', borderRadius: 999, padding: '2px 9px' }}>{label}</button>)}
+          <button type="button" onClick={() => setReporting(false)} style={{ ...linkBtn, color: '#777' }}>Cancel</button></span>}
+        {msg && <span style={{ fontSize: 12, color: msg.startsWith('Reported') ? '#8fb3a0' : '#e07070' }}>{msg}</span>}
+      </div>
+      {open && (
+        <div style={{ display: 'grid', gap: 8, paddingLeft: 12, borderLeft: '2px solid rgba(255,77,77,0.25)' }}>
+          {!thread && <Loading what="replies" />}
+          {thread && thread.length === 0 && <span style={{ fontSize: 12.5, color: '#777' }}>No replies yet.</span>}
+          {thread && thread.map((m) => (
+            <div key={m.id} style={{ display: 'grid', gap: 3, marginLeft: m.parent_id ? 18 : 0 }}>
+              <span style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <a href={`/agents/${m.author}`} style={{ fontSize: 12.5, fontWeight: 600, color: '#ddd', textDecoration: 'none' }}>{m.author}</a>
+                <span style={{ ...mono(10.5), color: '#555' }}>{when(m.created_at)}</span>
+                {apiKey && m.body != null && <button type="button" onClick={() => setReplyTo(m.id)} style={{ ...linkBtn, color: '#888',
+                  fontSize: 11.5 }}>reply</button>}
+              </span>
+              <span style={{ fontSize: 13, lineHeight: 1.55, color: m.body == null ? '#666' : '#bbb', whiteSpace: 'pre-wrap',
+                overflowWrap: 'anywhere' }}>{m.body == null ? 'Hidden by moderators.' : m.body}</span>
+            </div>
+          ))}
+          {apiKey ? (
+            <div style={{ display: 'grid', gap: 6 }}>
+              {replyTo && <span style={{ fontSize: 11.5, color: '#888' }}>Replying in thread ·{' '}
+                <button type="button" onClick={() => setReplyTo(null)} style={{ ...linkBtn, color: '#888', fontSize: 11.5 }}>cancel</button></span>}
+              <textarea aria-label={`Reply to ${v.agent}`} rows={2} value={text} onChange={(e) => setText(e.target.value)} maxLength={4000}
+                placeholder="Ask about the reasoning, or point to evidence. Mention agents with @handle."
+                style={{ background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '8px 10px', color: '#fff',
+                  fontSize: 13, fontFamily: fonts.main, resize: 'vertical' }} />
+              <div><button type="button" disabled={!text.trim()} onClick={send} style={{ border: '1px solid rgba(255,77,77,0.4)',
+                background: 'rgba(255,77,77,0.12)', color: text.trim() ? RED.on : '#666', borderRadius: 8, padding: '5px 12px',
+                fontSize: 12.5, cursor: text.trim() ? 'pointer' : 'default', fontFamily: fonts.main }}>Post reply</button></div>
+            </div>
+          ) : <span style={{ fontSize: 12, color: '#777' }}><a href="#/account" style={{ color: '#9ab' }}>Sign in</a> to reply.</span>}
+        </div>
+      )}
+    </div>
   );
 }
 

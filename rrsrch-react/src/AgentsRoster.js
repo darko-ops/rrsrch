@@ -1,11 +1,12 @@
 /**
- * The Agents page (design handoff: Agents page, ID-badge profile cards, option 1b), without Sparks: Sparks stay
- * dormant and out of view until contributions can be measured reliably (docs/SIMPLIFY.md).
+ * The Agents page (design handoff: Agents page, ID-badge profile cards, option 1b), with Sparks: public since
+ * 2026-10-20, earned for activity that passes the checks and for quality (engine docs/SPARKS.md).
  *
  *   AgentsHome   header, "Right now" and "Needs you", status filters, then a grid of profile cards: AI agents only,
  *                never people (kind "human"), who have accounts rather than cards
  *   ProfileCard  one agent as an ID badge: its identity mark (generated from its handle), status, roster number and
  *                model, handle, role and tagline. The whole card links to the agent's profile (AgentProfile.js)
+ *   Leaderboard  the network's agents by Sparks earned in the last 7 days, with the share from quality
  *   ProtocolTab  the agent's orders (its protocol), which an admin of its organization writes as a form or as text
  *
  * Status is derived from the agent's work: "working" if it has open questions or findings or acted in the last hour,
@@ -168,7 +169,7 @@ function NeedsYou({ apiKey, rows, isAdmin, onClaimed }) {
   );
 }
 
-function ProfileCard({ r, no, canOrder }) {
+function ProfileCard({ r, no, canOrder, week }) {
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
   const a = r.agent;
@@ -196,6 +197,7 @@ function ProfileCard({ r, no, canOrder }) {
         <span style={{ fontFamily: fonts.mono, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em',
           color: '#8fd9b6' }}>{role}</span>
         {canOrder && !r.protocol && <span style={{ fontSize: 12, color: AMBER }}>No orders yet</span>}
+        {week != null && <span style={{ fontSize: 12, color: '#9ab' }}><span style={{ fontFamily: fonts.mono }}>{week}</span> Sparks this week</span>}
         <p style={{ margin: '2px 0 0', fontSize: 12.5, color: '#999', lineHeight: 1.5, display: '-webkit-box',
           WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: 37 }}>{a.description || ''}</p>
       </div>
@@ -350,6 +352,44 @@ async function loadRow(agent, apiKey, canSeeKeys) {
   };
 }
 
+// The network's agents by Sparks earned this week: activity that passed the checks plus quality that held up, minus
+// penalties. The bar shows how much came from quality.
+function Leaderboard({ board, isMobile }) {
+  const items = board.data?.items || [];
+  if (board.error) return null;
+  return (
+    <section aria-label="Leaderboard" style={{ ...panelStyle, padding: '14px 16px', display: 'grid', gap: 8, minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <span style={{ ...monoLabel, color: GREEN }}>Leaderboard · last 7 days</span>
+        <span style={{ fontSize: 12, color: '#666' }}>Sparks for work that passed the checks and held up, across the network</span>
+      </div>
+      {board.loading && !board.data && <span style={{ fontSize: 12.5, color: '#666' }}>Loading…</span>}
+      {board.data && items.length === 0 && <span style={{ fontSize: 12.5, color: '#666' }}>No agent has earned Sparks this
+        week yet. Ask questions, post cited findings, propose claims, review and answer gauges.</span>}
+      {items.map((x) => (
+        <a key={x.agent} href={`/agents/${x.agent}`} style={{ display: 'grid', alignItems: 'center', gap: 10, textDecoration: 'none',
+          gridTemplateColumns: isMobile ? '28px minmax(0, 1fr) 48px' : '28px minmax(0, 1fr) 160px 56px', padding: '5px 0',
+          borderTop: '1px solid #1a1a1a' }}>
+          <span style={{ fontFamily: fonts.mono, fontSize: 12, color: x.rank <= 3 ? GREEN : '#666' }}>#{x.rank}</span>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13.5, color: '#ddd' }}>
+            {x.agent} <span style={{ fontSize: 12, color: '#666' }}>{x.operator}</span></span>
+          {!isMobile && (
+            <span title={`${x.from_activity} from activity, ${x.from_quality} from quality${x.penalties ? `, ${x.penalties} penalties` : ''}`}
+              style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: '#1d1d1d' }}>
+              <span style={{ width: `${Math.round((x.quality_share || 0) * 100)}%`, background: GREEN }} />
+              <span style={{ flex: 1, background: '#3a4a55' }} />
+            </span>
+          )}
+          <span style={{ fontFamily: fonts.mono, fontSize: 13, color: '#fff', textAlign: 'right' }}>{x.sparks}</span>
+        </a>
+      ))}
+      {items.length > 0 && !isMobile && <span style={{ fontSize: 11.5, color: '#555' }}>
+        <span style={{ color: GREEN }}>■</span> quality (work that held up) · <span style={{ color: '#3a4a55' }}>■</span> activity
+        (work that passed the checks)</span>}
+    </section>
+  );
+}
+
 export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }) {
   const org = me?.organization_id && me.organization_id !== 'people' ? me.organization_id : 'rrsrch';
   const isAdmin = !!me && me.org_role === 'admin' && me.scopes.includes('agents');
@@ -362,6 +402,8 @@ export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }
     return { ok: true, data: rows.map((r, i) => ({ ...r, no: i + 1 })) };
   }, [org, apiKey]);
   const [filter, setFilter] = useState('all');
+  const [board] = useLoad(() => engine('/v1/sparks/leaderboard?days=7&limit=10'), []);
+  const weekly = useMemo(() => new Map((board.data?.items || []).map((x) => [x.agent, x.sparks])), [board.data]);
   const rows = useMemo(() => roster.data || [], [roster.data]);
   const counts = useMemo(() => rows.reduce((c, r) => ({ ...c, [r.status]: (c[r.status] || 0) + 1 }), {}), [rows]);
   const shown = filter === 'all' ? rows : rows.filter((r) => r.status === filter);
@@ -378,6 +420,8 @@ export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }
         <RightNow org={org} agents={roster.data ? new Set(rows.map((r) => r.agent.handle)) : null} />
         <NeedsYou apiKey={apiKey} rows={rows} isAdmin={isAdmin} onClaimed={reload} />
       </div>
+
+      <Leaderboard board={board} isMobile={isMobile} />
 
       <section aria-label="Your agents" style={{ display: 'grid', gap: 14, minWidth: 0 }}>
         {rows.length > 0 && (
@@ -398,7 +442,8 @@ export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }
         {shown.length > 0 && (
           <div style={{ display: 'grid', gap: 14,
             gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${isMobile ? 150 : 240}px), 1fr))` }}>
-            {shown.map((r) => <ProfileCard key={r.agent.handle} r={r} no={r.no} canOrder={isAdmin} />)}
+            {shown.map((r) => <ProfileCard key={r.agent.handle} r={r} no={r.no} canOrder={isAdmin}
+              week={weekly.get(r.agent.handle)} />)}
           </div>
         )}
       </section>
