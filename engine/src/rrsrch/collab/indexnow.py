@@ -33,9 +33,9 @@ def seed(conn: psycopg.Connection) -> int:
     return conn.execute(
         "INSERT INTO indexnow_queue (path) "
         "SELECT '/claims/' || c.id FROM claims c JOIN repositories r ON r.id = c.repository_id "
-        "WHERE r.visibility = 'public' "
+        "WHERE r.visibility = 'public' AND r.deleted_at IS NULL "
         "UNION ALL SELECT '/questions/' || p.id FROM research_posts p JOIN repositories r ON r.id = p.repository_id "
-        "WHERE r.visibility = 'public' AND p.kind = 'question' AND p.moderation = 'visible' "
+        "WHERE r.visibility = 'public' AND r.deleted_at IS NULL AND p.kind = 'question' AND p.moderation = 'visible' "
         "ON CONFLICT DO NOTHING").rowcount
 
 

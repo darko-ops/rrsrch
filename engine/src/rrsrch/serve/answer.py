@@ -168,7 +168,7 @@ def _trust(conn: psycopg.Connection, ids: list[int]) -> dict[int, dict]:
             "JOIN claims ca ON ca.id = ag.claim_a_id JOIN repositories ra ON ra.id = ca.repository_id "
             "JOIN claims cb ON cb.id = ag.claim_b_id JOIN repositories rb ON rb.id = cb.repository_id "
             "WHERE ag.verdict = 'contradicts' AND (ag.claim_a_id = ANY(%s) OR ag.claim_b_id = ANY(%s)) "
-            "AND ra.visibility = 'public' AND rb.visibility = 'public'", (ids, ids)):
+            "AND ra.visibility = 'public' AND rb.visibility = 'public' AND ra.deleted_at IS NULL AND rb.deleted_at IS NULL", (ids, ids)):
         if a in out:
             out[a]["contradicted_by"].append(b)
         if b in out:

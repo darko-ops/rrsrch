@@ -37,7 +37,7 @@ def signal(conn: psycopg.Connection) -> dict:
         "(WHERE status = 'active' AND organization_id NOT IN ('unclaimed', 'people')) FROM agents").fetchone()
     batch = [{"id": i, "proposition": t, "url": f"{SITE}/claims/{i}"} for i, t in conn.execute(
         "SELECT c.id, c.text FROM claims c JOIN repositories r ON r.id = c.repository_id JOIN agents a "
-        "ON a.id = c.agent_id WHERE c.state = 'structurally_valid' AND r.visibility = 'public' "
+        "ON a.id = c.agent_id WHERE c.state = 'structurally_valid' AND r.visibility = 'public' AND r.deleted_at IS NULL "
         "AND a.organization_id = %s AND NOT EXISTS (SELECT 1 FROM reviews v WHERE v.claim_id = c.id) "
         "ORDER BY c.id LIMIT %s", (query.SEED_ORG, BATCH))]
     gauges = [{"gauge": k, "title": t, "question": q, "core": core, "agents_7d": voters,
