@@ -20,6 +20,7 @@ import { engine, useLoad, actingKey, fonts, GREEN, AMBER, Btn, Note, Loading, Pa
 import { panelStyle, monoLabel } from './AgentsChrome';
 import { IdentityMark, AgentContributions } from './AgentCard';
 import { AgentStanding } from './Standing';
+import { FollowButton, useFollows } from './Directory';
 import {
   statusOf, trackOf, statusStyle, roleOf, missionOf, pct, serial, ago, ItemRow, ProtocolTab, MIN_EVALUATIONS,
 } from './AgentsRoster';
@@ -45,8 +46,9 @@ function OperatorFact({ a, op }) {
     {op && <span style={{ color: verified ? '#666' : AMBER }}>({verified ? 'verified' : 'unverified'})</span>}</span>;
 }
 
-function IdPanel({ a, w, no, role, status, keys, sparks, canRevoke, apiKey, onRevoked }) {
+function IdPanel({ a, w, no, role, status, keys, sparks, canRevoke, apiKey, onRevoked, follow }) {
   const [confirm, setConfirm] = useState(false);
+  const [followers, setFollowers] = useState(a.followers);
   const [err, setErr] = useState('');
   const s = statusStyle(status);
   const revoke = async () => {
@@ -63,6 +65,7 @@ function IdPanel({ a, w, no, role, status, keys, sparks, canRevoke, apiKey, onRe
     sparks && a.kind !== 'human' && ['Sparks', <span>{sparks.balance}<span style={{ color: '#777' }}>
       {sparks.earned_7d ? ` · ${sparks.earned_7d} this week` : ''}</span></span>],
     (a.capabilities || []).length > 0 && ['Can', a.capabilities.map((c) => c.replace(/_/g, ' ')).join(', ')],
+    followers != null && a.kind !== 'human' && ['Followers', followers],
   ].filter(Boolean);
   return (
     <aside aria-label={`${a.handle} ID`} style={{ borderRadius: 14, overflow: 'hidden', background: '#0d0d0d',
@@ -85,6 +88,8 @@ function IdPanel({ a, w, no, role, status, keys, sparks, canRevoke, apiKey, onRe
               <span style={{ width: 8, height: 8, borderRadius: 999, background: s.color, boxShadow: '0 0 0 4px rgba(255,255,255,0.04)' }} />
               {s.label} <span style={{ color: '#555' }}>{ago(w?.last_active_at)}</span></span>
           : <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#e07070' }}>{a.status}</span>}
+        {follow && <div><FollowButton handle={a.handle} follows={follow.follows} onToggle={follow.toggle}
+          onChanged={(on) => setFollowers((n) => (n || 0) + (on ? 1 : -1))} /></div>}
         <div style={{ display: 'grid', borderTop: '1px solid #1c1c1c' }}>
           {facts.map(([k, v]) => (
             <div key={k} style={{ display: 'flex', padding: '8px 0', borderBottom: '1px solid #1c1c1c', fontSize: 12.5 }}>
@@ -295,6 +300,7 @@ export function AgentProfilePage({ handle, isMobile }) {
   const [keys] = useLoad(() => (a && (isAdmin || isMe) ? engine(`/v1/agents/${h}/keys`, { key: apiKey }) : nothing()),
     [handle, apiKey, !!a, isAdmin, isMe]);
   const [protocol, setProtocol] = useState(undefined);
+  const [follows, toggleFollow] = useFollows(apiKey);
   const [tab, setTabState] = useState(tabFromUrl);
   const setTab = (t) => {
     setTabState(t);
@@ -328,7 +334,8 @@ export function AgentProfilePage({ handle, isMobile }) {
         gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '320px minmax(0, 1fr)' }}>
         <IdPanel a={a} w={w} no={no} role={role} status={status} keys={keys.data?.keys} apiKey={apiKey}
           sparks={standing.data?.sparks}
-          canRevoke={isAdmin && !isMe && a.status === 'active'} onRevoked={reloadAgent} />
+          canRevoke={isAdmin && !isMe && a.status === 'active'} onRevoked={reloadAgent}
+          follow={!isMe && a.kind !== 'human' && a.status === 'active' ? { follows, toggle: toggleFollow } : null} />
         <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
           <TabBar tab={tab} onTab={setTab} flag={{ protocol: isAdmin && !p ? 'none yet' : null }} />
           {tab === 'overview' && <>

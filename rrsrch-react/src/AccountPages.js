@@ -167,7 +167,8 @@ function KeyConnect({ onKey, compact }) {
   );
 }
 
-export function AccountSignedOut({ isMobile, onSignedIn, onKey }) {
+// formOnly: just the sign-in and sign-up form, for a page that needs a person signed in (an agent's claim link)
+export function AccountSignedOut({ isMobile, onSignedIn, onKey, formOnly = false }) {
   const [mode, setMode] = useState('signin');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -199,6 +200,39 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey }) {
   const onGoogle = useCallback((d) => { writeStored(TOKEN_KEY, d.token); onSignedIn(d.user); }, [onSignedIn]);
   const card = { ...panelStyle, padding: 24, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, alignContent: 'start', boxSizing: 'border-box',
     width: isMobile ? '100%' : 420 };
+  const signInForm = (
+    <form onSubmit={submit} style={card}>
+      <div role="tablist" style={{ display: 'flex', border: '1px solid #333', borderRadius: 9, overflow: 'hidden' }}>
+        {[['signin', 'Sign in'], ['signup', 'Create account']].map(([m, label]) => (
+          <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setErr(''); }}
+            style={{ flex: 1, padding: '9px 0', border: 'none', cursor: 'pointer', fontFamily: fonts.main, fontSize: 13,
+              fontWeight: 700, background: mode === m ? '#fff' : 'transparent', color: mode === m ? '#000' : '#888' }}>
+            {label}</button>
+        ))}
+      </div>
+      {signup && (
+        <LabeledInput label="Name">
+          <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" style={bigInput()} />
+        </LabeledInput>
+      )}
+      <LabeledInput label="Email">
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" style={bigInput()} />
+      </LabeledInput>
+      <LabeledInput label="Password">
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+          autoComplete={signup ? 'new-password' : 'current-password'} style={bigInput()} />
+      </LabeledInput>
+      {signup && <PasswordRules password={password} who={{ name, email }} />}
+      {err && <div style={{ color: RED, fontSize: 13 }}>{err}</div>}
+      <button type="submit" disabled={blocked} style={{ width: '100%', background: GREEN, color: '#000', border: 'none',
+        borderRadius: 8, padding: '12px 0', fontSize: 14, fontWeight: 800, fontFamily: fonts.main,
+        cursor: busy ? 'wait' : 'pointer', opacity: blocked ? 0.5 : 1 }}>
+        {busy ? 'Working…' : signup ? 'Create account' : 'Sign in'}
+      </button>
+      <GoogleSignIn onSignedIn={onGoogle} onError={setErr} width={isMobile ? 300 : 370} />
+    </form>
+  );
+  if (formOnly) return signInForm;
   return (
     <div style={{ padding: isMobile ? '24px 4px' : '56px 48px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 36, justifyItems: 'center',
       fontFamily: fonts.main }}>
@@ -213,36 +247,7 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey }) {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '420px 420px', gap: 20,
         alignItems: 'stretch', width: isMobile ? '100%' : 'auto' }}>
-        <form onSubmit={submit} style={card}>
-          <div role="tablist" style={{ display: 'flex', border: '1px solid #333', borderRadius: 9, overflow: 'hidden' }}>
-            {[['signin', 'Sign in'], ['signup', 'Create account']].map(([m, label]) => (
-              <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setErr(''); }}
-                style={{ flex: 1, padding: '9px 0', border: 'none', cursor: 'pointer', fontFamily: fonts.main, fontSize: 13,
-                  fontWeight: 700, background: mode === m ? '#fff' : 'transparent', color: mode === m ? '#000' : '#888' }}>
-                {label}</button>
-            ))}
-          </div>
-          {signup && (
-            <LabeledInput label="Name">
-              <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" style={bigInput()} />
-            </LabeledInput>
-          )}
-          <LabeledInput label="Email">
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" style={bigInput()} />
-          </LabeledInput>
-          <LabeledInput label="Password">
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              autoComplete={signup ? 'new-password' : 'current-password'} style={bigInput()} />
-          </LabeledInput>
-          {signup && <PasswordRules password={password} who={{ name, email }} />}
-          {err && <div style={{ color: RED, fontSize: 13 }}>{err}</div>}
-          <button type="submit" disabled={blocked} style={{ width: '100%', background: GREEN, color: '#000', border: 'none',
-            borderRadius: 8, padding: '12px 0', fontSize: 14, fontWeight: 800, fontFamily: fonts.main,
-            cursor: busy ? 'wait' : 'pointer', opacity: blocked ? 0.5 : 1 }}>
-            {busy ? 'Working…' : signup ? 'Create account' : 'Sign in'}
-          </button>
-          <GoogleSignIn onSignedIn={onGoogle} onError={setErr} width={isMobile ? 300 : 370} />
-        </form>
+        {signInForm}
         <div style={card}>
           <div style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}>
             <span style={{ color: '#fff', fontSize: 16, fontWeight: 700 }}>Connect an agent key</span>
@@ -657,7 +662,7 @@ function OrganizationTab({ user }) {
         </div>
         {who.data.org_role === 'admin' && (
           <Note>Claim the agents you run on the <a href="#/agents?tab=agents" style={{ color: '#9ab' }}>Agents page</a>:
-            each one gives you its claim code when it signs up.</Note>
+            each one gives you its claim link when it signs up.</Note>
         )}
         <Repositories orgId={orgId} token={token} admin={who.data.org_role === 'admin'}
           verified={o?.verification === 'verified'} />

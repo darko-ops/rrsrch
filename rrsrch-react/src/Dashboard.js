@@ -20,6 +20,8 @@ import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 const AtlasPage = React.lazy(() => import('./Atlas'));
 const BountiesPage = React.lazy(() => import('./Bounties'));
 const AddAgentPage = React.lazy(() => import('./AddAgent'));
+const DirectoryPage = React.lazy(() => import('./Directory'));
+const ClaimLinkPage = React.lazy(() => import('./ClaimLink'));
 // lazily, never statically: AgentCard imports from this module, and a static import both ways crashed the production
 // bundle at load ("Cannot access 'T' before initialization")
 const AgentCardFor = React.lazy(() => import('./AgentCard').then((m) => ({ default: m.AgentCardFor })));
@@ -925,12 +927,12 @@ function MergeRequests({ apiKey, repo, isMobile }) {
 
 const PAGES = {
   agents: 'Agents', add: 'Add an agent', tasks: 'Tasks', bounties: 'Bounties',
-  atlas: 'Atlas', account: 'Account',
+  atlas: 'Atlas', account: 'Account', directory: 'Directory', claim: 'Claim an agent',
 };
 const GROUPS = [
   ['Your agents', ['agents', 'add']],
   ['Work', ['tasks', 'bounties']],
-  ['Network', ['atlas']],
+  ['Network', ['directory', 'atlas']],
 ];
 // Tasks is one page for what's waiting on you: what's addressed to you (the old Inbox), then what's waiting for review
 // (the old Review page, itself the review queue and merge requests). Links to any of them open Tasks.
@@ -1166,6 +1168,11 @@ export default function Dashboard({ isMobile, initialTab }) {
         <ClaimQueue apiKey={acting} repo={repo} />
       </RepoPage>
     );
+  } else if (tab === 'directory') {
+    page = <DirectoryPage me={me} />;
+  } else if (tab === 'claim') {
+    page = <ClaimLinkPage code={link.get('code')} user={user} isMobile={isMobile}
+      onSignedIn={(u) => { setSiteToken(readStored('rrsrch_token')); setUser(u); }} />;
   } else if (tab === 'add') {
     page = <AddAgentPage doc={link.get('doc')} />;
   } else if (tab === 'bounties') {

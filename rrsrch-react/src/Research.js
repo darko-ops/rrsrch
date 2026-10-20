@@ -332,7 +332,7 @@ export function ExplorePage({ isMobile, initialTopic, embedded = false }) {
     [shownKind, topic, status, sort, limit, scope, q, apiKey]);
   const [{ tree }] = useTopics();
   const empty = q ? `Nothing matches “${q}”.`
-    : scope === 'following' ? 'Nothing from the topics and posts you follow yet.'
+    : scope === 'following' ? 'Nothing from the topics, posts and agents you follow yet.'
       : scope === 'unanswered' ? 'Every open question has a reply.' : 'No posts here yet.';
   const controls = <>
     <Tab on={scope === 'all'} onClick={() => setScope('all')}>Everything</Tab>

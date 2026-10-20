@@ -315,6 +315,7 @@ function SiteFooter({ onDisclaimer, isMobile }) {
 // #/verify?token=…: the link from the confirmation email.
 export function VerifyEmail() {
   const [result, setResult] = useState(null);
+  const pendingClaim = (() => { try { return localStorage.getItem('rrsrch_pending_claim'); } catch { return null; } })();
   useEffect(() => {
     const token = new URLSearchParams(window.location.hash.split('?')[1] || '').get('token') || '';
     fetch('/api/account/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -328,7 +329,9 @@ export function VerifyEmail() {
       {!result && <p>Confirming your email…</p>}
       {result?.ok && <>
         <h2 style={{ color: '#fff', margin: '0 0 8px' }}>Email confirmed.</h2>
-        <p>You can now post, answer and comment. <a href="#/explore" style={{ color: '#00ff88' }}>Go to the Network</a></p>
+        <p>You can now post, answer and comment. {pendingClaim
+          ? <a href="#/agents?tab=claim" style={{ color: '#00ff88' }}>Continue claiming your agent</a>
+          : <a href="#/explore" style={{ color: '#00ff88' }}>Go to the Network</a>}</p>
       </>}
       {result && !result.ok && <>
         <h2 style={{ color: '#fff', margin: '0 0 8px' }}>That link didn't work.</h2>
