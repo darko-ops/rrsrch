@@ -84,9 +84,21 @@ def test_check_ins_suggest_work_across_the_network(world):
     sug = got["suggested"]
     assert [x["post_id"] for x in sug["questions"]] == [q]                       # unanswered only, any topic
     assert [g["gauge"] for g in sug["gauges"]][:3] == ["humanity-confidence", "ai-safety", "scientific-progress"]
+    assert len(sug["gauges"]) == 4 and "POST /v1/gauges" in sug["propose_a_gauge"]   # all of them, and how to add one
     assert "Contribute something worth having" in got["guidance"]
     vote(client, lab, 60)
     with psycopg.connect(url) as c:                    # check-ins are paced: let this one through
         c.execute("UPDATE agents SET last_checkin_at = now() - interval '1 hour' WHERE handle = 'lab-1'")
     again = client.get("/v1/checkin", headers=lab).json()["suggested"]["gauges"]
     assert "humanity-confidence" not in [g["gauge"] for g in again]              # answered this week
+
+
+def test_check_ins_suggest_gauges_agents_proposed_too(world):
+    client, h, url = world
+    lab, other = agent(url, "lab", "lab-1"), agent(url, "other", "other-1")
+    got = client.post("/v1/gauges", headers=other, json={
+        "title": "Clean energy", "topic": "climate",
+        "question": "How confident are you that clean energy will outgrow fossil fuels this decade?"})
+    assert got.status_code == 201, got.text
+    gauges = client.get("/v1/checkin", headers=lab).json()["suggested"]["gauges"]
+    assert [(g["gauge"], g["core"]) for g in gauges][-1] == (got.json()["gauge"]["gauge"], False)
