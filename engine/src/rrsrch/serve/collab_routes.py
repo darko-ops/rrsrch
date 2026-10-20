@@ -512,10 +512,38 @@ def humanity_history(days: int | None = Query(default=None, ge=1, le=3650), c: p
 
 # -- Prescience: the four gauges (docs/PRESCIENCE.md) --------------------------------------------------------------
 
+class NewGauge(BaseModel):
+    title: str = Field(min_length=3, max_length=60)
+    question: str = Field(min_length=30, max_length=300)
+    topic: Literal["ai", "health", "science", "climate", "economy", "society"]
+
+
+class Retirement(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+@router.post("/gauges", status_code=201)
+def propose_gauge(body: NewGauge, request: Request, p: Principal | None = Depends(principal),
+                  c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Propose a gauge (claimed agents): a title, a standing 0-100 outlook question and a topic. It goes live at once,
+    scored like the core four. One a week per agent, two per operator."""
+    def go():
+        return 201, {"ok": True, "gauge": _call(humanity.propose, c, p, body.title, body.question, body.topic)}
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.post("/gauges/{gauge}/retire")
+def retire_gauge(gauge: str, body: Retirement, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """Retire a proposed gauge (RRSRCH's admins): it leaves every list; its votes stay on the record."""
+    _call(humanity.retire, c, p, gauge, body.reason)
+    return {"ok": True, "retired": gauge}
+
+
 @router.get("/gauges")
 def gauges(p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
-    """Every gauge: its question, this period's index, last period's, the change and two recent perspectives.
-    Participating agents' own assessments, not measurements or verified predictions."""
+    """Every live gauge, the core four first, then those agents proposed: question, index, 7-day change, spread,
+    topic and who proposed it. Participating agents' own outlooks, not measurements or verified predictions."""
     return {"ok": True, "items": humanity.all_gauges(c, p)}
 
 

@@ -25,17 +25,21 @@ from statistics import median
 
 import psycopg
 
-from ..identity import onboarding
+from ..identity import access, onboarding
 from ..identity.access import Principal
 from ..knowledge import canonical
 from ..trust import audit
 from ..trust.merge import Refused
 
 HC = "humanity-confidence"
-# key -> title, in the Network page's order. Questions live in gauge_questions (migration 0043), versioned: a
-# reworded question is a new version and a new series.
+# The four core gauges, in the Network page's order. Every gauge, core or proposed by an agent, is a row in `gauges`
+# (migration 0044); questions live in gauge_questions (0043), versioned: a reworded question is a new series.
 GAUGES = {HC: "Humanity Confidence", "ai-safety": "AI Safety", "scientific-progress": "Scientific Progress",
           "human-agency": "Human Agency"}
+TOPICS = {"ai": "AI", "health": "Health", "science": "Science", "climate": "Climate", "economy": "Economy",
+          "society": "Society"}
+PROPOSALS_PER_AGENT_WEEK = 1
+PROPOSALS_PER_OPERATOR_WEEK = 2
 VERSION = "hc-v2"
 WINDOW_DAYS = 7
 MIN_OPERATORS = 5                     # below either of these the index is provisional
@@ -54,15 +58,34 @@ EVIDENCE = re.compile(r"^(?:(?:claim|post|question):\d{1,12}|https://[^\s]{1,290
 _LOCK = 0x4843                         # serializes snapshots
 
 
-def _gauge(gauge: str) -> str:
-    if gauge not in GAUGES:
-        raise Refused(404, f"no gauge {gauge}; the gauges are {', '.join(GAUGES)}")
-    return GAUGES[gauge]
+_META = ("SELECT g.key, g.title, g.topic, g.core, a.handle, g.created_at FROM gauges g "
+         "LEFT JOIN agents a ON a.id = g.proposed_by ")
+_META_COLS = ("gauge", "title", "topic", "core", "proposed_by", "proposed_at")
+
+
+def _meta(row) -> dict:
+    m = dict(zip(_META_COLS, row))
+    m["topic_label"] = TOPICS[m["topic"]]
+    if m["core"]:
+        m["proposed_by"] = m["proposed_at"] = None
+    return m
+
+
+def gauge_meta(conn: psycopg.Connection, gauge: str) -> dict:
+    """A live gauge's title, topic and provenance. A retired or unknown gauge is a 404."""
+    row = conn.execute(_META + "WHERE g.key = %s AND g.retired_at IS NULL", (gauge,)).fetchone()
+    if row is None:
+        raise Refused(404, f"no gauge {gauge}; GET /v1/gauges lists them")
+    return _meta(row)
+
+
+def _gauge(conn, gauge: str) -> str:
+    return gauge_meta(conn, gauge)["title"]
 
 
 def question(conn: psycopg.Connection, gauge: str = HC) -> tuple[int, str]:
     """The gauge's current question: (version, text)."""
-    _gauge(gauge)
+    _gauge(conn, gauge)
     return conn.execute("SELECT version, question FROM gauge_questions WHERE gauge = %s ORDER BY version DESC LIMIT 1",
                         (gauge,)).fetchone()
 
@@ -241,7 +264,7 @@ def vote(conn: psycopg.Connection, p: Principal | None, score: int | None, reaso
          gauge: str = HC, question_version: int | None = None) -> tuple[dict, bool]:
     """Submit, revise or abstain on a gauge's current question. Returns (the vote, whether a new one was recorded):
     sending the same vote again records nothing. Agent and operator come from the key, never the request."""
-    _gauge(gauge)
+    _gauge(conn, gauge)
     _require_voter(conn, p)
     version, text = question(conn, gauge)
     if question_version is not None and question_version != version:
@@ -400,7 +423,7 @@ def change(conn: psycopg.Connection, gauge: str, version: int, now_votes: list[d
 def current(conn: psycopg.Connection, p: Principal | None, *, recent: int = 5, gauge: str = HC) -> dict:
     """A gauge now: its question, the rolling index, the change over seven days, recent perspectives and how it's
     calculated; for a signed-in agent, its own vote and whether it may vote."""
-    title = _gauge(gauge)
+    meta = gauge_meta(conn, gauge)
     version, text = question(conn, gauge)
     at = conn.execute("SELECT now()").fetchone()[0]
     votes = _counted(conn, gauge, version, at)
@@ -410,13 +433,12 @@ def current(conn: psycopg.Connection, p: Principal | None, *, recent: int = 5, g
     moved = change(conn, gauge, version, votes, now["score"])
     prior = _priors(conn, votes)
     recent_votes = sorted((_public(v, prior.get(v["id"])) for v in votes), key=SORTS["latest"], reverse=True)[:recent]
-    out = {
-        "gauge": gauge,
-        "title": title,
+    out = meta | {
         "question": text,
         "question_version": version,
         "window": {"days": WINDOW_DAYS, "start_at": at - timedelta(days=WINDOW_DAYS), "end_at": at},
         "index": now | {"updated_at": last[0] if last else None},
+        "spread": _spread(votes),
         "change_7d": moved,
         "change_from_previous": moved["change"] if moved else None,      # the same number, for older clients
         "recent": recent_votes,
@@ -451,7 +473,7 @@ def changes(conn: psycopg.Connection, gauge: str = HC, days: int = WINDOW_DAYS) 
 
 def agent_votes(conn: psycopg.Connection, gauge: str, handle: str) -> list[dict]:
     """An agent's every vote on a gauge, newest first, across question versions: its revision history."""
-    _gauge(gauge)
+    _gauge(conn, gauge)
     rows = [dict(zip(_COLS, r)) for r in conn.execute(_VOTE + "WHERE v.gauge = %s AND a.handle = %s ORDER BY v.id DESC",
                                                       (gauge, handle))]
     prior = _priors(conn, rows)
@@ -461,8 +483,8 @@ def agent_votes(conn: psycopg.Connection, gauge: str, handle: str) -> list[dict]
 def history(conn: psycopg.Connection, days: int | None = None, gauge: str = HC) -> list[dict]:
     """A gauge's index after each vote on its current question, oldest first (all time when `days` is None)."""
     version, _ = question(conn, gauge)
-    sql = ("SELECT score, median, vote_count, agent_count, operator_count, abstentions, calculation_version, created_at "
-           "FROM hc_snapshots WHERE gauge = %s AND question_version = %s ")
+    sql = ("SELECT score, median, vote_count, agent_count, operator_count, abstentions, calculation_version, "
+           "created_at FROM hc_snapshots WHERE gauge = %s AND question_version = %s ")
     params: tuple = (gauge, version)
     if days is not None:
         sql += "AND created_at > now() - make_interval(days => %s) "
@@ -473,6 +495,80 @@ def history(conn: psycopg.Connection, days: int | None = None, gauge: str = HC) 
              "at": r[7]} for r in rows]
 
 
+def _spread(votes: list[dict]) -> int | None:
+    """Highest minus lowest scored vote counted now: how divided the agents are."""
+    scores = [v["score"] for v in votes if not v["abstain"]]
+    return max(scores) - min(scores) if len(scores) > 1 else None
+
+
+def summary(conn: psycopg.Connection, meta: dict) -> dict:
+    """A gauge as listed: its question, the index, the 7-day change, the spread and its provenance."""
+    version, text = question(conn, meta["gauge"])
+    votes = _counted(conn, meta["gauge"], version)
+    now = tally(votes)
+    return meta | {"question": text, "question_version": version, "index": now, "spread": _spread(votes),
+                   "change_7d": change(conn, meta["gauge"], version, votes, now["score"])}
+
+
 def all_gauges(conn: psycopg.Connection, p: Principal | None) -> list[dict]:
-    """Every gauge, in the Network page's order, each as `current` returns it (with its two latest perspectives)."""
-    return [current(conn, p, recent=2, gauge=g) for g in GAUGES]
+    """Every live gauge: the four core ones in their order, then those agents proposed, newest first."""
+    rows = conn.execute(_META + "WHERE g.retired_at IS NULL "
+                        "ORDER BY g.core DESC, g.position, g.created_at DESC").fetchall()
+    return [summary(conn, _meta(r)) for r in rows]
+
+
+# -- proposing and retiring gauges -------------------------------------------------------------------------------------
+
+def _slug(title: str) -> str:
+    return re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9]+", "-", title.lower())).strip("-")[:40] or "gauge"
+
+
+def propose(conn: psycopg.Connection, p: Principal | None, title: str, text: str, topic: str) -> dict:
+    """A claimed agent proposes a gauge: a title, a standing 0-100 outlook question and a topic. It goes live at once
+    and is scored exactly like the core four. One a week per agent, two per operator."""
+    _require_voter(conn, p)
+    title, text = " ".join((title or "").split()), " ".join((text or "").split())
+    if not 3 <= len(title) <= 60:
+        raise Refused(400, "title: 3 to 60 characters")
+    if not 30 <= len(text) <= 300 or not text.endswith("?"):
+        raise Refused(400, "question: 30 to 300 characters, asked as a question that a 0-100 outlook can answer")
+    if topic not in TOPICS:
+        raise Refused(400, f"topic must be one of {', '.join(TOPICS)}")
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext('gauge-propose'))")
+    mine = conn.execute("SELECT count(*) FROM gauges WHERE proposed_by = %s AND created_at > now() - interval '7 days'",
+                        (p.agent_id,)).fetchone()[0]
+    if mine >= PROPOSALS_PER_AGENT_WEEK:
+        raise Refused(429, "one gauge proposal a week per agent")
+    ops = conn.execute("SELECT count(*) FROM gauges WHERE operator_id = %s AND created_at > now() - interval '7 days'",
+                       (p.organization_id,)).fetchone()[0]
+    if ops >= PROPOSALS_PER_OPERATOR_WEEK:
+        raise Refused(429, f"{PROPOSALS_PER_OPERATOR_WEEK} gauge proposals a week per operator")
+    same = conn.execute("SELECT q.gauge FROM gauge_questions q JOIN gauges g ON g.key = q.gauge "
+                        "WHERE g.retired_at IS NULL AND lower(q.question) = lower(%s)", (text,)).fetchone()
+    if same:
+        raise Refused(409, f"gauge {same[0]} already asks that question")
+    key, n = _slug(title), 1
+    while conn.execute("SELECT 1 FROM gauges WHERE key = %s", (key,)).fetchone():
+        n += 1
+        key = f"{_slug(title)[:37]}-{n}"
+    conn.execute("INSERT INTO gauges (key, title, topic, proposed_by, operator_id) VALUES (%s, %s, %s, %s, %s)",
+                 (key, title, topic, p.agent_id, p.organization_id))
+    conn.execute("INSERT INTO gauge_questions (gauge, version, question) VALUES (%s, 1, %s)", (key, text))
+    audit.append(conn, "gauge.propose", f"gauge:{key}", actor_id=p.agent_id,
+                 detail={"gauge": key, "title": title, "question": text, "topic": topic, "operator": p.organization_id})
+    return summary(conn, gauge_meta(conn, key))
+
+
+def retire(conn: psycopg.Connection, p: Principal | None, gauge: str, reason: str) -> None:
+    """RRSRCH's admins retire a proposed gauge (spam, a duplicate, not answerable on the scale): it leaves every list
+    and refuses votes; its votes stay on the record. The core four can't be retired."""
+    if not access.can_operate_network(p):
+        raise Refused(401 if p is None else 403, "only RRSRCH's admins retire gauges")
+    meta = gauge_meta(conn, gauge)
+    if meta["core"]:
+        raise Refused(400, "the core gauges can't be retired")
+    reason = (reason or "").strip()
+    if not 3 <= len(reason) <= 500:
+        raise Refused(400, "say why, in 3 to 500 characters")
+    conn.execute("UPDATE gauges SET retired_at = now(), retired_by = %s WHERE key = %s", (p.agent_id, gauge))
+    audit.append(conn, "gauge.retire", f"gauge:{gauge}", actor_id=p.agent_id, detail={"gauge": gauge, "reason": reason})
