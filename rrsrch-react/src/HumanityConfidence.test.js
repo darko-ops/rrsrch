@@ -28,7 +28,7 @@ test('the Network page shows four gauges, each opening its Prescience page', asy
   expect(cards[2]).toHaveTextContent('1 abstained');
   expect(within(cards[3]).getByRole('img', { name: 'Human Agency gauge: no score yet' })).toBeInTheDocument();
   expect(cards[0]).toHaveAttribute('title', Q);
-  expect(within(row).getByText('Explore perspectives →')).toHaveAttribute('href', '#/prescience/humanity-confidence');
+  expect(within(row).getByText('All gauges →')).toHaveAttribute('href', '#/prescience');
   expect(row).toHaveTextContent(/not a measurement or a verified prediction/);
 });
 

@@ -3,6 +3,7 @@ export const Q = 'Taking health, prosperity, freedom, safety, scientific progres
 export const idx = (o = {}) => ({ score: null, label: null, median: null, status: 'awaiting', agents: 0, abstentions: 0, operators: 0,
   verified_operators: 0, model_families: 0, distribution: [0, 0, 0, 0, 0], updated_at: null, ...o });
 export const gauge = (key, title, o = {}) => ({ ok: true, gauge: key, title, question: `${title}?`, question_version: 1,
+  core: true, topic: 'society', topic_label: 'Society', proposed_by: null, proposed_at: null, spread: null,
   window: { days: 7 }, index: idx(), change_7d: null, change_from_previous: null, recent: [], method: null, ...o });
 export const FOUR = [
   gauge('humanity-confidence', 'Humanity Confidence', { question: Q, question_version: 2,
@@ -17,3 +18,18 @@ export const FOUR = [
   gauge('human-agency', 'Human Agency'),
 ];
 
+
+// gauges agents proposed
+export const proposed = (key, title, topic, o = {}) => gauge(key, title, { core: false, topic, topic_label:
+  ({ ai: 'AI', health: 'Health', science: 'Science', climate: 'Climate', economy: 'Economy', society: 'Society' })[topic],
+  proposed_by: `${key}-bot`, proposed_at: '2026-10-15T00:00:00Z', ...o });
+export const PROPOSED = [
+  proposed('clean-power', 'Clean Power', 'climate', { proposed_at: '2026-10-18T00:00:00Z', spread: 40,
+    index: idx({ score: 61, label: 'Cautiously optimistic', status: 'provisional', agents: 4, operators: 3, distribution: [0, 0, 1, 2, 1] }),
+    change_7d: { change: 1.5, previous_score: 59.5, since: '2026-10-12T00:00:00Z', from_revisions: null, mostly_participation: false } }),
+  proposed('open-models', 'Open Models', 'ai', { proposed_at: '2026-10-12T00:00:00Z', spread: 70,
+    index: idx({ score: 47, label: 'Mixed outlook', status: 'active', agents: 14, operators: 6, distribution: [1, 3, 5, 3, 2] }),
+    change_7d: { change: -8.2, previous_score: 55.2, since: '2026-10-12T00:00:00Z', from_revisions: null, mostly_participation: false } }),
+  proposed('cancer-cures', 'Cancer Cures', 'health', { proposed_at: '2026-10-16T00:00:00Z', spread: 10,
+    index: idx({ score: 70, label: 'Cautiously optimistic', status: 'provisional', agents: 2, operators: 2, distribution: [0, 0, 0, 2, 0] }) }),
+];
