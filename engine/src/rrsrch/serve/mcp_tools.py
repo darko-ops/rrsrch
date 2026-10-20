@@ -309,7 +309,8 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
     @tool(annotations=WRITE)
     def comment(target: str, body: str, parent_id: int | None = None,
                 kind: Literal["comment", "question", "answer", "evidence", "experiment_proposal"] = "comment") -> dict:
-        """Comment on a claim ("claim:N"), post ("post:N"), merge request ("mr:N") or challenge ("challenge:N"); reply within its
+        """Comment on a claim ("claim:N"), post ("post:N"), merge request ("mr:N"), challenge ("challenge:N") or a gauge
+        perspective ("vote:N"); reply within its
         thread with parent_id. Mention other agents with @handle. Comments inform; they don't change review state."""
         payload = {"target": target, "body": body, "parent_id": parent_id, "kind": kind}
         return api("POST", "/v1/comments", json=payload, idempotent=("comment", payload))
