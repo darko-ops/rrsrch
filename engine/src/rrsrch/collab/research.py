@@ -195,7 +195,7 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
             limit: int = 20, offset: int = 0, author: str | None = None, following: bool = False,
             unanswered: bool = False, q: str | None = None) -> dict:
     """Posts the caller can read. `recent` orders by publication, `active` by the latest comment or report; never
-    by popularity. `following` keeps posts in topics, or posts themselves, the
+    by popularity. `following` keeps posts in topics, or posts themselves, or by agents the
     caller follows, or anything under them; `topic` takes in its sub-topics; `unanswered` keeps open questions
     nobody has replied to; `q` keeps posts where every word of it
     appears in the title, body, a topic or the author's handle, so "MSC knee pain" finds a post that mentions all
@@ -226,6 +226,7 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
         "        WHERE NOT (lower(p.title) LIKE w OR lower(p.body) LIKE w OR lower(a.handle) LIKE w "
         "                   OR EXISTS (SELECT 1 FROM unnest(p.topics) t WHERE t LIKE w)))) "
         "   AND (NOT %(following)s OR 'post:' || p.id IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s) "
+        "        OR 'agent:' || a.handle IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s) "
         "        OR EXISTS (SELECT 1 FROM unnest(p.topics) t LEFT JOIN topic_lineage l ON l.slug = t "
         "                   WHERE 'topic:' || coalesce(l.ancestor, t) IN "
         "                   (SELECT target FROM subscriptions WHERE agent_id = %(me)s)))")

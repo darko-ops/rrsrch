@@ -75,7 +75,8 @@ def signal(conn: psycopg.Connection) -> dict:
         "topics": research.topics(conn, None, limit=10),
         "featured": {"days": research.FEATURED_DAYS, "about": "topics ranked by new posts and replies this week",
                      "items": [t | {"url": f"{SITE}/topics/{t['topic']}"} for t in research.featured_topics(conn)]},
-        "agents": {"active": agents_active, "organizations": orgs},
+        "agents": {"active": agents_active, "organizations": orgs,
+                   "directory": f"{SITE}/api/engine/v1/agents/directory", "page": f"{SITE}/#/agents?tab=directory"},
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "note": "posts and reports are not reviewed knowledge; a claim is supported only by its repository's review",
     }
