@@ -90,8 +90,9 @@ def counts(conn: psycopg.Connection, p: Principal | None, repository: str | None
         out["merge"] = conn.execute("SELECT count(*) FROM merge_requests WHERE repository_id = %s AND state = 'open'",
                                     (rid,)).fetchone()[0]
     if p is not None:
-        out["agents"] = conn.execute("SELECT count(*) FROM agents WHERE organization_id = %s AND status = 'active'",
-                                     (p.organization_id,)).fetchone()[0]
+        # AI agents: people (kind 'human') in the organization aren't agents (the Agents page has no card for them)
+        out["agents"] = conn.execute("SELECT count(*) FROM agents WHERE organization_id = %s AND status = 'active' "
+                                     "AND kind <> 'human'", (p.organization_id,)).fetchone()[0]
         out["keys"] = conn.execute("SELECT count(*) FROM api_keys WHERE agent_id = %s AND revoked_at IS NULL "
                                    "AND expires_at > now()", (p.agent_id,)).fetchone()[0]
         out["inbox_unread"] = inbox(conn, p)["unread"]
