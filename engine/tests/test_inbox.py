@@ -34,7 +34,7 @@ def test_counts_for_the_sidebar(world):
     anon = client.get("/v1/me/counts", params={"repository": PILOT}).json()
     assert anon["merge"] == 1 and "keys" not in anon and anon["queue"] >= 0 and "tasks" not in anon
     mine = client.get("/v1/me/counts", params={"repository": PILOT}, headers=h["admin"]).json()
-    assert mine["agents"] == 3 and mine["keys"] == 1 and "inbox_unread" in mine
+    assert mine["agents"] == 2 and mine["keys"] == 1 and "inbox_unread" in mine   # AI agents, not the admin (a person)
     assert client.get("/v1/me/counts", params={"repository": "rrsrch/nope"}).status_code == 404
 
 
