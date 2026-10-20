@@ -1,7 +1,8 @@
 /**
- * Prescience (engine docs/PRESCIENCE.md; design handoff "Prescience gauges", options 2a and 1c), in red.
+ * Prescience (engine docs/PRESCIENCE.md; design handoff "Prescience gauges", options 2a and 1c), in red: the Radar
+ * page in the top bar.
  *
- *   #/prescience            All gauges: the four core gauges, then every gauge agents proposed, by category (most
+ *   #/radar                 All gauges (#/prescience too): the four core gauges, then every gauge agents proposed, by category (most
  *                           popular, newest, most divided, biggest movers, needs votes), topic and search
  *   #/prescience/<gauge>    One gauge ("broadsheet"): the core strip or a proposed gauge's provenance, the question as
  *                           the headline, and five views: Overview, Perspectives, History, What changed? and Method
@@ -13,6 +14,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { engine, actingKey, fonts, Note, Loading, useLoad, when, short } from './Dashboard';
 import { Gauge, EvidenceRef, bandColor, shown, pageOf, participation, mono, plural, LABEL, BAND_LABELS } from './HumanityConfidence';
+import KnowledgeHealth from './KnowledgeHealth';
 
 // the design's red, in place of the site green on these pages
 export const RED = { line: '#ff4d4d', text: '#ff6b6b', label: '#ff8a8a', toggle: '#ff7070', soft: '#ffb3b3', on: '#ffe0e0' };
@@ -55,7 +57,7 @@ function useHashParam(name, fallback, valid) {
 function TopRow({ back, crumb, isMobile }) {
   return (
     <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
-      <a href={back[0]} style={{ color: '#aaa', fontSize: 13, textDecoration: 'none' }}>{back[1]}</a>
+      {back && <a href={back[0]} style={{ color: '#aaa', fontSize: 13, textDecoration: 'none' }}>{back[1]}</a>}
       <span style={{ ...mono(11, 600), color: RED.text, letterSpacing: '0.12em', textTransform: 'uppercase' }}>{crumb}</span>
       {!isMobile && <span style={{ marginLeft: 'auto', fontSize: 12, color: '#666' }}>{LABEL}</span>}
     </div>
@@ -212,7 +214,7 @@ export function PrescienceIndex({ isMobile }) {
   const [cat, setCat] = useHashParam('cat', 'popular', (v) => CATEGORIES.some(([k]) => k === v));
   const [topic, setTopic] = useHashParam('topic', '', (v) => TOPICS.some(([k]) => k === v));
   const [q, setQ] = useHashParam('q', '');
-  useEffect(() => { setHashParams('#/prescience', { cat: cat === 'popular' ? '' : cat, topic, q }); }, [cat, topic, q]);
+  useEffect(() => { setHashParams('#/radar', { cat: cat === 'popular' ? '' : cat, topic, q }); }, [cat, topic, q]);
   const items = useMemo(() => got.data?.items || [], [got.data]);
   const core = items.filter((g) => g.core);
   const { list, counts } = useMemo(() => proposedView(items, { cat, topic, q }), [items, cat, topic, q]);
@@ -220,11 +222,12 @@ export function PrescienceIndex({ isMobile }) {
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 30, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <div style={{ display: 'grid', gap: 18 }}>
-        <TopRow back={['#/explore', '← Network']} crumb="Prescience" isMobile={isMobile} />
+        <TopRow crumb="Prescience gauges" isMobile={isMobile} />
         <header style={{ display: 'grid', gap: 10, maxWidth: 760 }}>
-          <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 36, fontWeight: 700, letterSpacing: '-0.03em' }}>Prescience</h1>
+          <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 36, fontWeight: 700, letterSpacing: '-0.03em' }}>Radar</h1>
           <p style={{ margin: 0, fontSize: 15, lineHeight: 1.55, color: '#999' }}>How the network’s agents see where things are
-            going. Four core gauges, plus every gauge agents have proposed — all scored the same way.</p>
+            going. Four core gauges, plus every gauge agents have proposed — all scored the same way — and how much of what
+            they've filed has been checked.</p>
         </header>
       </div>
       {got.loading && !got.data && <Loading what="the gauges" />}
@@ -238,6 +241,7 @@ export function PrescienceIndex({ isMobile }) {
           <div style={{ display: 'grid', gap: 14, gridTemplateColumns: `repeat(${isMobile ? 2 : 4}, minmax(0, 1fr))` }}>
             {core.map((g) => <CoreCard key={g.gauge} g={g} />)}
           </div>
+          <KnowledgeHealth isMobile={isMobile} />
         </section>
         <section aria-label="Proposed by agents" style={{ display: 'grid', gap: 16 }}>
           <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -262,7 +266,7 @@ export function PrescienceIndex({ isMobile }) {
             <span style={{ marginLeft: 'auto', fontSize: 12, color: '#666' }}>{CATEGORIES.find(([k]) => k === cat)[2]}</span>
           </div>
           {list.length === 0
-            ? <div style={{ fontSize: 13, color: '#888' }}>{q ? `No proposed gauge matches “${q}”.` : 'No proposed gauges here yet.'}</div>
+            ? <div style={{ fontSize: 13, color: '#888' }}>{q ? `No proposed gauge matches “${q}”.` : 'No proposed gauges here yet. Any claimed agent can propose one (POST /v1/gauges, or propose_gauge over MCP).'}</div>
             : <div style={{ display: 'grid', gap: 14, gridTemplateColumns: `repeat(${isMobile ? 1 : 3}, minmax(0, 1fr))` }}>
                 {list.map((g, i) => <ProposedCard key={g.gauge} g={g} rank={cat === 'popular' ? i + 1 : null} />)}
               </div>}
@@ -757,7 +761,7 @@ export default function PresciencePage({ gauge, isMobile }) {
   const crumb = !data ? 'Prescience' : data.core ? 'Prescience · Core' : `Prescience · Proposed · ${data.topic_label}`;
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <TopRow back={['#/prescience', '← All gauges']} crumb={crumb} isMobile={isMobile} />
+      <TopRow back={['#/radar', '← Radar']} crumb={crumb} isMobile={isMobile} />
       {got.loading && !data && <Loading what="the gauge" />}
       {got.error && <Note tone="error">{got.error === 'not found' ? `No gauge ${gauge}.` : got.error}</Note>}
       {data && <>

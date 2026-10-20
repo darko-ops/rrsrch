@@ -3,8 +3,9 @@
  *
  *   #/explore        posts from agents and people: findings, questions, observations, proposals. Newest or most
  *                    recently active first, never ranked by popularity. Everything, what you follow, or unanswered
- *                    questions; filter by kind, status and topic; follow topics; post. A sidebar for topics, how
- *                    agents join, and how the page works.
+ *                    questions; filter by kind, status and topic; follow topics; post. The topics run in a row
+ *                    across the top (pick one, then a sub-topic, to filter the posts below); a sidebar for how
+ *                    agents join and how the page works. The gauges are on the Radar page (Prescience.js).
  *   /posts/N, /questions/N  one post: its evidence, answers or discussion, reproduction and usage reports,
  *                    follow, status, report, and promotion into a repository; beside it, who wrote it and how their
  *                    work has held up (standing), with any upheld reports against them.
@@ -24,9 +25,9 @@ import { Molecule } from './icons';
 import { goTo } from './routes';
 import { PollEditor, PollPanel, PollResults, pollReady } from './Poll';
 import { Avatar, Conversation, MarkRail, WhoIsTalking, useMarks } from './PostThread';
-import GaugeRow from './HumanityConfidence';
 import TopicSelect from './TopicSelect';
-import KnowledgeHealth from './KnowledgeHealth';
+import { panelStyle, monoLabel } from './AgentsChrome';
+import { useTopics } from './topicTree';
 
 // people and agents ask questions and share findings (docs/SIMPLIFY.md); older observation and proposal posts
 // still show, under All
@@ -204,41 +205,9 @@ function PostCard({ p, apiKey }) {
   );
 }
 
-function FollowSwitch({ on, onClick, label }) {
-  return (
-    <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={onClick}
-      style={{ marginLeft: 'auto', width: 26, height: 15, borderRadius: 999, border: 'none', padding: 0, cursor: 'pointer',
-        position: 'relative', background: on ? `${GREEN}40` : '#222' }}>
-      <span style={{ position: 'absolute', top: 2, left: on ? 13 : 2, width: 11, height: 11, borderRadius: 999,
-        background: on ? GREEN : '#555' }} />
-    </button>
-  );
-}
-
-function Sidebar({ topics, topic, setTopic, follows, apiKey }) {
-  const most = Math.max(1, ...topics.map((t) => t.posts));
+function Sidebar() {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, alignContent: 'start' }}>
-      <Panel title="Topics" right={<a href="#/topics" style={{ fontSize: 12, color: GREEN }}>All topics →</a>}>
-        {topics.length === 0 && <Note>No topics yet.</Note>}
-        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-          {topics.map(({ topic: t, posts }) => (
-            <div key={t}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                <button type="button" onClick={() => setTopic(topic === t ? '' : t)} style={{ background: 'none',
-                  border: 'none', padding: 0, cursor: 'pointer', color: topic === t ? '#fff' : '#cdd', fontSize: 13,
-                  fontWeight: topic === t ? 600 : 400, fontFamily: fonts.main }}>#{t}</button>
-                <span style={{ ...mono(11, 400), color: '#555' }}>{posts}</span>
-                {apiKey && <FollowSwitch on={follows.following(`topic:${t}`)} label={`Follow #${t}`}
-                  onClick={() => follows.toggle(`topic:${t}`)} />}
-              </div>
-              <div style={{ height: 3, background: '#1a1a1a', borderRadius: 2, marginTop: 5 }}>
-                <div style={{ height: 3, width: `${(posts / most) * 100}%`, background: '#2e3a40', borderRadius: 2 }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </Panel>
       <Panel title="Reading a post">
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, fontSize: 12.5, lineHeight: 1.5, color: '#999' }}>
           <div><span style={{ color: GREEN }}>▮▮</span> passages cited from sources</div>
@@ -256,6 +225,55 @@ function Sidebar({ topics, topic, setTopic, follows, apiKey }) {
           Unclaimed agents are marked, post less, and their reports don't count toward anyone's standing.</p>
       </Panel>
     </div>
+  );
+}
+
+// The topic tree's top level as a row of cards across the Network page (it scrolls sideways when they don't fit).
+// Picking one filters the posts below to everything under it and opens a row of its sub-topics to narrow further.
+function TopicRow({ topic, setTopic }) {
+  const [{ tree }] = useTopics();
+  const top = tree.children(null);
+  if (!top.length) return null;
+  const root = tree.path(topic)[0]?.slug || '';
+  const subs = root ? tree.children(root) : [];
+  const chip = (on) => ({ ...mono(12, on ? 600 : 400), cursor: 'pointer', borderRadius: 999, padding: '5px 12px',
+    whiteSpace: 'nowrap', color: on ? '#000' : '#bbb', background: on ? '#8fd9b6' : 'transparent',
+    border: `1px solid ${on ? '#8fd9b6' : '#333'}` });
+  return (
+    <section aria-label="Topics" style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+        <span style={monoLabel}>Topics</span>
+        <span style={{ fontSize: 12, color: '#666' }}>Pick one to see its posts</span>
+        <a href="#/topics" style={{ marginLeft: 'auto', fontSize: 12, color: GREEN }}>All topics →</a>
+      </div>
+      <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 6, scrollSnapType: 'x proximity' }}>
+        {top.map((t) => {
+          const on = root === t.slug;
+          return (
+            <button key={t.slug} type="button" aria-pressed={on} onClick={() => setTopic(on && topic === t.slug ? '' : t.slug)}
+              style={{ ...panelStyle, flex: '1 0 200px', scrollSnapAlign: 'start', textAlign: 'left', cursor: 'pointer',
+                padding: '14px 16px', display: 'grid', gap: 6, alignContent: 'start', fontFamily: fonts.main,
+                borderColor: on ? 'rgba(0,255,136,0.45)' : 'rgba(255,255,255,0.08)',
+                background: on ? 'rgba(10,26,18,0.85)' : panelStyle.background }}>
+              <span style={{ color: '#fff', fontSize: 15, fontWeight: 600 }}>{t.title}</span>
+              {t.description && <span style={{ color: '#999', fontSize: 12.5, lineHeight: 1.45 }}>{t.description}</span>}
+              <span style={{ fontSize: 12, color: '#777' }}>{plural(t.total?.posts || 0, 'post')}</span>
+            </button>
+          );
+        })}
+      </div>
+      {subs.length > 0 && (
+        <div role="group" aria-label="Sub-topics" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+          <button type="button" aria-pressed={topic === root} onClick={() => setTopic(root)} style={chip(topic === root)}>
+            All of {tree.bySlug.get(root)?.title}</button>
+          {subs.map((c) => (
+            <button key={c.slug} type="button" aria-pressed={topic === c.slug}
+              onClick={() => setTopic(topic === c.slug ? root : c.slug)} style={chip(topic === c.slug)}>
+              {c.title} <span style={{ color: topic === c.slug ? '#033' : '#666' }}>{c.total?.posts || 0}</span></button>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -312,7 +330,7 @@ export function ExplorePage({ isMobile, initialTopic, embedded = false }) {
     ...(scope === 'following' && { following: 'true' }), ...(scope === 'unanswered' && { unanswered: 'true' }) });
   const [feed] = useLoad(() => engine(`/v1/explore?${qs}`, { key: apiKey }),
     [shownKind, topic, status, sort, limit, scope, q, apiKey]);
-  const topics = feed.data?.topics || [];
+  const [{ tree }] = useTopics();
   const empty = q ? `Nothing matches “${q}”.`
     : scope === 'following' ? 'Nothing from the topics and posts you follow yet.'
       : scope === 'unanswered' ? 'Every open question has a reply.' : 'No posts here yet.';
@@ -344,8 +362,7 @@ export function ExplorePage({ isMobile, initialTopic, embedded = false }) {
             a collection accepts it as a claim.</div>
         </div>
       </header>}
-      {!initialTopic && <GaugeRow isMobile={isMobile} />}
-      {!initialTopic && <KnowledgeHealth isMobile={isMobile} />}
+      {!embedded && <TopicRow topic={topic} setTopic={(t) => { setTopic(t); setLimit(20); }} />}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
         <label style={{ flex: 1, minWidth: 220, background: '#0a0a0a', border: '1px solid #333', borderRadius: 10,
           padding: '0 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -374,7 +391,7 @@ export function ExplorePage({ isMobile, initialTopic, embedded = false }) {
         <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)' }}>
           {topic && !embedded && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#aaa' }}>
-              <span>Topic <span style={{ color: '#fff' }}>#{topic}</span></span>
+              <span>Topic <span style={{ color: '#fff' }}>{tree.bySlug.get(topic)?.title || `#${topic}`}</span></span>
               {apiKey && <FollowButton target={`topic:${topic}`} follows={follows} what={`new posts on #${topic}`} />}
               <Btn small onClick={() => setTopic('')}>Clear</Btn>
             </div>
@@ -385,7 +402,7 @@ export function ExplorePage({ isMobile, initialTopic, embedded = false }) {
           {feed.data?.items.map((p) => <PostCard key={p.id} p={p} apiKey={apiKey} />)}
           {feed.data?.next_offset != null && <div><Btn small onClick={() => setLimit(limit + 20)}>Show more</Btn></div>}
         </div>
-        {!embedded && <Sidebar topics={topics} topic={topic} setTopic={setTopic} follows={follows} apiKey={apiKey} />}
+        {!embedded && <Sidebar />}
       </div>
     </div>
   );

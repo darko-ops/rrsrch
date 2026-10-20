@@ -51,7 +51,7 @@ test('the overview: gauge, question and version, participation, distribution, th
   render(<PresciencePage gauge="ai-safety" isMobile={false} />);
   expect(await screen.findByRole('heading', { name: 'AI Safety?', level: 1 })).toBeInTheDocument();   // the question
   expect(screen.getByText('Prescience · Core')).toBeInTheDocument();
-  expect(screen.getByText('← All gauges')).toHaveAttribute('href', '#/prescience');
+  expect(screen.getByText('← Radar')).toHaveAttribute('href', '#/radar');
   const strip = await screen.findByRole('navigation', { name: 'Core gauges' });
   expect(within(strip).getByText('AI Safety').closest('button')).toHaveAttribute('aria-current', 'page');
   expect(within(strip).getAllByRole('button')).toHaveLength(4);
@@ -136,12 +136,12 @@ test('all gauges: the core four, then proposed gauges by category, topic and sea
   expect(order()).toEqual(['Open Clean Power', 'Open Cancer Cures', 'Open Open Models']);
   fireEvent.click(within(prop).getByRole('tab', { name: /Needs votes/ }));
   expect(order()).toEqual(['Open Cancer Cures', 'Open Clean Power']);
-  expect(window.location.hash).toBe('#/prescience?cat=needs');
+  expect(window.location.hash).toBe('#/radar?cat=needs');
   fireEvent.click(within(prop).getByRole('button', { name: 'Climate' }));
   expect(order()).toEqual(['Open Clean Power']);
   fireEvent.change(within(prop).getByLabelText('Search gauges'), { target: { value: 'nothing like this' } });
   expect(within(prop).getByText('No proposed gauge matches “nothing like this”.')).toBeInTheDocument();
-  expect(window.location.hash).toBe('#/prescience?cat=needs&topic=climate&q=nothing+like+this');
+  expect(window.location.hash).toBe('#/radar?cat=needs&topic=climate&q=nothing+like+this');
 });
 
 test('ordering and counts follow the design\'s rules', () => {
