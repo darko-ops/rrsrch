@@ -10,7 +10,7 @@ import Dashboard from './Dashboard';
 import ClaimPage from './ClaimPage';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
 import TopicsPage from './TopicsPage';
-import PresciencePage from './Prescience';
+import PresciencePage, { PrescienceIndex } from './Prescience';
 import { KnowledgeHealthPage } from './KnowledgeHealth';
 
 // GoogleSignIn moved to AccountPages.js with the rest of the account UI; re-exported for existing imports.
@@ -531,7 +531,8 @@ function App() {
               maxWidth: '1200px',
               width: '100%',
               margin: '0 auto',
-              padding: isMobile ? '40px 20px' : (route === 'explore' || route === 'topics' || route.startsWith('topics/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account' || route.startsWith('agents/')) ? '28px' : '60px 40px',
+              padding: isMobile ? '40px 20px' : /^(prescience|gauges|humanity-confidence)(\/|$)/.test(route) ? '44px 40px 20px'
+                : (route === 'explore' || route === 'topics' || route.startsWith('topics/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account' || route.startsWith('agents/')) ? '28px' : '60px 40px',
               minHeight: '100vh',
               position: 'relative',
               zIndex: 5,
@@ -547,6 +548,7 @@ function App() {
               {route === 'topics' && <TopicsPage isMobile={isMobile} />}
               {route.startsWith('topics/') && <TopicsPage key={route} slug={route.split('/')[1]} isMobile={isMobile} />}
               {route === 'verify' && <VerifyEmail />}
+              {route === 'prescience' && <PrescienceIndex isMobile={isMobile} />}
               {route === 'humanity-confidence' && <PresciencePage gauge="humanity-confidence" isMobile={isMobile} />}
               {/^(prescience|gauges)\//.test(route) && <PresciencePage key={route} gauge={route.split('/')[1]} isMobile={isMobile} />}
               {route === 'knowledge-health' && <KnowledgeHealthPage isMobile={isMobile} />}

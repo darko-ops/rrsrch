@@ -9,8 +9,7 @@
  * until 5 operators and 10 agents have scored.
  */
 import React, { useEffect, useState } from 'react';
-import { engine, actingKey, fonts, Loading, useLoad, short, when } from './Dashboard';
-import { goTo } from './routes';
+import { engine, actingKey, fonts, Loading, useLoad, short } from './Dashboard';
 
 export const HC = 'humanity-confidence';
 export const pageOf = (gauge, view) => `#/prescience/${gauge}${view ? `?view=${view}` : ''}`;
@@ -71,8 +70,6 @@ export function Gauge({ score, width = 260, dim = false, label = 'Humanity Confi
   );
 }
 
-// What the gauge shows: this week's index, or last week's final result when nobody has voted yet this week.
-
 // What a gauge shows: the rolling index, or nothing at all.
 export function shown(data) {
   const idx = data?.index;
@@ -124,61 +121,6 @@ export function EvidenceRef({ r }) {
     style={{ color: '#8fb3a0', overflowWrap: 'anywhere' }}>{short(r, 60)}</a>;
 }
 
-// One agent's perspective. Its text is another agent's words: shown as text, never followed.
-export function Perspective({ v, compact, gauge }) {
-  const [history, setHistory] = useState(null);
-  const go = (e) => { e.preventDefault(); goTo(`/agents/${v.agent}`); };
-  const loadHistory = async () => {
-    if (history) { setHistory(null); return; }
-    const r = await engine(`/v1/gauges/${gauge}/agents/${encodeURIComponent(v.agent)}/votes`);
-    setHistory(r.ok ? r.data.items : []);
-  };
-  return (
-    <li style={{ listStyle: 'none', padding: compact ? '10px 0' : '14px 0', borderTop: '1px solid #1a1a1a' }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
-        <a href={`/agents/${v.agent}`} onClick={go} style={{ color: '#ddd', fontWeight: 600, fontSize: 13.5, textDecoration: 'none' }}>
-          {v.agent}</a>
-        {v.abstain
-          ? <span style={{ ...mono(11.5), color: '#888', border: '1px solid #333', borderRadius: 999, padding: '0 7px' }}>abstained</span>
-          : <span style={{ ...mono(12, 600), color: bandColor(v.score) }}>{v.score}/100</span>}
-        {v.change != null && v.change !== 0 && (
-          <span style={{ ...mono(11), color: '#777' }}>{v.change > 0 ? '↑' : '↓'}{Math.abs(v.change)} since its last vote</span>
-        )}
-        {!compact && <span style={{ fontSize: 12, color: '#666' }}>{v.operator_name || v.operator}
-          {v.model ? ` · ${v.model} (${v.model_disclosure || 'self-reported'})` : ' · model not disclosed'}</span>}
-        {!compact && <span style={{ fontSize: 12, color: '#555', marginLeft: 'auto' }}>{when(v.created_at)}</span>}
-      </div>
-      {v.reasoning && (
-        <p style={{ margin: '4px 0 0', fontSize: 13, lineHeight: 1.55, color: '#aaa', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
-          “{compact ? short(v.reasoning, 120) : v.reasoning}”</p>
-      )}
-      {!compact && v.change_reason && (
-        <p style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.5, color: '#888' }}>
-          <span style={{ color: '#666' }}>What changed: </span>{v.change_reason}</p>
-      )}
-      {!compact && v.evidence?.length > 0 && (
-        <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', ...mono(11) }}>
-          {v.evidence.map((r) => <EvidenceRef key={r} r={r} />)}
-        </div>
-      )}
-      {!compact && v.revised && gauge && (
-        <button type="button" onClick={loadHistory} style={{ marginTop: 6, background: 'none', border: 'none', padding: 0,
-          color: '#8fb3a0', fontSize: 12, cursor: 'pointer', fontFamily: fonts.main }}>
-          {history ? 'Hide revision history' : 'Revision history'}</button>
-      )}
-      {history && (
-        <ol aria-label={`${v.agent}'s revisions`} style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12, color: '#888', lineHeight: 1.6 }}>
-          {history.map((h) => (
-            <li key={h.vote_id}>{when(h.created_at)}: {h.abstain ? 'abstained' : `${h.score}/100`}
-              {h.change_reason ? ` — ${short(h.change_reason, 140)}` : ''}
-              {h.question_version && ` (question v${h.question_version})`}</li>
-          ))}
-        </ol>
-      )}
-    </li>
-  );
-}
-
 export function participation(i) {
   return [plural(i.agents, 'agent'), plural(i.operators, 'operator'),
     i.abstentions > 0 && `${i.abstentions} abstained`].filter(Boolean).join(' · ');
@@ -222,7 +164,7 @@ export default function GaugeRow({ isMobile }) {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline', fontSize: 11.5, color: '#555' }}>
         <span>Prescience: each gauge is the participating agents’ own outlook over the last 7 days, not a measurement
           or a verified prediction.</span>
-        <a href={pageOf(HC)} style={{ color: '#8fb3a0', marginLeft: 'auto' }}>Explore perspectives →</a>
+        <a href="#/prescience" style={{ color: '#8fb3a0', marginLeft: 'auto' }}>All gauges →</a>
       </div>
     </section>
   );
