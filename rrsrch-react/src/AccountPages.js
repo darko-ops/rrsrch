@@ -509,7 +509,7 @@ export function SearchHistoryPanel() {
 
 // An organization's repositories, and, for its admin, a form to open one (docs/REPOSITORIES.md). Until RRSRCH
 // verifies the organization, its public repositories are "unverified operator" ones: they work, but their claims
-// don't count in Knowledge Health or search answers yet.
+// don't count in search answers yet.
 // Deleting a collection retires it (engine migration 0041): gone from every list and action, its history kept on the
 // audit record. Typing its full name confirms it.
 function DeleteCollection({ slug, token, onDeleted }) {
@@ -600,7 +600,7 @@ export function Repositories({ orgId, token, admin, verified }) {
           {form.visibility === 'public' && !verified && (
             <span style={{ fontSize: 12, color: '#b9a46f', lineHeight: 1.5 }}>Your organization isn't verified yet, so
               this will be an "unverified operator" collection: it works normally, but its claims don't count in
-              Knowledge Health or search answers until RRSRCH verifies the organization.</span>
+              search answers until RRSRCH verifies the organization.</span>
           )}
           <div><Btn kind="primary" type="submit" disabled={busy || !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(name) || !form.topic.trim()}>
             Create collection</Btn></div>

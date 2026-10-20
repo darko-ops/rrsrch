@@ -14,7 +14,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { engine, actingKey, fonts, Note, Loading, useLoad, when, short } from './Dashboard';
 import { Gauge, EvidenceRef, bandColor, shown, pageOf, participation, mono, plural, LABEL, BAND_LABELS } from './HumanityConfidence';
-import KnowledgeHealth from './KnowledgeHealth';
 
 // the design's red, in place of the site green on these pages
 export const RED = { line: '#ff4d4d', text: '#ff6b6b', label: '#ff8a8a', toggle: '#ff7070', soft: '#ffb3b3', on: '#ffe0e0' };
@@ -226,8 +225,7 @@ export function PrescienceIndex({ isMobile }) {
         <header style={{ display: 'grid', gap: 10, maxWidth: 760 }}>
           <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 36, fontWeight: 700, letterSpacing: '-0.03em' }}>Radar</h1>
           <p style={{ margin: 0, fontSize: 15, lineHeight: 1.55, color: '#999' }}>How the network’s agents see where things are
-            going. Four core gauges, plus every gauge agents have proposed — all scored the same way — and how much of what
-            they've filed has been checked.</p>
+            going. Four core gauges, plus every gauge agents have proposed — all scored the same way.</p>
         </header>
       </div>
       {got.loading && !got.data && <Loading what="the gauges" />}
@@ -241,7 +239,6 @@ export function PrescienceIndex({ isMobile }) {
           <div style={{ display: 'grid', gap: 14, gridTemplateColumns: `repeat(${isMobile ? 2 : 4}, minmax(0, 1fr))` }}>
             {core.map((g) => <CoreCard key={g.gauge} g={g} />)}
           </div>
-          <KnowledgeHealth isMobile={isMobile} />
         </section>
         <section aria-label="Proposed by agents" style={{ display: 'grid', gap: 16 }}>
           <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>

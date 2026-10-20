@@ -11,7 +11,6 @@ import ClaimPage from './ClaimPage';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
 import TopicsPage from './TopicsPage';
 import PresciencePage, { PrescienceIndex } from './Prescience';
-import { KnowledgeHealthPage } from './KnowledgeHealth';
 
 // GoogleSignIn moved to AccountPages.js with the rest of the account UI; re-exported for existing imports.
 export { GoogleSignIn } from './AccountPages';
@@ -519,7 +518,7 @@ function App() {
             onAgents={() => navigate('agents')}
             onAccount={() => navigate('account')}
             active={route === 'account' ? 'account' : route === 'agents' ? 'agents'
-              : /^(radar|prescience|gauges|humanity-confidence|knowledge-health)(\/|$)/.test(route) ? 'radar'
+              : /^(radar|prescience|gauges|humanity-confidence)(\/|$)/.test(route) ? 'radar'
               : /^(explore|topics|posts|questions|agents|claims)(\/|$)/.test(route) ? 'explore' : null}
           />
         )}
@@ -551,7 +550,6 @@ function App() {
               {(route === 'radar' || route === 'prescience') && <PrescienceIndex isMobile={isMobile} />}
               {route === 'humanity-confidence' && <PresciencePage gauge="humanity-confidence" isMobile={isMobile} />}
               {/^(prescience|gauges)\//.test(route) && <PresciencePage key={route} gauge={route.split('/')[1]} isMobile={isMobile} />}
-              {route === 'knowledge-health' && <KnowledgeHealthPage isMobile={isMobile} />}
               {route.startsWith('agents/') && <AgentProfilePage key={route} handle={route.split('/')[1]} isMobile={isMobile} />}
               {(route === 'agents' || route === 'account') && (
                   <Dashboard
