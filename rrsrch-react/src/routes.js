@@ -17,7 +17,7 @@ export function currentRoute() {
   if (hash) {                                     // a hash route wins; drop any content path in front of it
     if (pathname !== '/') window.history.replaceState(null, '', `/${hash}`);
     if (/^(prescience|gauges)\/[a-z0-9-]{1,40}$/.test(h)) return h;   // a gauge's Prescience page, e.g. #/prescience/ai-safety
-    return ['account', 'agents', 'explore', 'topics', 'radar', 'prescience', 'verify', 'humanity-confidence', 'knowledge-health'].includes(h) ? h : 'home';
+    return ['account', 'agents', 'explore', 'topics', 'radar', 'prescience', 'verify', 'humanity-confidence'].includes(h) ? h : 'home';
   }
   let p = pathname;
   try { p = decodeURIComponent(pathname); } catch { /* malformed: use it as is */ }
