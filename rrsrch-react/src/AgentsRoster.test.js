@@ -27,7 +27,8 @@ test('track record: the measure with the most evaluations; a rate only from 5', 
 const DATA = {
   '/v1/agents?organization=lab': { items: [
     { handle: 'trial-reader', kind: 'service', model: 'qwen', status: 'active', organization_id: 'lab' },
-    { handle: 'old-bot', kind: 'service', status: 'active', organization_id: 'lab' }] },
+    { handle: 'old-bot', kind: 'service', status: 'active', organization_id: 'lab' },
+    { handle: 'dana', kind: 'human', status: 'active', organization_id: 'lab' }] },
   '/v1/agents/trial-reader/work': { last_active_at: hoursAgo(2), posts: [], proposals: [
     { id: 7, state: 'open', proposition: '42% responded at 24 months.', repository: 'lab/knee', created_at: hoursAgo(2) }] },
   '/v1/agents/old-bot/work': { last_active_at: hoursAgo(200), posts: [], proposals: [] },
@@ -38,7 +39,8 @@ const DATA = {
   '/v1/agents/trial-reader/activity': { days: Array.from({ length: 14 }, (_, i) => ({ date: `2026-10-${String(3 + i).padStart(2, '0')}`,
     count: i === 13 ? 2 : 0, outcome: i === 13 ? 'waiting' : null })) },
   '/v1/agents/old-bot/activity': { days: [] },
-  '/v1/organizations/lab/activity': { items: [{ kind: 'proposal', id: 7, handle: 'trial-reader', at: hoursAgo(2),
+  '/v1/organizations/lab/activity': { items: [{ kind: 'post', id: 9, handle: 'dana', at: hoursAgo(1), verb: 'asked',
+    title: 'A person asking' }, { kind: 'proposal', id: 7, handle: 'trial-reader', at: hoursAgo(2),
     verb: 'proposed', title: '42% responded at 24 months.' }] },
   '/v1/agents?organization=unclaimed': { items: [] },
   '/v1/agents/trial-reader': { agent: { handle: 'trial-reader', organization_id: 'lab', protocol: {
@@ -93,6 +95,10 @@ test('the Agents page: right now, needs you, status filters and a card per agent
   expect(within(needs).getByRole('link', { name: 'Give it orders' })).toHaveAttribute('href', '/agents/old-bot?tab=protocol');
   expect(within(reader).getByTestId('identity-mark').children).toHaveLength(25);
   expect(screen.queryByRole('table')).not.toBeInTheDocument();                           // the roster table is gone
+  expect(within(cards).queryByRole('link', { name: /dana/ })).not.toBeInTheDocument();   // people get no card
+  expect(within(cards).getAllByRole('link')).toHaveLength(2);
+  expect(now).not.toHaveTextContent('A person asking');                                  // nor a line in Right now
+  expect(screen.getByRole('button', { name: /^All/ })).toHaveTextContent('2');
   expect(screen.queryByText(/Sparks/i)).not.toBeInTheDocument();                         // dormant: never shown
   fireEvent.click(screen.getByRole('button', { name: /^idle/ }));
   expect(within(cards).queryByRole('link', { name: /trial-reader/ })).not.toBeInTheDocument();
