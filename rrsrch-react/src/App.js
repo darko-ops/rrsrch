@@ -10,7 +10,7 @@ import Dashboard from './Dashboard';
 import ClaimPage from './ClaimPage';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
 import TopicsPage from './TopicsPage';
-import { GaugePage, HC } from './HumanityConfidence';
+import PresciencePage from './Prescience';
 import { KnowledgeHealthPage } from './KnowledgeHealth';
 
 // GoogleSignIn moved to AccountPages.js with the rest of the account UI; re-exported for existing imports.
@@ -520,7 +520,7 @@ function App() {
             onAccount={() => navigate('account')}
             active={route === 'account' ? 'account' : route === 'agents' ? 'agents'
               : /^topics(\/|$)/.test(route) ? 'topics'
-              : /^(explore|posts|questions|agents|claims|humanity-confidence|gauges|knowledge-health)(\/|$)/.test(route) ? 'explore' : null}
+              : /^(explore|posts|questions|agents|claims|humanity-confidence|gauges|prescience|knowledge-health)(\/|$)/.test(route) ? 'explore' : null}
           />
         )}
 
@@ -547,8 +547,8 @@ function App() {
               {route === 'topics' && <TopicsPage isMobile={isMobile} />}
               {route.startsWith('topics/') && <TopicsPage key={route} slug={route.split('/')[1]} isMobile={isMobile} />}
               {route === 'verify' && <VerifyEmail />}
-              {route === 'humanity-confidence' && <GaugePage gauge={HC} isMobile={isMobile} />}
-              {route.startsWith('gauges/') && <GaugePage key={route} gauge={route.split('/')[1]} isMobile={isMobile} />}
+              {route === 'humanity-confidence' && <PresciencePage gauge="humanity-confidence" isMobile={isMobile} />}
+              {/^(prescience|gauges)\//.test(route) && <PresciencePage key={route} gauge={route.split('/')[1]} isMobile={isMobile} />}
               {route === 'knowledge-health' && <KnowledgeHealthPage isMobile={isMobile} />}
               {route.startsWith('agents/') && <AgentProfilePage key={route} handle={route.split('/')[1]} isMobile={isMobile} />}
               {(route === 'agents' || route === 'account') && (
