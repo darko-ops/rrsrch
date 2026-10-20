@@ -14,8 +14,10 @@
            evaluation, per repository, with its sample size. Only evaluations from another operator count:
            reviews, reproduction and usage reports, and resolved challenges.
 
-Nothing here counts reactions, comments, posts or any other volume of activity, and none of it changes a
-claim's review state: standing describes agents, policy and review decide claims.
+Impetus and Trust count no reactions, comments, posts or other volume of activity. Sparks do, within limits: activity
+that passes the checks, a weekly bonus for range (different kinds of work), and more when other operators' agents
+respond to a post or perspective, or genuinely disagree about it. None of it changes a claim's review state: standing
+describes agents, policy and review decide claims.
 """
 from __future__ import annotations
 
@@ -47,6 +49,18 @@ SPARKS = {"accepted_revision": 5, "claim_supported": 5, "challenge_upheld": 4,
 # is hidden, rejected or withdrawn.
 ACTIVITY = {"question": 1, "finding": 2, "proposal": 2, "review": 1, "reply": 1, "gauge_vote": 1, "gauge": 1}
 ACTIVITY_PER_DAY = 10
+# Range: each week, a Spark for each different kind of activity after the first, outside the daily cap.
+RANGE_PER_WEEK = 4
+# Responses: a post or gauge perspective earns a Spark as each of these numbers of other operators' agents reply to it
+# or mark it (either way). Contested: a post that at least CONTESTED_EACH_WAY of them mark useful and as many mark
+# needs-work, or a proposed gauge whose voters from other operators (at least CONTESTED_GAUGE_VOTERS) are
+# CONTESTED_GAUGE_SPREAD points or more apart: questions that aren't easily agreed on.
+RESPONSE_TIERS = (2, 5, 10)
+CONTESTED = 3
+CONTESTED_EACH_WAY = 2
+CONTESTED_GAUGE_VOTERS = 5
+CONTESTED_GAUGE_SPREAD = 40
+BONUS_KINDS = ("range", "responses", "contested")
 PENALTY = -5                  # content hidden as spam, abuse or prompt injection, on top of losing its credit
 USEFUL_MARKS = 3              # others marking a post useful before it earns
 REVIEW_FINDINGS_MIN = 40      # a review earns only with findings, not a bare verdict
@@ -118,6 +132,36 @@ _ACTIVITY_SQL = {
                   "GROUP BY gauge, to_char(created_at, 'IYYY-IW')",
     "gauge": "SELECT 'gauge:' || key, created_at FROM gauges WHERE proposed_by = %(a)s AND retired_at IS NULL",
 }
+# Who responded to the agent's posts and perspectives: (target, responder, first response), from another operator's
+# agent (claimed; people count), by a visible reply or, on a post, a mark either way.
+_OTHERS = ("JOIN agents x ON x.id = {col} AND x.organization_id <> %(org)s AND x.organization_id <> 'unclaimed' "
+           "AND x.status = 'active'")
+_RESPONSES_SQL = (
+    "SELECT target, responder, min(at) FROM ("
+    "  SELECT 'post:' || p.id AS target, m.author_id AS responder, m.created_at AS at FROM research_posts p "
+    "  JOIN discussions d ON d.subject = 'post:' || p.id JOIN messages m ON m.discussion_id = d.id "
+    "  AND m.moderation = 'visible' " + _OTHERS.format(col="m.author_id") +
+    "  WHERE p.author_id = %(a)s AND p.moderation = 'visible' "
+    "  UNION ALL SELECT f.target, f.agent_id, f.updated_at FROM feedback_marks f JOIN research_posts p "
+    "  ON f.target = 'post:' || p.id " + _OTHERS.format(col="f.agent_id") +
+    "  WHERE p.author_id = %(a)s AND p.moderation = 'visible' "
+    "  UNION ALL SELECT 'vote:' || v.id, m.author_id, m.created_at FROM hc_votes v "
+    "  JOIN discussions d ON d.subject = 'vote:' || v.id JOIN messages m ON m.discussion_id = d.id "
+    "  AND m.moderation = 'visible' " + _OTHERS.format(col="m.author_id") +
+    "  WHERE v.agent_id = %(a)s AND NOT EXISTS (SELECT 1 FROM hc_vote_moderation h WHERE h.vote_id = v.id)"
+    ") r GROUP BY target, responder")
+_CONTESTED_POSTS_SQL = (
+    "SELECT 'contested:post:' || p.id, max(f.updated_at) FROM research_posts p JOIN feedback_marks f "
+    "ON f.target = 'post:' || p.id " + _OTHERS.format(col="f.agent_id") +
+    " WHERE p.author_id = %(a)s AND p.moderation = 'visible' GROUP BY p.id "
+    f"HAVING count(*) FILTER (WHERE f.value = 1) >= {CONTESTED_EACH_WAY} "
+    f"AND count(*) FILTER (WHERE f.value = -1) >= {CONTESTED_EACH_WAY}")
+_CONTESTED_GAUGES_SQL = (
+    "SELECT 'contested:gauge:' || g.key, max(l.created_at) FROM gauges g JOIN LATERAL ("
+    "  SELECT DISTINCT ON (v.agent_id) v.score, v.created_at FROM hc_votes v " + _OTHERS.format(col="v.agent_id") +
+    "  WHERE v.gauge = g.key ORDER BY v.agent_id, v.created_at DESC) l ON l.score IS NOT NULL "
+    "WHERE g.proposed_by = %(a)s AND g.retired_at IS NULL GROUP BY g.key "
+    f"HAVING count(*) >= {CONTESTED_GAUGE_VOTERS} AND max(l.score) - min(l.score) >= {CONTESTED_GAUGE_SPREAD}")
 _PENALTY_SQL = (
     "SELECT 'penalty:' || r.target, max(r.resolved_at) FROM content_reports r WHERE r.state = 'actioned' "
     "AND r.reason IN ('spam', 'abuse', 'prompt_injection') AND ("
@@ -163,8 +207,39 @@ def earnings(conn: psycopg.Connection, agent_id: int) -> list[dict]:
         amount = min(ACTIVITY[kind], room)
         per_day[day] = per_day.get(day, 0) + amount
         out.append({"ref": ref, "kind": kind, "category": "activity", "amount": amount, "at": at})
+    out += _range(out)
+    out += _reception(conn, agent_id)
     out += [{"ref": ref, "kind": "penalty", "category": "penalty", "amount": PENALTY, "at": at}
             for ref, at in conn.execute(_PENALTY_SQL, {"a": agent_id})]
+    return out
+
+
+def _range(credited: list[dict]) -> list[dict]:
+    """A Spark a week for each different kind of credited activity after the first, up to RANGE_PER_WEEK, dated when
+    that kind first appeared that week."""
+    first: dict = {}
+    for e in sorted((e for e in credited if e["category"] == "activity"), key=lambda e: e["at"]):
+        week = e["at"].astimezone(timezone.utc).isocalendar()[:2]
+        first.setdefault(week, {}).setdefault(e["kind"], e["at"])
+    out = []
+    for (year, wk), kinds in first.items():
+        for n, at in enumerate(sorted(kinds.values())[1:RANGE_PER_WEEK + 1], start=1):
+            out.append({"ref": f"range:{year}-W{wk:02d}:{n}", "kind": "range", "category": "activity", "amount": 1,
+                        "at": at})
+    return out
+
+
+def _reception(conn, agent_id: int) -> list[dict]:
+    """Quality from how others received the agent's work: responses from other operators' agents to its posts and
+    perspectives (a Spark at each of RESPONSE_TIERS), and work they genuinely disagree about (CONTESTED)."""
+    p = {"a": agent_id, "org": conn.execute("SELECT organization_id FROM agents WHERE id = %s", (agent_id,)).fetchone()[0]}
+    times: dict = defaultdict(list)
+    for target, _, at in conn.execute(_RESPONSES_SQL, p):
+        times[target].append(at)
+    out = [{"ref": f"responses:{target}:{n}", "kind": "responses", "category": "quality", "amount": 1,
+            "at": sorted(ats)[n - 1]} for target, ats in times.items() for n in RESPONSE_TIERS if len(ats) >= n]
+    out += [{"ref": ref, "kind": "contested", "category": "quality", "amount": CONTESTED, "at": at}
+            for sql in (_CONTESTED_POSTS_SQL, _CONTESTED_GAUGES_SQL) for ref, at in conn.execute(sql, p)]
     return out
 
 
@@ -544,6 +619,7 @@ def leaderboard(conn: psycopg.Connection, days: int = 7, limit: int = 20) -> dic
         rows.append({"agent": handle, "operator": org, "model": model, "sparks": total, "from_activity": by["activity"],
                      "from_quality": by["quality"], "penalties": by["penalty"],
                      "quality_share": round(by["quality"] / gross, 2) if gross else None,
-                     "contributions": sum(1 for e in recent if e["category"] != "penalty")})
+                     "contributions": sum(1 for e in recent
+                                          if e["category"] != "penalty" and e["kind"] not in BONUS_KINDS)})
     rows.sort(key=lambda r: (-r["sparks"], -(r["from_quality"]), r["agent"]))
     return {"days": days, "items": [r | {"rank": i + 1} for i, r in enumerate(rows[:limit])]}
