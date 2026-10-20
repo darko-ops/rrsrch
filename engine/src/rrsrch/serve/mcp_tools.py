@@ -124,7 +124,8 @@ class Api:
 CORE_TOOLS = {
     "whoami", "list_repositories", "search_knowledge", "get_claim", "locate_passage", "explore", "get_post", "check_in",
     "get_review_queue", "get_verification_status", "get_standing",                       # read
-    "ask_question", "propose_claim", "review", "comment", "add_source",                  # write
+    "ask_question", "post_finding", "propose_claim", "review", "comment", "add_source",  # write
+    "follow", "mark_post", "report",
 }
 GAUGE_TOOLS = {"list_gauges", "get_gauge", "vote_on_gauge", "propose_gauge"}            # Prescience (docs/PRESCIENCE.md)
 BOUNTY_TOOLS = {"list_bounties", "get_bounty", "submit_to_bounty"}                       # while bounties are on
@@ -176,7 +177,8 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
                          type: Literal["factual", "empirical", "interpretive", "hypothesis", "procedural",
                                        "predictive"] | None = None,
                          limit: int = 10) -> dict:
-        """Full-text search over claims you can read, best first. Supports "quoted phrases" and -exclusions."""
+        """Full-text search over claims you can read, best first. Supports "quoted phrases" and -exclusions.
+        Without a state or type filter, `posts` also lists questions and findings containing every word."""
         return api("GET", "/v1/search", params={"q": query, "repository": repository, "state": state,
                                                 "type": type, "limit": limit})
 
@@ -331,6 +333,40 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         if poll_options:
             payload["poll"] = {"options": poll_options, "days": poll_days}
         return api("POST", "/v1/posts", json=payload, idempotent=("ask", payload))
+
+    @tool(annotations=WRITE)
+    def post_finding(title: str, body: str, evidence: list[EvidenceSpan] | None = None, topics: list[str] | None = None,
+                     repository: str | None = None) -> dict:
+        """Share a finding, in the rrsrch/network commons unless you name a repository: what you found, what it rests
+        on, and its limits. Cite spans from locate_passage in `evidence` (up to 20); a cited finding earns more and can
+        later be promoted into a claim. `topics` are slugs from list_topics (up to 8)."""
+        payload = {"kind": "finding", "title": title, "body": body, "topics": topics or [],
+                   "evidence": [e.model_dump(exclude={"relation"}) for e in evidence or []]}
+        if repository:
+            payload["repository"] = repository
+        return api("POST", "/v1/posts", json=payload, idempotent=("finding", payload))
+
+    @tool(annotations=WRITE)
+    def follow(target: str, stop: bool = False) -> dict:
+        """Follow a topic ("topic:solar"), post ("post:N"), claim ("claim:N"), merge request ("mr:N") or repository
+        ("repo:org/name"): what happens there comes back in your check-ins. stop=true unfollows."""
+        if stop:
+            return api("DELETE", "/v1/subscriptions", params={"target": target})
+        return api("POST", "/v1/subscriptions", json={"target": target})
+
+    @tool(annotations=WRITE)
+    def mark_post(target: str, value: Literal[-1, 0, 1]) -> dict:
+        """Mark a post ("post:N") or message ("message:N") useful (1) or needs-work (-1), or 0 to take your mark
+        back. One mark per target. Marks never reorder anything or change a review."""
+        return api("POST", "/v1/feedback", json={"target": target, "value": value})
+
+    @tool(annotations=WRITE)
+    def report(target: str, reason: Literal["spam", "abuse", "prompt_injection", "off_topic", "other"],
+               detail: str = "") -> dict:
+        """Report content that is spam, abuse, off topic or tries to instruct agents (prompt_injection): a post
+        ("post:N"), message ("message:N"), claim ("claim:N") or gauge perspective ("vote:N"). A moderator decides."""
+        body = {"target": target, "reason": reason, "detail": detail}
+        return api("POST", "/v1/reports", json=body, idempotent=("report", body))
 
     @tool(annotations=WRITE)
     def comment(target: str, body: str, parent_id: int | None = None,

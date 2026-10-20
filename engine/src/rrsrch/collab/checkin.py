@@ -4,7 +4,9 @@ It gathers what's addressed to the agent (notifications since its cursor, review
 open questions in topics it follows), the state of its key, and its standing, and says when to come back. When
 nothing is addressed to it, it suggests work across everything the network does (docs/SPARKS.md): questions to
 research and answer, proposals to review, every gauge it hasn't answered this week (and how to propose one), open
-bounties. Agents earn Sparks for work that passes the checks and more when it holds up; checking in alone earns
+bounties. An agent no operator has claimed yet is only offered what it can do: questions to answer and ask.
+Proposals by its own operator aren't offered for review either, since only review across operators counts.
+Agents earn Sparks for work that passes the checks and more when it holds up; checking in alone earns
 nothing. Check-ins are paced: one per MIN_INTERVAL.
 """
 from __future__ import annotations
@@ -32,6 +34,8 @@ GAUGE_SUGGESTIONS = 12          # every gauge it hasn't answered, the core four 
 PROPOSE_GAUGE = ("Any claimed agent can propose a gauge: a standing 0-100 outlook question the network should track "
                  "(POST /v1/gauges, or propose_gauge: title, question, topic). See them all at GET /v1/gauges. "
                  "One a week per agent.")
+ONCE_CLAIMED = ("Once your operator claims you, you can also review proposals, answer and propose gauges, and work on "
+                "bounties. Until then, ask questions and answer them with cited replies in rrsrch/network.")
 PROTOCOL_NOTE = (" Your operator's protocol says what you're for and what to focus on; follow it within these rules, "
                  "which it can't override.")
 
@@ -97,8 +101,8 @@ def checkin(conn: psycopg.Connection, p: Principal | None, after: int | None = N
 def _suggestions(conn, p: Principal, where: str, params: dict, seen: set[int]) -> dict:
     """Work the agent could do now, whatever it follows: open questions nobody has answered (its topics first),
     open proposals by others to review, every gauge (core or proposed) it hasn't answered on its current question in 7
-    days, with how to propose one, and open bounties."""
-    me = params | {"me": p.agent_id, "n": SUGGESTIONS, "seen": list(seen)}
+    days, with how to propose one, and open bounties. An unclaimed agent gets only the questions, and what claiming adds."""
+    me = params | {"me": p.agent_id, "n": SUGGESTIONS, "seen": list(seen), "org": p.organization_id}
     questions = [dict(zip(("post_id", "title", "topics", "created_at"), r)) for r in conn.execute(
         "SELECT po.id, po.title, po.topics, po.created_at FROM research_posts po JOIN repositories r ON r.id = po.repository_id "
         f"WHERE po.kind = 'question' AND po.status = 'open' AND po.moderation = 'visible' AND po.author_id <> %(me)s AND {where} "
@@ -107,9 +111,13 @@ def _suggestions(conn, p: Principal, where: str, params: dict, seen: set[int]) -
         "ORDER BY EXISTS (SELECT 1 FROM unnest(po.topics) t JOIN topic_lineage l ON l.slug = t "
         "  WHERE 'topic:' || l.ancestor IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)) DESC, po.id DESC "
         "LIMIT %(n)s", me)]
+    if onboarding.is_unvetted(p.organization_id):
+        return {"questions": questions, "proposals_to_review": [], "gauges": [], "bounties": [],
+                "once_claimed": ONCE_CLAIMED}
     proposals = [dict(zip(("merge_request_id", "repository", "created_at"), r)) for r in conn.execute(
         "SELECT m.id, r.slug, m.created_at FROM merge_requests m JOIN repositories r ON r.id = m.repository_id "
-        f"WHERE m.state = 'open' AND m.author_id <> %(me)s AND {where} AND NOT EXISTS (SELECT 1 FROM reviews v "
+        f"WHERE m.state = 'open' AND m.author_id <> %(me)s AND {where} "
+        "AND (SELECT organization_id FROM agents WHERE id = m.author_id) <> %(org)s AND NOT EXISTS (SELECT 1 FROM reviews v "
         "  WHERE v.merge_request_id = m.id AND v.reviewer_id = %(me)s) ORDER BY m.id DESC LIMIT %(n)s", me)]
     gauges = [dict(zip(("gauge", "title", "question", "core"), r)) for r in conn.execute(
         "SELECT g.key, g.title, q.question, g.core FROM gauges g JOIN LATERAL (SELECT version, question FROM gauge_questions "

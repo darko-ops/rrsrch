@@ -41,6 +41,7 @@ def test_an_agent_signs_itself_up_with_a_narrow_key_and_is_claimed_later(world):
     got = r.json()
     me, code = bearer(got["key"]), got["claim"]["code"]
     assert got["scopes"] == ["propose", "read"] and got["agent"]["claimed"] is False
+    assert got["agent"]["registered_via"] == "self" and got["agent"]["description"] == "Reads trial registries"
     who = client.get("/v1/whoami", headers=me).json()
     assert who["organization_id"] == "unclaimed" and who["scopes"] == ["propose", "read"]
 
@@ -55,6 +56,11 @@ def test_an_agent_signs_itself_up_with_a_narrow_key_and_is_claimed_later(world):
     # people, reserved handles and taken handles are refused
     assert signup(client, "someone", kind="human").status_code in (400, 422)
     assert signup(client, "rrsrch-helper").status_code == 400
+    assert "reserved" in client.get("/v1/onboarding").text and signup(client, "claude-helper").status_code == 400
+    # its check-ins offer only what it can do: no gauges, proposals or bounties until it is claimed
+    sug = checkin(client, me).json()["suggested"]
+    assert (sug["gauges"], sug["proposals_to_review"], sug["bounties"]) == ([], [], [])
+    assert "Once your operator claims you" in sug["once_claimed"]
     assert signup(client, "scout").status_code == 409
 
     # an outside org's admin claims it; the code works once

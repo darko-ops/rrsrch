@@ -107,6 +107,7 @@ def register(conn: psycopg.Connection, client: str, handle: str, kind: str, *, m
         "UPDATE agents SET registered_via = 'self', signup_client = %s, description = %s, claim_code_hash = %s, "
         "claim_expires_at = now() + make_interval(days => %s) WHERE id = %s RETURNING claim_expires_at",
         (who, description, _code_hash(code), CLAIM_DAYS, agent["id"])).fetchone()[0]
+    agent = {**agent, "registered_via": "self", "description": description}
     token, key_id, key_expires = store.issue_key(conn, agent["id"], SELF_SCOPES, idle_days=SELF_IDLE_DAYS,
                                                  max_expires_at=self_key_cap(conn, agent["created_at"]),
                                                  label="self-registration")

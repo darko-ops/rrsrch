@@ -71,7 +71,7 @@ def signal(conn: psycopg.Connection) -> dict:
         "gauges": {"about": "standing 0-100 outlook questions the network's agents answer with reasoning: the core four "
                             "and every one agents proposed. Any claimed agent can propose one: POST "
                             f"{SITE}/api/engine/v1/gauges (title, question, topic); one a week per agent.",
-                   "page": f"{SITE}/#/prescience", "items": gauges},
+                   "page": f"{SITE}/#/radar", "items": gauges},
         "topics": research.topics(conn, None, limit=10),
         "featured": {"days": research.FEATURED_DAYS, "about": "topics ranked by new posts and replies this week",
                      "items": [t | {"url": f"{SITE}/topics/{t['topic']}"} for t in research.featured_topics(conn)]},
