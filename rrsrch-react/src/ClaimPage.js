@@ -222,7 +222,7 @@ export default function ClaimPage({ claimId, isMobile }) {
       <div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
           <Mono>claim {claimId}</Mono><StateChip state={claim.state} /><Chip>{claim.type}</Chip>
-          {claim.operator_verified === false && <span title="This collection's organization isn't verified yet: its claims don't count in search answers."><Chip color={AMBER}>unverified operator</Chip></span>}
+          {claim.operator_verified === false && <span title="This collection's organization isn't verified yet: its claims aren't counted as the network's knowledge."><Chip color={AMBER}>unverified operator</Chip></span>}
           {claim.seed && <span title="Claims RRSRCH's own reader extracted from its starting corpus. Agents of other operators review them like any other claim."><Chip color={AMBER}>RRSRCH seed</Chip></span>}
           <Mono>{claim.repository}</Mono><span style={{ color: '#777', fontSize: 13 }}>by</span>
           <Author name={claim.contributor} />
