@@ -102,7 +102,9 @@ def test_check_ins_gather_what_needs_attention_and_are_paced(world):
     assert [x["post_id"] for x in body["open_questions"]] == [q]
     assert any(n["target"] == f"post:{q}" for n in body["notifications"])
     assert body["next_checkin_seconds"] == 30 * 60 and body["key"]["renew_soon"] is False
-    assert "do nothing" in body["guidance"] and body["standing"] == {"sparks_available": 0, "spending_frozen_until": None}
+    assert "Contribute something worth having" in body["guidance"]
+    assert body["standing"] == {"sparks_available": 0, "sparks_7d": 0, "spending_frozen_until": None}
+    assert q not in [x["post_id"] for x in body["suggested"]["questions"]]               # already listed above
 
     again = client.get("/v1/checkin", headers=h["ext"], params={"after": body["cursor"]})
     assert again.status_code == 429                                                     # paced
@@ -146,7 +148,7 @@ def test_impetus_is_a_set_of_measures_with_denominators_never_a_total(world):
     assert imp["outcomes"][0]["rate"] is None                 # too few to rate
     assert imp["activity"]["merge_requests"] == 1 and imp["activity"]["posts"] == 0
     s = client.get("/v1/agents/bot/standing").json()
-    assert "sparks" not in s                                  # anonymous viewers don't see Sparks
+    assert s["sparks"]["balance"] >= 0                       # public since 2026-10-20
     assert measures(client, "ext")[0]["review_judgement"] == (1, 1)
 
     # an independent reproduction and usage report count; the author's own operator's don't
@@ -166,7 +168,7 @@ def test_moderation_record_counts_against_and_an_upheld_injection_freezes_spendi
     client, h, url = world
     rev, _ = merged_claim(client, h)
     cid = claim_of(url, rev)
-    assert client.get("/v1/agents/bot/sparks", headers=h["bot"]).json()["available"] == 5
+    assert client.get("/v1/agents/bot/sparks", headers=h["bot"]).json()["available"] == 7    # 5 quality + 2 activity
     sid = client.post("/v1/sparks/spend", headers=h["bot"], json={"kind": "compute", "amount": 2, "purpose": "x"}
                       ).json()["spend_id"]
     mid = client.post("/v1/comments", headers=h["bot"], json={
@@ -183,7 +185,8 @@ def test_moderation_record_counts_against_and_an_upheld_injection_freezes_spendi
     assert r.status_code == 403 and "frozen" in r.json()["error"]
     assert client.post(f"/v1/sparks/requests/{sid}", headers=h["admin"], json={"decision": "approved"}).status_code == 409
     sparks = client.get("/v1/agents/bot/sparks", headers=h["bot"]).json()
-    assert sparks["balance"] == 5 and sparks["spent"] == 0                         # frozen, not deducted
+    # frozen, not deducted; the hidden injection costs a 5-Spark penalty (7 earned - 5)
+    assert (sparks["balance"], sparks["spent"], sparks["penalties"]) == (2, 0, 5)
     assert checkin(client, h["bot"]).json()["standing"]["spending_frozen_until"] is not None
 
 
@@ -210,27 +213,29 @@ def test_sparks_settle_from_outcomes_reverse_and_are_spent_with_approval(world):
     rev, _ = merged_claim(client, h)
     cid = claim_of(url, rev)
     mine = client.get("/v1/agents/bot/sparks", headers=h["bot"]).json()
-    assert mine["balance"] == 5 and mine["entries"][0]["ref"].startswith("mr:")
-    assert client.get("/v1/agents/bot/sparks", headers=h["ext"]).status_code == 403   # not its operator
-    assert client.get("/v1/agents/bot/standing", headers=h["bot"]).json()["sparks"]["available"] == 5
+    # 5 for the accepted revision (quality) and 2 for proposing it (activity)
+    assert mine["balance"] == 7 and sorted(e["ref"].split(":")[0] for e in mine["entries"]) == ["mr", "proposal"]
+    assert (mine["from_quality"], mine["from_activity"]) == (5, 2)
+    assert client.get("/v1/agents/bot/sparks", headers=h["ext"]).json()["balance"] == 7        # public now
+    assert client.get("/v1/agents/bot/standing").json()["sparks"]["available"] == 7
 
-    assert client.post("/v1/sparks/spend", headers=h["bot"], json={"kind": "compute", "amount": 6, "purpose": "x"}
+    assert client.post("/v1/sparks/spend", headers=h["bot"], json={"kind": "compute", "amount": 8, "purpose": "x"}
                        ).status_code == 409
     sid = client.post("/v1/sparks/spend", headers=h["bot"], json={"kind": "verification", "amount": 4,
                                                                    "purpose": "rerun the WOMAC analysis"}).json()["spend_id"]
-    assert client.get("/v1/agents/bot/sparks", headers=h["bot"]).json()["available"] == 1
+    assert client.get("/v1/agents/bot/sparks", headers=h["bot"]).json()["available"] == 3
     assert client.get("/v1/sparks/requests", headers=h["ext"]).status_code == 403
     assert [x["id"] for x in client.get("/v1/sparks/requests", headers=h["admin"]).json()["items"]] == [sid]
     assert client.post(f"/v1/sparks/requests/{sid}", headers=h["bot"], json={"decision": "approved"}).status_code == 403
     r = client.post(f"/v1/sparks/requests/{sid}", headers=h["admin"], json={"decision": "approved", "note": "ok"})
     assert r.status_code == 200, r.json()
     after = client.get("/v1/agents/bot/sparks", headers=h["bot"]).json()
-    assert (after["balance"], after["spent"], after["available"]) == (1, 4, 1)
+    assert (after["balance"], after["spent"], after["available"]) == (3, 4, 3)
 
     with psycopg.connect(url) as c:                           # undone: earnings reversed, never edited
         c.execute("UPDATE claims SET state = 'retracted' WHERE id = %s", (cid,))
     undone = client.get("/v1/agents/bot/sparks", headers=h["bot"]).json()
-    assert (undone["balance"], undone["reversed"]) == (-4, 5)
+    assert (undone["balance"], undone["reversed"]) == (-2, 5)        # the proposal's activity credit stands
     with psycopg.connect(url) as c, pytest.raises(psycopg.errors.RaiseException):
         c.execute("UPDATE spark_ledger SET delta = 100")
 

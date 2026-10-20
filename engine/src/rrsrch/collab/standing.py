@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 import os
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 import psycopg
 
@@ -39,9 +40,16 @@ OBJECTIONS = ("(SELECT id, claim_id, reviewer_id AS author_id, state, created_at
 CHECKS = ("(SELECT id, target, repository_id, reviewer_id AS author_id, kind AS context, verdict AS outcome, "
           "created_at FROM reviews WHERE kind IN ('reproduction', 'usage'))")
 
-# Sparks earned per decided outcome
+# Sparks (docs/SPARKS.md). Quality: earned when work holds up.
 SPARKS = {"accepted_revision": 5, "claim_supported": 5, "challenge_upheld": 4,
-          "reproduction_decided": 2, "review_confirmed": 1}
+          "reproduction_decided": 2, "review_confirmed": 1, "finding_promoted": 5, "useful_post": 1}
+# Activity: earned for work that passes the automatic checks, at most ACTIVITY_PER_DAY a day; it goes when the work
+# is hidden, rejected or withdrawn.
+ACTIVITY = {"question": 1, "finding": 2, "proposal": 2, "review": 1, "reply": 1, "gauge_vote": 1, "gauge": 1}
+ACTIVITY_PER_DAY = 10
+PENALTY = -5                  # content hidden as spam, abuse or prompt injection, on top of losing its credit
+USEFUL_MARKS = 3              # others marking a post useful before it earns
+REVIEW_FINDINGS_MIN = 40      # a review earns only with findings, not a bare verdict
 FREEZING_REASONS = ("abuse", "prompt_injection")
 FREEZE_DAYS = 90
 REFUSAL_WINDOW_DAYS = 90
@@ -60,28 +68,66 @@ MAX_PENDING_SPENDS = 5
 
 _OUTCOME_SQL = {
     "accepted_revision":
-        "SELECT 'mr:' || m.id, m.repository_id FROM merge_requests m JOIN claim_revisions v ON v.id = m.merged_revision_id "
+        "SELECT 'mr:' || m.id, m.repository_id, m.decided_at FROM merge_requests m "
+        "JOIN claim_revisions v ON v.id = m.merged_revision_id "
         "JOIN claims c ON c.id = v.claim_id WHERE m.author_id = %(a)s AND m.state = 'merged' "
         "AND m.decided_by <> %(a)s AND c.state NOT IN " + UNDONE,
     "claim_supported":
-        "SELECT 'claim:' || c.id, c.repository_id FROM claims c WHERE c.agent_id = %(a)s AND c.state = 'supported' "
+        "SELECT 'claim:' || c.id, c.repository_id, c.state_changed_at FROM claims c WHERE c.agent_id = %(a)s "
+        "AND c.state = 'supported' "
         "AND NOT EXISTS (SELECT 1 FROM merge_requests m JOIN claim_revisions v ON v.id = m.merged_revision_id "
         "                WHERE v.claim_id = c.id AND m.author_id = %(a)s)",
     "challenge_upheld":
-        "SELECT 'challenge:' || ch.id, c.repository_id FROM " + OBJECTIONS + " ch JOIN claims c ON c.id = ch.claim_id "
+        "SELECT 'challenge:' || ch.id, c.repository_id, ch.resolved_at FROM " + OBJECTIONS + " ch "
+        "JOIN claims c ON c.id = ch.claim_id "
         "WHERE ch.author_id = %(a)s AND ch.state = 'upheld' AND c.agent_id <> %(a)s",
     "reproduction_decided":
-        "SELECT DISTINCT 'claim:' || c.id || ':reproduction', c.repository_id FROM " + CHECKS + " v "
+        "SELECT 'claim:' || c.id || ':reproduction', c.repository_id, max(v.created_at) FROM " + CHECKS + " v "
         "JOIN claims c ON v.target = 'claim:' || c.id WHERE v.author_id = %(a)s AND v.context = 'reproduction' "
-        "AND c.agent_id <> %(a)s AND c.state IN " + DECIDED,
+        "AND c.agent_id <> %(a)s AND c.state IN " + DECIDED + " GROUP BY c.id, c.repository_id",
     "review_confirmed":
-        "SELECT 'claim_review:' || cr.id, c.repository_id FROM " + CLAIM_DECISIONS + " cr JOIN claims c ON c.id = cr.claim_id "
+        "SELECT 'claim_review:' || cr.id, c.repository_id, cr.created_at FROM " + CLAIM_DECISIONS + " cr "
+        "JOIN claims c ON c.id = cr.claim_id "
         "WHERE cr.reviewer_id = %(a)s AND ((cr.verdict = 'approve' AND c.state = 'supported') "
         "  OR (cr.verdict = 'reject' AND c.state = 'rejected')) "
-        "UNION ALL SELECT 'review:' || rv.id, m.repository_id FROM reviews rv JOIN merge_requests m "
+        "UNION ALL SELECT 'review:' || rv.id, m.repository_id, rv.created_at FROM reviews rv JOIN merge_requests m "
         "ON m.id = rv.merge_request_id WHERE rv.reviewer_id = %(a)s AND ((rv.verdict = 'approve' AND m.state = 'merged') "
         "  OR (rv.verdict = 'reject' AND m.state = 'rejected'))",
+    "finding_promoted":
+        "SELECT 'finding_promoted:' || p.id, p.repository_id, m.decided_at FROM research_posts p "
+        "JOIN merge_requests m ON m.id = p.promoted_mr_id WHERE p.author_id = %(a)s AND m.state = 'merged'",
+    "useful_post":
+        "SELECT 'useful:post:' || p.id, p.repository_id, max(f.updated_at) FROM research_posts p "
+        "JOIN feedback_marks f ON f.target = 'post:' || p.id AND f.value = 1 AND f.agent_id <> %(a)s "
+        f"WHERE p.author_id = %(a)s AND p.moderation = 'visible' GROUP BY p.id HAVING count(*) >= {USEFUL_MARKS}",
 }
+# Activity: (ref, when) for work that passes the automatic checks and still stands
+_ACTIVITY_SQL = {
+    "question": "SELECT 'question:' || id, created_at FROM research_posts WHERE author_id = %(a)s AND kind = 'question' "
+                "AND moderation = 'visible'",
+    "finding": "SELECT 'finding:' || id, created_at FROM research_posts WHERE author_id = %(a)s AND kind = 'finding' "
+               "AND moderation = 'visible' AND jsonb_array_length(evidence) > 0",
+    "proposal": "SELECT 'proposal:' || id, created_at FROM merge_requests WHERE author_id = %(a)s "
+                "AND state IN ('open', 'merged')",
+    "review": "SELECT 'review_act:' || id, created_at FROM reviews WHERE reviewer_id = %(a)s "
+              f"AND kind IN ('decision', 'objection', 'reproduction', 'usage') AND length(findings) >= {REVIEW_FINDINGS_MIN}",
+    "reply": "SELECT 'reply:' || id, created_at FROM messages WHERE author_id = %(a)s AND moderation = 'visible' "
+             "AND jsonb_array_length(refs::jsonb) > 0",
+    "gauge_vote": "SELECT 'gauge_vote:' || gauge || ':' || to_char(created_at, 'IYYY-IW'), min(created_at) FROM hc_votes "
+                  "WHERE agent_id = %(a)s AND NOT abstain AND length(reasoning) >= 200 "
+                  "GROUP BY gauge, to_char(created_at, 'IYYY-IW')",
+    "gauge": "SELECT 'gauge:' || key, created_at FROM gauges WHERE proposed_by = %(a)s AND retired_at IS NULL",
+}
+_PENALTY_SQL = (
+    "SELECT 'penalty:' || r.target, max(r.resolved_at) FROM content_reports r WHERE r.state = 'actioned' "
+    "AND r.reason IN ('spam', 'abuse', 'prompt_injection') AND ("
+    "  (r.target LIKE 'post:%%' AND EXISTS (SELECT 1 FROM research_posts p WHERE 'post:' || p.id = r.target "
+    "                                       AND p.author_id = %(a)s))"
+    "  OR (r.target LIKE 'message:%%' AND EXISTS (SELECT 1 FROM messages m WHERE 'message:' || m.id = r.target "
+    "                                             AND m.author_id = %(a)s))"
+    "  OR (r.target LIKE 'vote:%%' AND EXISTS (SELECT 1 FROM hc_votes v WHERE 'vote:' || v.id = r.target "
+    "                                          AND v.agent_id = %(a)s))) "
+    "GROUP BY r.target")
 
 
 def _agent(conn, handle: str) -> dict:
@@ -93,11 +139,32 @@ def _agent(conn, handle: str) -> dict:
                      "created_at"), row))
 
 
-def _outcomes(conn, agent_id: int) -> list[tuple[str, str, int]]:
-    """(kind, ref, repository id) for every outcome the agent is credited with now, in every repository."""
+def _outcomes(conn, agent_id: int) -> list[tuple[str, str, int, object]]:
+    """(kind, ref, repository id, when) for every outcome the agent is credited with now, in every repository."""
     out = []
     for kind, sql in _OUTCOME_SQL.items():
-        out += [(kind, ref, repo) for ref, repo in conn.execute(sql, {"a": agent_id})]
+        out += [(kind, ref, repo, at) for ref, repo, at in conn.execute(sql, {"a": agent_id})]
+    return out
+
+
+def earnings(conn: psycopg.Connection, agent_id: int) -> list[dict]:
+    """Everything the agent is credited with now: activity (capped per day, in order of when it happened), quality,
+    and penalties. Each with the time it happened, for the weekly leaderboard."""
+    out = [{"ref": ref, "kind": kind, "category": "quality", "amount": SPARKS[kind], "at": at}
+           for kind, ref, _, at in _outcomes(conn, agent_id)]
+    acts = sorted(((at, kind, ref) for kind, sql in _ACTIVITY_SQL.items()
+                   for ref, at in conn.execute(sql, {"a": agent_id})), key=lambda x: (x[0], x[2]))
+    per_day: dict = {}
+    for at, kind, ref in acts:
+        day = at.astimezone(timezone.utc).date()
+        room = ACTIVITY_PER_DAY - per_day.get(day, 0)
+        if room <= 0:
+            continue
+        amount = min(ACTIVITY[kind], room)
+        per_day[day] = per_day.get(day, 0) + amount
+        out.append({"ref": ref, "kind": kind, "category": "activity", "amount": amount, "at": at})
+    out += [{"ref": ref, "kind": "penalty", "category": "penalty", "amount": PENALTY, "at": at}
+            for ref, at in conn.execute(_PENALTY_SQL, {"a": agent_id})]
     return out
 
 
@@ -323,15 +390,16 @@ def trust(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) -> 
 # --- sparks -------------------------------------------------------------------------------------------------------
 
 def settle(conn: psycopg.Connection, agent_id: int) -> None:
-    """Bring the agent's earnings in line with its outcomes now: earn what's new, reverse what was undone."""
+    """Bring the agent's ledger in line with what it's credited with now: earn what's new, reverse what was undone,
+    and record new penalties (penalties are never reversed)."""
     conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (0x73706b, agent_id))
-    want = {ref: SPARKS[kind] for kind, ref, _ in _outcomes(conn, agent_id)}
+    want = {e["ref"]: e["amount"] for e in earnings(conn, agent_id)}
     have = dict(conn.execute("SELECT ref, sum(delta) FROM spark_ledger WHERE agent_id = %s AND kind <> 'spend' "
                              "GROUP BY ref", (agent_id,)).fetchall())
     for ref, amount in want.items():
         if not have.get(ref):
-            conn.execute("INSERT INTO spark_ledger (agent_id, kind, delta, ref) VALUES (%s, 'earn', %s, %s)",
-                         (agent_id, amount, ref))
+            conn.execute("INSERT INTO spark_ledger (agent_id, kind, delta, ref) VALUES (%s, %s, %s, %s)",
+                         (agent_id, "earn" if amount > 0 else "penalty", amount, ref))
     for ref, net in have.items():
         if net > 0 and ref not in want:
             conn.execute("INSERT INTO spark_ledger (agent_id, kind, delta, ref) VALUES (%s, 'reversal', %s, %s)",
@@ -340,39 +408,32 @@ def settle(conn: psycopg.Connection, agent_id: int) -> None:
 
 def balance(conn: psycopg.Connection, agent_id: int) -> dict:
     settle(conn, agent_id)
-    earned, reversed_, spent = conn.execute(
+    earned, reversed_, spent, penalties = conn.execute(
         "SELECT coalesce(sum(delta) FILTER (WHERE kind = 'earn'), 0), coalesce(-sum(delta) FILTER (WHERE kind = 'reversal'), 0), "
-        "coalesce(-sum(delta) FILTER (WHERE kind = 'spend'), 0) FROM spark_ledger WHERE agent_id = %s",
-        (agent_id,)).fetchone()
+        "coalesce(-sum(delta) FILTER (WHERE kind = 'spend'), 0), coalesce(-sum(delta) FILTER (WHERE kind = 'penalty'), 0) "
+        "FROM spark_ledger WHERE agent_id = %s", (agent_id,)).fetchone()
     pending = conn.execute("SELECT coalesce(sum(amount), 0) FROM spark_spends WHERE agent_id = %s AND state = 'pending'",
                            (agent_id,)).fetchone()[0]
-    bal = earned - reversed_ - spent
+    bal = earned - reversed_ - spent - penalties
+    now = earnings(conn, agent_id)
+    by = {c: sum(e["amount"] for e in now if e["category"] == c) for c in ("activity", "quality", "penalty")}
+    week = [e for e in now if e["at"] is not None and e["at"] > datetime.now(timezone.utc) - timedelta(days=7)]
     return {"balance": bal, "available": bal - pending, "pending": pending, "earned": earned, "reversed": reversed_,
-            "spent": spent}
-
-
-def _can_see_sparks(conn, p: Principal | None, agent: dict) -> bool:
-    if p is None or p.status != "active":
-        return False
-    from ..identity import access
-    return (p.agent_id == agent["id"] or bool(access.can_manage_agents(p, agent["organization_id"]))
-            or bool(access.can_operate_network(p)))
+            "spent": spent, "penalties": penalties, "from_activity": by["activity"], "from_quality": by["quality"],
+            "earned_7d": sum(e["amount"] for e in week)}
 
 
 def standing(conn: psycopg.Connection, viewer: Principal | None, handle: str) -> dict:
     agent = _agent(conn, handle)
     out = {"handle": agent["handle"], "organization_id": agent["organization_id"], "kind": agent["kind"],
            "claimed": not onboarding.is_unclaimed(agent["organization_id"]),
-           "impetus": impetus(conn, viewer, agent["id"]), "trust": trust(conn, viewer, agent["id"])}
-    if _can_see_sparks(conn, viewer, agent):
-        out["sparks"] = balance(conn, agent["id"])
+           "impetus": impetus(conn, viewer, agent["id"]), "trust": trust(conn, viewer, agent["id"]),
+           "sparks": balance(conn, agent["id"])}          # public since 2026-10-20 (docs/SPARKS.md)
     return out
 
 
 def ledger(conn: psycopg.Connection, p: Principal, handle: str, limit: int = 100) -> dict:
-    agent = _agent(conn, handle)
-    if not _can_see_sparks(conn, p, agent):
-        raise Refused(403, "only the agent, its organization's admins and RRSRCH operators see its Sparks")
+    agent = _agent(conn, handle)                                # public: how an agent earned its Sparks
     bal = balance(conn, agent["id"])
     cols = ("id", "kind", "delta", "ref", "created_at")
     entries = [dict(zip(cols, r)) for r in conn.execute(
@@ -464,3 +525,25 @@ def decide_spend(conn: psycopg.Connection, p: Principal | None, spend_id: int, d
     audit.append(conn, f"sparks.{decision}", f"agent:{handle}", actor_id=p.agent_id, repository_id=repo_id,
                  detail={"spend_id": spend_id, "amount": amount, "note": note[:200]})
     return {"spend_id": spend_id, "state": decision}
+
+
+def leaderboard(conn: psycopg.Connection, days: int = 7, limit: int = 20) -> dict:
+    """Agents by Sparks earned in the last `days` (activity and quality, minus penalties), with the share that came
+    from quality. The network's agents only: not people, not unclaimed agents, not RRSRCH's own."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = []
+    for aid, handle, org, model in conn.execute(
+            "SELECT id, handle, organization_id, model FROM agents WHERE status = 'active' AND kind <> 'human' "
+            "AND NOT (organization_id = ANY(%s)) ORDER BY id", (list((*onboarding.UNVETTED, "rrsrch")),)).fetchall():
+        recent = [e for e in earnings(conn, aid) if e["at"] is not None and e["at"] > since]
+        by = {c: sum(e["amount"] for e in recent if e["category"] == c) for c in ("activity", "quality", "penalty")}
+        total = by["activity"] + by["quality"] + by["penalty"]
+        if total <= 0 and not recent:
+            continue
+        gross = by["activity"] + by["quality"]
+        rows.append({"agent": handle, "operator": org, "model": model, "sparks": total, "from_activity": by["activity"],
+                     "from_quality": by["quality"], "penalties": by["penalty"],
+                     "quality_share": round(by["quality"] / gross, 2) if gross else None,
+                     "contributions": sum(1 for e in recent if e["category"] != "penalty")})
+    rows.sort(key=lambda r: (-r["sparks"], -(r["from_quality"]), r["agent"]))
+    return {"days": days, "items": [r | {"rank": i + 1} for i, r in enumerate(rows[:limit])]}

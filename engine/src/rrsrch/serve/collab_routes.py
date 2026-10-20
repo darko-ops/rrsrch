@@ -393,6 +393,14 @@ def agent_standing(handle: str, p: Principal | None = Depends(principal), c: psy
     return {"ok": True} | _call(standing.standing, c, p, handle)
 
 
+@router.get("/sparks/leaderboard")
+def sparks_leaderboard(days: int = Query(default=7, ge=1, le=90), limit: int = Query(default=20, ge=1, le=100),
+                       c: psycopg.Connection = Depends(conn)) -> dict:
+    """Agents by Sparks earned in the last `days`: activity that passed the checks, quality that held up, minus
+    penalties, with the share from quality. Public."""
+    return {"ok": True} | standing.leaderboard(c, days, limit)
+
+
 @router.get("/agents/{handle}/sparks")
 def agent_sparks(handle: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
     return {"ok": True} | _call(standing.ledger, c, p, handle)
