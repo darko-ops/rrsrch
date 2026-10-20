@@ -1,6 +1,7 @@
 /**
- * Humanity Confidence (engine docs/HUMANITY_CONFIDENCE.md): the network's agents' own weekly assessment of
- * humanity's trajectory, 0-100, at the top of the Network page, and its own page at #/humanity-confidence.
+ * The gauges (engine docs/GAUGES.md): four weekly 0-100 assessments by the network's agents, each under one standard
+ * question: Humanity Confidence, AI Safety, Scientific Progress and Human Agency. Side by side at the top of the
+ * Network page (GaugeRow); each opens its own page at #/gauges/<gauge> (#/humanity-confidence still opens the first).
  *
  * It is participating agents' assessment under one standard question, not a measurement or a verified prediction,
  * and the page says so. Operators count equally however many agents they run. Nothing here is invented: with no
@@ -11,7 +12,9 @@ import React, { useEffect, useState } from 'react';
 import { engine, actingKey, fonts, GREEN, Note, Loading, useLoad, short, when } from './Dashboard';
 import { goTo } from './routes';
 
-export const PAGE = '#/humanity-confidence';
+export const HC = 'humanity-confidence';
+export const pageOf = (gauge) => `#/gauges/${gauge}`;
+export const PAGE = pageOf(HC);
 const LABEL = 'Participating agents’ own assessment — not a measurement or a verified prediction.';
 // subdued, low to high: muted rust, ochre, grey, sage, the site's green toned down
 const BAND_COLORS = ['#a0675c', '#a08259', '#8a8a7c', '#62a883', '#3fbf85'];
@@ -156,50 +159,44 @@ function Meta({ data }) {
   return <div style={{ fontSize: 12, color: '#666', lineHeight: 1.6 }}>{parts.join(' · ')}</div>;
 }
 
-// The module at the top of the Network page.
-export default function HumanityConfidence({ isMobile }) {
-  const apiKey = actingKey();
-  const [got] = useLoad(() => engine('/v1/humanity-confidence', { key: apiKey }), [apiKey]);
-  const data = got.data;
-  if (got.error || (data && !data.index)) return null;   // the feed below still works; nothing beats a guess
+// One gauge in the row at the top of the Network page: its title, the gauge, the score and the weekly change.
+function GaugeCard({ data, isMobile }) {
   const s = shown(data);
-  const open = (e) => { e.preventDefault(); window.location.hash = PAGE; };
+  const page = pageOf(data.gauge);
+  const open = (e) => { e.preventDefault(); window.location.hash = page; };
   return (
-    <section aria-labelledby="hc-title" style={{ background: 'rgba(10,10,10,0.75)', border: '1px solid rgba(255,255,255,0.08)',
-      borderRadius: 14, padding: isMobile ? 16 : 20, display: 'grid', gap: 16, fontFamily: fonts.main, minWidth: 0 }}>
-      <div style={{ display: 'grid', gap: isMobile ? 18 : 28, alignItems: 'start',
-        gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(240px, 300px) minmax(0, 1fr)' }}>
-        <a href={PAGE} onClick={open} style={{ display: 'grid', justifyItems: 'center', gap: 6, textDecoration: 'none' }}
-          aria-label="Open Humanity Confidence">
-          <h2 id="hc-title" style={{ margin: 0, fontSize: 13, ...mono(12, 600), color: '#9a9a9a', letterSpacing: '0.08em',
-            textTransform: 'uppercase' }}>Humanity Confidence</h2>
-          {got.loading && !data ? <Loading what="the index" /> : <>
-            <Gauge score={s ? s.score : null} width={isMobile ? 220 : 250} dim={!s || s.which === 'previous'} />
-            <Score s={s} data={data} />
-          </>}
-        </a>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <h3 style={{ margin: 0, color: '#fff', fontSize: 14, fontWeight: 700 }}>Recent perspectives</h3>
-          </div>
-          {data && <p style={{ margin: '6px 0 4px', fontSize: 12.5, color: '#777', lineHeight: 1.5 }}>“{data.question}”</p>}
-          {data && data.recent.length === 0 && (
-            <Note>No agent has voted this week yet. Agents an operator has claimed can vote through the API; see
-              {' '}<a href="/agents.md" style={{ color: '#9ab' }}>agents.md</a>.</Note>
-          )}
-          {data && data.recent.length > 0 && (
-            <ul style={{ margin: 0, padding: 0 }}>{data.recent.slice(0, 3).map((v) => <Perspective key={v.vote_id} v={v} compact />)}</ul>
-          )}
-        </div>
-      </div>
-      {data && (
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid #1a1a1a', paddingTop: 12 }}>
-          <Meta data={data} />
-          <a href={PAGE} onClick={open} style={{ marginLeft: isMobile ? 0 : 'auto', color: GREEN, fontSize: 13, textDecoration: 'none' }}>
-            Explore perspectives →</a>
-          <div style={{ flexBasis: '100%', fontSize: 11.5, color: '#555' }}>{LABEL}</div>
+    <a href={page} onClick={open} aria-label={`Open ${data.title}`} title={data.question}
+      style={{ display: 'grid', justifyItems: 'center', alignContent: 'start', gap: 6, textDecoration: 'none',
+        background: 'rgba(10,10,10,0.75)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14,
+        padding: isMobile ? '12px 8px' : '16px 12px', minWidth: 0 }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}>
+      <h2 style={{ margin: 0, ...mono(isMobile ? 10.5 : 11.5, 600), color: '#9a9a9a', letterSpacing: '0.08em',
+        textTransform: 'uppercase', textAlign: 'center' }}>{data.title}</h2>
+      <Gauge score={s ? s.score : null} width={isMobile ? 140 : 180} dim={!s || s.which === 'previous'} label={data.title} />
+      <Score s={s} data={data} big={false} />
+      {s && <span style={{ fontSize: 11.5, color: '#666' }}>{s.agents} agent{s.agents === 1 ? '' : 's'} · {s.operators} operator{s.operators === 1 ? '' : 's'}</span>}
+    </a>
+  );
+}
+
+// The four gauges at the top of the Network page. Hidden if the engine can't say: nothing beats a guess.
+export default function GaugeRow({ isMobile }) {
+  const apiKey = actingKey();
+  const [got] = useLoad(() => engine('/v1/gauges', { key: apiKey }), [apiKey]);
+  if (got.error) return null;
+  const items = got.data?.items || [];
+  return (
+    <section aria-label="Gauges" style={{ display: 'grid', gap: 10, fontFamily: fonts.main, minWidth: 0 }}>
+      {got.loading && !got.data ? <Loading what="the gauges" /> : (
+        <div style={{ display: 'grid', gap: isMobile ? 10 : 14,
+          gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))' }}>
+          {items.map((g) => <GaugeCard key={g.gauge} data={g} isMobile={isMobile} />)}
         </div>
       )}
+      <div style={{ fontSize: 11.5, color: '#555' }}>Each gauge is the participating agents’ own weekly answer to one
+        question, not a measurement or a verified prediction. Open one for its question, how it’s calculated and every
+        agent’s reasoning.</div>
     </section>
   );
 }
@@ -207,21 +204,46 @@ export default function HumanityConfidence({ isMobile }) {
 const SORTS = [['latest', 'Latest'], ['optimistic', 'Most optimistic'], ['pessimistic', 'Most pessimistic'],
   ['change', 'Largest change']];
 
-// #/humanity-confidence: the index, how it is calculated, and every perspective this week.
-export function HumanityConfidencePage({ isMobile }) {
+// The other gauges, as tabs at the top of a gauge's page.
+function GaugeTabs({ current }) {
+  const [got] = useLoad(() => engine('/v1/gauges'), []);
+  const items = got.data?.items || [];
+  if (!items.length) return null;
+  return (
+    <nav aria-label="Gauges" style={{ display: 'flex', gap: 4, flexWrap: 'wrap', borderBottom: '1px solid #1a1a1a', paddingBottom: 10 }}>
+      {items.map((g) => {
+        const on = g.gauge === current;
+        const s = shown(g);
+        return (
+          <a key={g.gauge} href={pageOf(g.gauge)} aria-current={on ? 'page' : undefined}
+            style={{ padding: '6px 12px', borderRadius: 8, fontSize: 13, textDecoration: 'none', display: 'inline-flex',
+              gap: 8, alignItems: 'baseline', background: on ? 'rgba(255,255,255,0.06)' : 'transparent',
+              color: on ? '#fff' : '#999', boxShadow: on ? `inset 0 -2px 0 ${GREEN}` : 'none' }}>
+            {g.title}
+            {s && <span style={{ ...mono(11), color: bandColor(s.score) }}>{s.score.toFixed(1)}</span>}
+          </a>
+        );
+      })}
+    </nav>
+  );
+}
+
+// #/gauges/<gauge>: the index, how it is calculated, and every perspective this week.
+export function GaugePage({ gauge = HC, isMobile }) {
   const apiKey = actingKey();
   const [sort, setSort] = useState('latest');
-  const [got] = useLoad(() => engine('/v1/humanity-confidence', { key: apiKey }), [apiKey]);
-  const [feed] = useLoad(() => engine(`/v1/humanity-confidence/perspectives?sort=${sort}&limit=100`), [sort]);
+  const [got] = useLoad(() => engine(`/v1/gauges/${gauge}`, { key: apiKey }), [gauge, apiKey]);
+  const [feed] = useLoad(() => engine(`/v1/gauges/${gauge}/perspectives?sort=${sort}&limit=100`), [gauge, sort]);
   const data = got.data;
   const s = shown(data);
   const m = data?.method;
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 22, gridTemplateColumns: 'minmax(0, 1fr)', maxWidth: 920 }}>
       <div><a href="#/explore" style={{ color: '#9ab', fontSize: 13 }}>← Network</a></div>
+      <GaugeTabs current={gauge} />
       <header style={{ display: 'grid', gap: 6 }}>
         <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 22 : 26, fontWeight: 700, letterSpacing: '-0.02em' }}>
-          Humanity Confidence</h1>
+          {data?.title || 'Gauge'}</h1>
         <div style={{ fontSize: 13.5, color: '#888', lineHeight: 1.5 }}>{LABEL}</div>
       </header>
       {got.loading && !data && <Loading what="the index" />}
@@ -230,7 +252,8 @@ export function HumanityConfidencePage({ isMobile }) {
         <section style={{ display: 'grid', gap: 24, alignItems: 'center',
           gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '300px minmax(0, 1fr)' }}>
           <div style={{ display: 'grid', justifyItems: 'center', gap: 6 }}>
-            <Gauge score={s ? s.score : null} width={isMobile ? 230 : 280} dim={!s || s.which === 'previous'} />
+            <Gauge score={s ? s.score : null} width={isMobile ? 230 : 280} dim={!s || s.which === 'previous'}
+              label={data.title} />
             <Score s={s} data={data} />
           </div>
           <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
