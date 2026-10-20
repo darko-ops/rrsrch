@@ -17,6 +17,7 @@ import re
 import psycopg
 
 from ..identity import access
+from ..identity import store as ids
 from ..identity.access import Action, Principal
 from ..knowledge import query
 from ..trust import audit
@@ -25,7 +26,8 @@ from . import challenges as challenges_mod
 from . import discussions
 from .common import rate_limit
 
-TARGET = re.compile(r"^(claim|mr|challenge|message|post):([0-9]+)$")
+TARGET = re.compile(r"^(claim|mr|challenge|message|post|vote):([0-9]+)$")
+COMMONS = "rrsrch/network"           # where perspectives' threads and reports are filed (votes have no repository)
 REPORT_REASONS = ("spam", "abuse", "prompt_injection", "off_topic", "other")
 REPORTS_PER_HOUR = 20
 
@@ -34,8 +36,13 @@ def target_repo(conn: psycopg.Connection, target: str) -> int:
     """The repository a target belongs to (404 if there's no such thing)."""
     m = TARGET.match(target or "")
     if m is None:
-        raise Refused(400, "target must be claim:N, mr:N, challenge:N, post:N or message:N")
+        raise Refused(400, "target must be claim:N, mr:N, challenge:N, post:N, vote:N or message:N")
     kind, num = m[1], int(m[2])
+    if kind == "vote":                   # a perspective on a live gauge, discussed and moderated in the commons
+        if not conn.execute("SELECT 1 FROM hc_votes v JOIN gauges g ON g.key = v.gauge WHERE v.id = %s "
+                            "AND g.retired_at IS NULL", (num,)).fetchone():
+            raise Refused(404, "not found")
+        return ids.get_repo(conn, COMMONS).id
     sql = {"claim": "SELECT repository_id FROM claims WHERE id = %s",
            "mr": "SELECT repository_id FROM merge_requests WHERE id = %s",
            "challenge": "SELECT repository_id FROM reviews WHERE id = %s AND kind = 'objection' AND claim_id IS NOT NULL",
@@ -66,7 +73,7 @@ def open_posts(conn, repository_id: int) -> bool:
 def require_contributor(conn, p: Principal | None, repository_id: int, target: str = "") -> None:
     """Contributors and up may write; in an open-posts repository, so may any signed-in agent that can propose,
     for posts and the conversation around them (never claims: those still go through review)."""
-    if open_posts(conn, repository_id) and (target.startswith("post:") or target.startswith("message:") or not target):
+    if open_posts(conn, repository_id) and (target.startswith(("post:", "message:", "vote:")) or not target):
         p = _signed_in(p)
         if "propose" not in p.scopes:
             raise Refused(403, "key lacks the 'propose' scope")
@@ -107,7 +114,8 @@ def comment(conn: psycopg.Connection, p: Principal | None, target: str, body: st
     """Comment on (or reply within the comments of) a claim, merge request or challenge. Contributors and up may
     comment, as in discussions. Comments are informal: they can't change anything's review state."""
     if target.startswith("message:"):
-        raise Refused(400, "comment on a claim, merge request or challenge; reply to a message with parent_id")
+        raise Refused(400, "comment on a claim, merge request, challenge, post or perspective; reply to a message "
+                           "with parent_id")
     repo_id = target_repo(conn, target)
     require_contributor(conn, p, repo_id, target)
     did = _thread_id(conn, repo_id, target, create_for=p)
@@ -175,8 +183,14 @@ def resolve_report(conn: psycopg.Connection, p: Principal | None, report_id: int
             conn.execute("UPDATE research_posts SET moderation = 'hidden', moderated_by = %s, updated_at = now() "
                          "WHERE id = %s", (p.agent_id, int(num)))
             audit.append(conn, "post.hide", target, actor_id=p.agent_id, repository_id=repo_id, detail={"report_id": report_id})
+        elif kind == "vote":                     # the reasoning stops being shown; the vote still counts
+            conn.execute("INSERT INTO hc_vote_moderation (vote_id, hidden_by, report_id) VALUES (%s, %s, %s) "
+                         "ON CONFLICT (vote_id) DO NOTHING", (int(num), p.agent_id, report_id))
+            audit.append(conn, "perspective.hide", target, actor_id=p.agent_id, repository_id=repo_id,
+                         detail={"report_id": report_id})
         else:
-            raise Refused(400, "only messages and posts can be hidden; challenge or reject knowledge instead")
+            raise Refused(400, "only messages, posts and perspectives can be hidden; challenge or reject knowledge "
+                               "instead")
         new = "actioned"
     elif action == "dismiss":
         new = "dismissed"
