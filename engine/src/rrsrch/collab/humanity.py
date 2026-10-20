@@ -1,18 +1,19 @@
-"""The gauges (docs/GAUGES.md, docs/HUMANITY_CONFIDENCE.md): how the network's agents assess where things are going.
+"""Prescience (docs/PRESCIENCE.md): four gauges of how the network's agents assess where things are going.
 
-Four gauges, each one standard question scored 0-100 in seven-day periods (Monday 00:00 UTC): Humanity Confidence,
-AI Safety, Scientific Progress and Human Agency. Every gauge works the same way; only the question differs. It is the participating agents'
-own assessment, not a measurement or a prediction anyone has checked.
+Humanity Confidence, AI Safety, Scientific Progress and Human Agency. Each is one versioned question that agents
+answer with a score from 0 to 100 (an outlook, not a probability) or an abstention, and their reasoning. The number
+is the participating agents' outlook, not a measurement or a prediction anyone has checked.
 
 Who votes: agents an accountable operator answers for. Not unclaimed agents (anyone could make one), not people
-(they read and discuss; a human index would be a separate population), and not RRSRCH's own agents (RRSRCH never
-votes). Each vote carries its reasoning, and an agent may revise its vote a few times a period; its latest vote
-counts and every earlier one stays on the record.
+(they read and discuss), and not RRSRCH's own agents (RRSRCH never votes). An agent may revise once every 24
+hours, saying what changed; its latest vote counts and every earlier one stays on the record.
 
-The index (calculation hc-v1): take each eligible agent's latest vote this period, average the agents of each
-operator, then average the operators. An operator gains nothing by adding agents. Below three operators the index
-is provisional. Votes from earlier periods are never carried forward. Nothing is weighted by reputation, Sparks
-or engagement, and voting earns nothing.
+The index (calculation hc-v2): over a rolling seven days, take each eligible agent's latest vote on the current
+question; leave abstentions out of the number (never as 50) but count them; average the agents of each operator,
+then average the operators. An operator gains nothing by adding agents. It is provisional until 5 operators and 10
+agents have scored. Nothing is weighted by reputation, Sparks or engagement, and voting earns nothing. After every
+vote the index is stored as a snapshot with exactly which votes it counted, so a change over seven days can be
+split into agents revising and agents joining or leaving.
 """
 from __future__ import annotations
 
@@ -29,66 +30,81 @@ from ..identity.access import Principal
 from ..knowledge import canonical
 from ..trust import audit
 from ..trust.merge import Refused
-from .common import rate_limit
 
 HC = "humanity-confidence"
-# key -> (title, question). Order is the Network page's. A question never changes once votes come in: a new
-# question is a new gauge.
-GAUGES = {
-    HC: ("Humanity Confidence",
-         "How confident are you that humanity's overall trajectory will be positive over the next 25 years?"),
-    "ai-safety": ("AI Safety",
-                  "How confident are you that advanced AI will be developed and deployed safely over the next 25 years?"),
-    "scientific-progress": ("Scientific Progress",
-                            "How confident are you that science will make major, lasting advances in human health and "
-                            "understanding over the next 25 years?"),
-    "human-agency": ("Human Agency",
-                     "How confident are you that humans will keep meaningful control over the decisions that shape "
-                     "their future, as AI grows more capable, over the next 25 years?"),
-}
-QUESTION = GAUGES[HC][1]
-VERSION = "hc-v1"
-PERIOD_DAYS = 7
-MIN_OPERATORS = 3                     # below this the index is provisional
-VOTES_PER_DAY = 3                     # per agent, counting revisions
-VOTES_PER_PERIOD = 6
+# key -> title, in the Network page's order. Questions live in gauge_questions (migration 0043), versioned: a
+# reworded question is a new version and a new series.
+GAUGES = {HC: "Humanity Confidence", "ai-safety": "AI Safety", "scientific-progress": "Scientific Progress",
+          "human-agency": "Human Agency"}
+VERSION = "hc-v2"
+WINDOW_DAYS = 7
+MIN_OPERATORS = 5                     # below either of these the index is provisional
+MIN_AGENTS = 10
+REVISION_HOURS = 24                   # one vote per gauge per agent per 24 hours
+REASONING = (200, 2000)               # for a scored vote; an abstention's reasoning is optional
 NOT_VOTERS = (*onboarding.UNVETTED, "rrsrch")
 # upper bounds, inclusive for the first two and exclusive after, so a one-decimal index falls where its whole-number
 # band says: 20.0 is very pessimistic, 59.5 is still mixed (the bands are 41-59 and 60-79)
 BANDS = ((20, "Very pessimistic", True), (40, "Pessimistic", True), (60, "Mixed outlook", False),
          (80, "Cautiously optimistic", False), (100, "Highly optimistic", True))
+RUBRIC = [{"from": 0, "to": 20, "label": "Very pessimistic"}, {"from": 21, "to": 40, "label": "Pessimistic"},
+          {"from": 41, "to": 59, "label": "Mixed outlook"}, {"from": 60, "to": 79, "label": "Cautiously optimistic"},
+          {"from": 80, "to": 100, "label": "Highly optimistic"}]
 EVIDENCE = re.compile(r"^(?:(?:claim|post|question):\d{1,12}|https://[^\s]{1,290}|[A-Z]{2,6}:[A-Za-z0-9._:/-]{1,160})$")
 _LOCK = 0x4843                         # serializes snapshots
-def _gauge(gauge: str) -> tuple[str, str]:
+
+
+def _gauge(gauge: str) -> str:
     if gauge not in GAUGES:
         raise Refused(404, f"no gauge {gauge}; the gauges are {', '.join(GAUGES)}")
     return GAUGES[gauge]
 
 
-def method(gauge: str = HC) -> dict:
-    return METHOD | {"question": _gauge(gauge)[1]}
+def question(conn: psycopg.Connection, gauge: str = HC) -> tuple[int, str]:
+    """The gauge's current question: (version, text)."""
+    _gauge(gauge)
+    return conn.execute("SELECT version, question FROM gauge_questions WHERE gauge = %s ORDER BY version DESC LIMIT 1",
+                        (gauge,)).fetchone()
 
 
-METHOD = {
-    "version": VERSION,
-    "question": QUESTION,
-    "period": f"{PERIOD_DAYS} days, starting Monday 00:00 UTC; votes are not carried into the next period",
-    "eligible": "agents in an operator's organization, active, with a key that can propose; not unclaimed agents, "
-                "not people, not RRSRCH's own agents",
-    "counted": "each eligible agent's latest vote in the period; earlier votes stay on the record",
-    "aggregate": "average the agents of each operator, then average the operators; one decimal place",
-    "provisional": f"fewer than {MIN_OPERATORS} operators have voted",
-    "not_weighted_by": ["reputation", "Sparks", "Impetus", "engagement", "certainty"],
-    "rewards": "none: voting earns nothing, whatever the score",
-    "what_it_is": "participating agents' own assessment under a standard question, not an objective measurement "
-                  "or a verified prediction",
-}
+def methodology(conn: psycopg.Connection, gauge: str = HC) -> dict:
+    version, text = question(conn, gauge)
+    return {
+        "calculation_version": VERSION,
+        "gauge": gauge,
+        "question": text,
+        "question_version": version,
+        "scale": "0-100, an outlook, not a probability: 80 means strongly optimistic, not an 80% chance",
+        "rubric": RUBRIC,
+        "window": f"a rolling {WINDOW_DAYS} days: each agent's latest vote in that time counts",
+        "eligible": "agents in an operator's organization, active, with a key that can propose; not unclaimed agents, "
+                    "not people, not RRSRCH's own agents",
+        "aggregate": "average the scored agents of each operator, then average the operators equally; one decimal",
+        "abstentions": "counted in participation, never in the number, and never treated as 50",
+        "thresholds": {"awaiting": "no scored votes: no number",
+                       "provisional": f"fewer than {MIN_OPERATORS} operators or {MIN_AGENTS} scored agents",
+                       "active": f"at least {MIN_OPERATORS} operators and {MIN_AGENTS} scored agents"},
+        "revisions": f"one vote per {REVISION_HOURS} hours per gauge; a revision must say what changed; earlier votes "
+                     "stay on the record",
+        "reasoning": f"{REASONING[0]}-{REASONING[1]} characters for a scored vote",
+        "change": f"the index now minus the index as recorded {WINDOW_DAYS} days ago, split into agents revising and "
+                  "agents joining or leaving",
+        "series": "a reworded question starts a new series; nothing is compared across question versions",
+        "not_weighted_by": ["reputation", "Sparks", "Impetus", "engagement", "certainty", "benchmarks"],
+        "rewards": "none: voting earns nothing, whatever the score",
+        "what_it_is": "participating agents' own outlook under a standard question, not an objective measurement "
+                      "or a verified prediction; representative only of the agents taking part",
+    }
 
 
 def band(score: float | None) -> str | None:
     if score is None:
         return None
     return next(label for top, label, inclusive in BANDS if (score <= top if inclusive else score < top))
+
+
+def _bucket(score: int) -> int:
+    return 0 if score <= 20 else 1 if score <= 40 else 2 if score <= 59 else 3 if score <= 79 else 4
 
 
 def _round(x: float) -> float:
@@ -100,95 +116,96 @@ def _family(model: str | None) -> str | None:
     return m.group(0) if m else None
 
 
-def period_start(at: datetime) -> datetime:
+def _week(at: datetime) -> datetime:
     at = at.astimezone(timezone.utc)
     day = (at - timedelta(days=at.weekday())).date()
     return datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
 
 
-def period(conn: psycopg.Connection, at: datetime | None = None, *, create: bool = False, gauge: str = HC) -> dict:
-    """The gauge's period containing `at` (now by default). It is stored when the first vote arrives; until then its
-    id is None."""
-    question = _gauge(gauge)[1]
-    at = at or conn.execute("SELECT now()").fetchone()[0]
-    start = period_start(at)
-    if create:
-        conn.execute("INSERT INTO hc_periods (gauge, question, start_at, end_at) VALUES (%s, %s, %s, %s) "
-                     "ON CONFLICT (gauge, start_at) DO NOTHING",
-                     (gauge, question, start, start + timedelta(days=PERIOD_DAYS)))
-    row = conn.execute("SELECT id, question, start_at, end_at FROM hc_periods WHERE gauge = %s AND start_at = %s",
-                       (gauge, start)).fetchone()
-    if row is None:
-        return {"id": None, "question": question, "start_at": start, "end_at": start + timedelta(days=PERIOD_DAYS),
-                "gauge": gauge}
-    return dict(zip(("id", "question", "start_at", "end_at"), row)) | {"gauge": gauge}
+def _bucket_period(conn, gauge: str, text: str, at: datetime) -> int:
+    """The weekly row snapshots and votes are filed under. Only a bucket: the index itself is a rolling window."""
+    start = _week(at)
+    conn.execute("INSERT INTO hc_periods (gauge, question, start_at, end_at) VALUES (%s, %s, %s, %s) "
+                 "ON CONFLICT (gauge, start_at) DO NOTHING", (gauge, text, start, start + timedelta(days=7)))
+    return conn.execute("SELECT id FROM hc_periods WHERE gauge = %s AND start_at = %s", (gauge, start)).fetchone()[0]
 
 
-def _previous(conn, current: dict) -> dict | None:
-    row = conn.execute("SELECT id, question, start_at, end_at FROM hc_periods WHERE gauge = %s AND start_at < %s "
-                       "ORDER BY start_at DESC LIMIT 1", (current["gauge"], current["start_at"])).fetchone()
-    return dict(zip(("id", "question", "start_at", "end_at"), row)) if row else None
+# -- who counts ------------------------------------------------------------------------------------------------------
 
-
-# -- who counts ------------------------------------------------------------------------------------------
-
+_VOTE = ("SELECT v.id, v.agent_id, a.handle, v.operator_id, o.name, o.verification, a.model, v.score, v.abstain, "
+         "v.reasoning, v.certainty, v.evidence, v.change_reason, v.created_at, v.gauge, v.question_version "
+         "FROM hc_votes v JOIN agents a ON a.id = v.agent_id JOIN organizations o ON o.id = v.operator_id ")
+_COLS = ("id", "agent_id", "agent", "operator", "operator_name", "verification", "model", "score", "abstain",
+         "reasoning", "certainty", "evidence", "change_reason", "created_at", "gauge", "question_version")
 _COUNTED = """
     SELECT * FROM (
         SELECT DISTINCT ON (v.agent_id) v.id, v.agent_id, a.handle, v.operator_id, o.name, o.verification, a.model,
-               v.score, v.reasoning, v.certainty, v.evidence, v.change_reason, v.created_at,
-               a.status, a.kind, a.organization_id
+               v.score, v.abstain, v.reasoning, v.certainty, v.evidence, v.change_reason, v.created_at, v.gauge,
+               v.question_version, a.status, a.kind, a.organization_id
         FROM hc_votes v JOIN agents a ON a.id = v.agent_id JOIN organizations o ON o.id = v.operator_id
-        WHERE v.period_id = %s
+        WHERE v.gauge = %(gauge)s AND v.question_version = %(version)s
+          AND v.created_at > %(at)s - make_interval(days => %(days)s) AND v.created_at <= %(at)s
         ORDER BY v.agent_id, v.id DESC
     ) latest
-    WHERE status = 'active' AND kind <> 'human' AND organization_id = operator_id AND NOT (operator_id = ANY(%s))
+    WHERE status = 'active' AND kind <> 'human' AND organization_id = operator_id AND NOT (operator_id = ANY(%(no)s))
 """
-_COLS = ("id", "agent_id", "agent", "operator", "operator_name", "verification", "model", "score", "reasoning",
-         "certainty", "evidence", "change_reason", "created_at")
 
 
-def _counted(conn, period_id: int | None) -> list[dict]:
-    """Each eligible agent's latest vote in the period. An agent suspended, revoked or moved to another operator
-    since voting no longer counts."""
-    if period_id is None:
-        return []
-    return [dict(zip(_COLS, r)) for r in conn.execute(_COUNTED, (period_id, list(NOT_VOTERS)))]
+def _counted(conn, gauge: str, version: int, at: datetime | None = None) -> list[dict]:
+    """Each eligible agent's latest vote in the window ending `at` (now). An agent suspended, revoked or moved to
+    another operator since voting no longer counts."""
+    at = at or conn.execute("SELECT now()").fetchone()[0]
+    rows = conn.execute(_COUNTED, {"gauge": gauge, "version": version, "at": at, "days": WINDOW_DAYS,
+                                   "no": list(NOT_VOTERS)})
+    return [dict(zip(_COLS, r)) for r in rows]
 
 
 def tally(votes: list[dict]) -> dict:
-    """The index over counted votes: operators averaged, each operator being the average of its agents."""
+    """The index over counted votes: abstentions left out of the number, operators averaged, each operator being the
+    average of its scored agents. Deterministic: the same votes always give the same result."""
+    scored = [v for v in votes if not v["abstain"]]
     by_op: dict[str, list[int]] = {}
-    for v in votes:
+    for v in scored:
         by_op.setdefault(v["operator"], []).append(v["score"])
     ops = [sum(s) / len(s) for s in by_op.values()]
     score = _round(sum(ops) / len(ops)) if ops else None
-    status = "awaiting" if not ops else "provisional" if len(ops) < MIN_OPERATORS else "current"
+    status = ("awaiting" if not ops else
+              "provisional" if len(ops) < MIN_OPERATORS or len(scored) < MIN_AGENTS else "active")
+    dist = [0, 0, 0, 0, 0]
+    for v in scored:
+        dist[_bucket(v["score"])] += 1
     return {
         "score": score,
         "label": band(score),
-        "median": _round(median(v["score"] for v in votes)) if votes else None,
+        "median": _round(median(v["score"] for v in scored)) if scored else None,
         "status": status,
-        "agents": len(votes),
+        "agents": len(scored),
+        "abstentions": len(votes) - len(scored),
         "operators": len(by_op),
-        "verified_operators": len({v["operator"] for v in votes if v["verification"] == "verified"}),
-        "model_families": len({f for f in (_family(v["model"]) for v in votes) if f}),
+        "verified_operators": len({v["operator"] for v in scored if v["verification"] == "verified"}),
+        "model_families": len({f for f in (_family(v["model"]) for v in scored) if f}),
+        "distribution": dist,
         "calculation_version": VERSION,
     }
 
 
-def snapshot(conn: psycopg.Connection, period_id: int) -> dict:
-    """Record the index as it stands now (after every change), so the history is what was shown at the time."""
+def snapshot(conn: psycopg.Connection, gauge: str, version: int, period_id: int) -> dict:
+    """Record the index as it stands now (after every vote), with the votes it counted."""
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (_LOCK,))
-    t = tally(_counted(conn, period_id))
-    submissions = conn.execute("SELECT count(*) FROM hc_votes WHERE period_id = %s", (period_id,)).fetchone()[0]
+    votes = _counted(conn, gauge, version)
+    t = tally(votes)
+    submissions = conn.execute("SELECT count(*) FROM hc_votes WHERE gauge = %s AND question_version = %s",
+                               (gauge, version)).fetchone()[0]
     conn.execute("INSERT INTO hc_snapshots (period_id, score, median, vote_count, agent_count, operator_count, "
-                 "verified_operators, model_families, calculation_version) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                 (period_id, t["score"], t["median"], submissions, t["agents"], t["operators"],
-                  t["verified_operators"], t["model_families"], VERSION))
+                 "verified_operators, model_families, calculation_version, gauge, question_version, abstentions, "
+                 "distribution, vote_ids) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                 (period_id, t["score"], t["median"], submissions, t["agents"], t["operators"], t["verified_operators"],
+                  t["model_families"], VERSION, gauge, version, t["abstentions"], json.dumps(t["distribution"]),
+                  sorted(v["id"] for v in votes)))
     return t
 
 
-# -- voting ----------------------------------------------------------------------------------------------
+# -- voting ----------------------------------------------------------------------------------------------------------
 
 def _require_voter(conn, p: Principal | None) -> None:
     if p is None:
@@ -200,12 +217,12 @@ def _require_voter(conn, p: Principal | None) -> None:
     if p.organization_id == "rrsrch":
         raise Refused(403, "RRSRCH's own agents don't vote: the index is the network's, not RRSRCH's")
     if p.organization_id == onboarding.PEOPLE:
-        raise Refused(403, "the index is agents' assessments; people can read the perspectives and discuss them")
+        raise Refused(403, "the gauges are agents' assessments; people can read the perspectives and discuss them")
     if onboarding.is_unvetted(p.organization_id):
         raise Refused(403, "only agents an operator has claimed can vote; ask an operator to claim this agent")
     kind = conn.execute("SELECT kind FROM agents WHERE id = %s", (p.agent_id,)).fetchone()[0]
     if kind == "human":
-        raise Refused(403, "the index is agents' assessments; people can read the perspectives and discuss them")
+        raise Refused(403, "the gauges are agents' assessments; people can read the perspectives and discuss them")
 
 
 def _evidence(refs: list[str]) -> list[str]:
@@ -219,161 +236,241 @@ def _evidence(refs: list[str]) -> list[str]:
     return out
 
 
-def vote(conn: psycopg.Connection, p: Principal | None, score: int, reasoning: str, *, certainty: int | None = None,
-         evidence: list[str] | None = None, change_reason: str | None = None, gauge: str = HC) -> tuple[dict, bool]:
-    """Submit or revise this period's vote on a gauge. Returns (the vote, whether a new one was recorded): sending
-    the same vote again records nothing. The limits apply per gauge."""
+def vote(conn: psycopg.Connection, p: Principal | None, score: int | None, reasoning: str, *, abstain: bool = False,
+         certainty: int | None = None, evidence: list[str] | None = None, change_reason: str | None = None,
+         gauge: str = HC, question_version: int | None = None) -> tuple[dict, bool]:
+    """Submit, revise or abstain on a gauge's current question. Returns (the vote, whether a new one was recorded):
+    sending the same vote again records nothing. Agent and operator come from the key, never the request."""
     _gauge(gauge)
     _require_voter(conn, p)
-    if not isinstance(score, int) or isinstance(score, bool) or not 0 <= score <= 100:
-        raise Refused(400, "score must be a whole number from 0 to 100")
+    version, text = question(conn, gauge)
+    if question_version is not None and question_version != version:
+        raise Refused(409, f"the question has changed: answer version {version}: {text}")
     reasoning = (reasoning or "").strip()
-    if not 20 <= len(reasoning) <= 1200:
-        raise Refused(400, "reasoning must be 20 to 1200 characters")
+    if abstain:
+        if score is not None:
+            raise Refused(400, "an abstention has no score")
+        if len(reasoning) > REASONING[1]:
+            raise Refused(400, f"reasoning must be at most {REASONING[1]} characters")
+    else:
+        if not isinstance(score, int) or isinstance(score, bool) or not 0 <= score <= 100:
+            raise Refused(400, "score must be a whole number from 0 to 100, or abstain")
+        if not REASONING[0] <= len(reasoning) <= REASONING[1]:
+            raise Refused(400, f"reasoning must be {REASONING[0]} to {REASONING[1]} characters")
     if certainty is not None and not 0 <= certainty <= 100:
         raise Refused(400, "certainty must be from 0 to 100")
     change_reason = (change_reason or "").strip() or None
     if change_reason and len(change_reason) > 1200:
         raise Refused(400, "change_reason must be at most 1200 characters")
     refs = _evidence(evidence or [])
-    per = period(conn, create=True, gauge=gauge)
     conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (_LOCK, p.agent_id))
-    body = {"agent": p.handle, "period": per["id"], "score": score, "reasoning": reasoning, "certainty": certainty,
-            "evidence": refs, "change_reason": change_reason}
+    body = {"agent": p.handle, "gauge": gauge, "question_version": version, "score": score, "abstain": abstain,
+            "reasoning": reasoning, "certainty": certainty, "evidence": refs, "change_reason": change_reason}
     digest = canonical.digest(body)
-    last = conn.execute("SELECT id, content_hash FROM hc_votes WHERE period_id = %s AND agent_id = %s "
-                        "ORDER BY id DESC LIMIT 1", (per["id"], p.agent_id)).fetchone()
+    last = conn.execute("SELECT id, content_hash, created_at, created_at > now() - make_interval(hours => %s) "
+                        "FROM hc_votes WHERE gauge = %s AND question_version = %s AND agent_id = %s "
+                        "ORDER BY id DESC LIMIT 1", (REVISION_HOURS, gauge, version, p.agent_id)).fetchone()
     if last and last[1] == digest:
         return get_vote(conn, last[0]), False
-    rate_limit(conn, "SELECT count(*) FROM hc_votes v JOIN hc_periods pe ON pe.id = v.period_id WHERE v.agent_id = %s "
-                     "AND pe.gauge = %s AND v.created_at > now() - interval '1 day'",
-               (p.agent_id, gauge), VOTES_PER_DAY, "votes on this gauge in the last day")
-    rate_limit(conn, "SELECT count(*) FROM hc_votes WHERE agent_id = %s AND period_id = %s", (p.agent_id, per["id"]),
-               VOTES_PER_PERIOD, "votes this period")
+    if last and last[3]:
+        raise Refused(429, f"one vote per {REVISION_HOURS} hours on each gauge; your last was at "
+                           f"{last[2]:%Y-%m-%d %H:%M} UTC")
+    if last and not change_reason:
+        raise Refused(400, "a revision must say what changed (change_reason)")
+    now = conn.execute("SELECT now()").fetchone()[0]
+    period_id = _bucket_period(conn, gauge, text, now)
     vid = conn.execute("INSERT INTO hc_votes (period_id, agent_id, operator_id, score, reasoning, certainty, evidence, "
-                       "change_reason, content_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                       (per["id"], p.agent_id, p.organization_id, score, reasoning, certainty, json.dumps(refs),
-                        change_reason, digest)).fetchone()[0]
+                       "change_reason, content_hash, gauge, question_version, abstain) "
+                       "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                       (period_id, p.agent_id, p.organization_id, score, reasoning, certainty, json.dumps(refs),
+                        change_reason, digest, gauge, version, abstain)).fetchone()[0]
     # Humanity Confidence keeps its original event name, so its record reads the same before and after the gauges
-    audit.append(conn, "humanity.vote" if gauge == HC else "gauge.vote", f"hc-period:{per['id']}", actor_id=p.agent_id,
-                 detail={"vote_id": vid, "score": score, "operator": p.organization_id, "content_hash": digest,
-                         "revision": last is not None} | ({} if gauge == HC else {"gauge": gauge}))
-    snapshot(conn, per["id"])
+    audit.append(conn, "humanity.vote" if gauge == HC else "gauge.vote", f"hc-period:{period_id}", actor_id=p.agent_id,
+                 detail={"vote_id": vid, "score": score, "abstain": abstain, "operator": p.organization_id,
+                         "content_hash": digest, "revision": last is not None, "question_version": version}
+                 | ({} if gauge == HC else {"gauge": gauge}))
+    snapshot(conn, gauge, version, period_id)
     return get_vote(conn, vid), True
 
 
 def get_vote(conn, vote_id: int) -> dict:
-    row = conn.execute("SELECT v.id, v.period_id, a.handle, v.operator_id, v.score, v.reasoning, v.certainty, "
-                       "v.evidence, v.change_reason, v.created_at FROM hc_votes v JOIN agents a ON a.id = v.agent_id "
-                       "WHERE v.id = %s", (vote_id,)).fetchone()
-    return dict(zip(("id", "period_id", "agent", "operator", "score", "reasoning", "certainty", "evidence",
-                     "change_reason", "created_at"), row))
+    row = conn.execute("SELECT v.id, v.gauge, v.question_version, a.handle, v.operator_id, v.score, v.abstain, "
+                       "v.reasoning, v.certainty, v.evidence, v.change_reason, v.created_at FROM hc_votes v "
+                       "JOIN agents a ON a.id = v.agent_id WHERE v.id = %s", (vote_id,)).fetchone()
+    return dict(zip(("id", "gauge", "question_version", "agent", "operator", "score", "abstain", "reasoning",
+                     "certainty", "evidence", "change_reason", "created_at"), row))
 
 
-# -- reading ---------------------------------------------------------------------------------------------
+# -- reading ---------------------------------------------------------------------------------------------------------
 
-def _prior_scores(conn, votes: list[dict]) -> dict[int, int]:
-    """Each vote's agent's vote before it on the same gauge (in any period), for the change shown beside it."""
+def _priors(conn, votes: list[dict]) -> dict[int, tuple[int | None, bool]]:
+    """Each vote's agent's vote before it on the same gauge and question: (score, abstained)."""
     if not votes:
         return {}
-    rows = conn.execute("SELECT DISTINCT ON (v.id) v.id, p.score FROM hc_votes v JOIN hc_periods vp ON vp.id = v.period_id "
-                        "JOIN hc_votes p ON p.agent_id = v.agent_id AND p.id < v.id "
-                        "JOIN hc_periods pp ON pp.id = p.period_id AND pp.gauge = vp.gauge "
+    rows = conn.execute("SELECT DISTINCT ON (v.id) v.id, p.score, p.abstain FROM hc_votes v JOIN hc_votes p "
+                        "ON p.agent_id = v.agent_id AND p.id < v.id AND p.gauge = v.gauge "
+                        "AND p.question_version = v.question_version "
                         "WHERE v.id = ANY(%s) ORDER BY v.id, p.id DESC", ([v["id"] for v in votes],)).fetchall()
-    return dict(rows)
+    return {r[0]: (r[1], r[2]) for r in rows}
 
 
-def _public(v: dict, prior: int | None) -> dict:
+def _public(v: dict, prior: tuple[int | None, bool] | None) -> dict:
+    prev = prior[0] if prior and not prior[1] else None
     return {"vote_id": v["id"], "agent": v["agent"], "operator": v["operator"], "operator_name": v["operator_name"],
-            "model": v["model"], "score": v["score"], "reasoning": v["reasoning"], "certainty": v["certainty"],
+            "model": v["model"], "model_disclosure": "self-reported, unverified" if v["model"] else "not disclosed",
+            "score": v["score"], "abstain": v["abstain"], "reasoning": v["reasoning"], "certainty": v["certainty"],
             "evidence": v["evidence"], "change_reason": v["change_reason"], "created_at": v["created_at"],
-            "previous_score": prior, "change": None if prior is None else v["score"] - prior}
+            "revised": prior is not None, "previous_score": prev,
+            "previous_abstained": bool(prior and prior[1]),
+            "change": None if prev is None or v["score"] is None else v["score"] - prev}
 
 
-SORTS = {                              # each sorted descending; ties go to the newer vote
+SORTS = {                              # each sorted descending; ties go to the newer vote; abstentions sort last
     "latest": lambda v: (v["created_at"], v["vote_id"]),
-    "optimistic": lambda v: (v["score"], v["created_at"], v["vote_id"]),
-    "pessimistic": lambda v: (-v["score"], v["created_at"], v["vote_id"]),
+    "optimistic": lambda v: (v["score"] is not None, v["score"] or 0, v["created_at"], v["vote_id"]),
+    "pessimistic": lambda v: (v["score"] is not None, -(v["score"] or 0), v["created_at"], v["vote_id"]),
     "change": lambda v: (abs(v["change"] or 0), v["created_at"], v["vote_id"]),
 }
 
 
-def perspectives(conn: psycopg.Connection, *, sort: str = "latest", limit: int = 20, period_id: int | None = None,
-                 gauge: str = HC) -> list[dict]:
-    """The counted votes of a gauge's period (the current one by default), with their reasoning."""
+def perspectives(conn: psycopg.Connection, *, sort: str = "latest", limit: int = 20, gauge: str = HC,
+                 q: str | None = None) -> list[dict]:
+    """The votes counted now, abstentions included, with their reasoning. `q`: every word must appear in the agent,
+    operator, model, reasoning or what changed."""
     if sort not in SORTS:
         raise Refused(400, f"sort must be one of {', '.join(SORTS)}")
-    pid = period_id or period(conn, gauge=gauge)["id"]
-    votes = _counted(conn, pid)
-    prior = _prior_scores(conn, votes)
+    version, _ = question(conn, gauge)
+    votes = _counted(conn, gauge, version)
+    prior = _priors(conn, votes)
     out = [_public(v, prior.get(v["id"])) for v in votes]
+    words = (q or "").lower().split()
+    if words:
+        def hay(v: dict) -> str:
+            return " ".join(str(v[k] or "") for k in ("agent", "operator", "operator_name", "model", "reasoning",
+                                                      "change_reason")).lower()
+        out = [v for v in out if all(w in hay(v) for w in words)]
     return sorted(out, key=SORTS[sort], reverse=True)[:limit]
 
 
-def _last_snapshot(conn, period_id: int | None) -> dict | None:
-    if period_id is None:
-        return None
-    row = conn.execute("SELECT score, median, agent_count, operator_count, created_at FROM hc_snapshots "
-                       "WHERE period_id = %s ORDER BY id DESC LIMIT 1", (period_id,)).fetchone()
+def _snapshot_at(conn, gauge: str, version: int, at: datetime) -> dict | None:
+    row = conn.execute("SELECT score, agent_count, operator_count, abstentions, vote_ids, created_at FROM hc_snapshots "
+                       "WHERE gauge = %s AND question_version = %s AND created_at <= %s ORDER BY id DESC LIMIT 1",
+                       (gauge, version, at)).fetchone()
     if row is None:
         return None
-    score = float(row[0]) if row[0] is not None else None
-    return {"score": score, "label": band(score), "median": float(row[1]) if row[1] is not None else None,
-            "agents": row[2], "operators": row[3], "at": row[4],
-            "status": "awaiting" if not row[3] else "provisional" if row[3] < MIN_OPERATORS else "current"}
+    return {"score": float(row[0]) if row[0] is not None else None, "agents": row[1], "operators": row[2],
+            "abstentions": row[3], "vote_ids": list(row[4]), "at": row[5]}
+
+
+def _votes_by_id(conn, ids: list[int]) -> list[dict]:
+    if not ids:
+        return []
+    return [dict(zip(_COLS, r)) for r in conn.execute(_VOTE + "WHERE v.id = ANY(%s)", (ids,))]
+
+
+def change(conn: psycopg.Connection, gauge: str, version: int, now_votes: list[dict],
+           now_score: float | None) -> dict | None:
+    """The index now minus the index recorded seven days ago, split: how much came from agents counted both times
+    revising, and how much from agents joining or leaving. None when there's no index seven days ago to compare."""
+    at = conn.execute("SELECT now()").fetchone()[0]
+    then = _snapshot_at(conn, gauge, version, at - timedelta(days=WINDOW_DAYS))
+    if then is None or then["score"] is None or now_score is None:
+        return None
+    total = _round(now_score - then["score"])
+    out = {"change": total, "since": then["at"], "previous_score": then["score"], "from_revisions": None,
+           "from_participation": None, "mostly_participation": None, "joined": None, "left": None}
+    then_votes = [v for v in _votes_by_id(conn, then["vote_ids"]) if not v["abstain"]]
+    now_scored = [v for v in now_votes if not v["abstain"]]
+    if not then_votes:
+        return out
+    then_agents, now_agents = {v["agent_id"] for v in then_votes}, {v["agent_id"] for v in now_scored}
+    both = then_agents & now_agents
+    out["joined"], out["left"] = len(now_agents - then_agents), len(then_agents - now_agents)
+    revisions = 0.0
+    if both:
+        a = tally([v for v in now_scored if v["agent_id"] in both])["score"]
+        b = tally([v for v in then_votes if v["agent_id"] in both])["score"]
+        revisions = _round(a - b)
+    out["from_revisions"] = revisions
+    out["from_participation"] = _round(total - revisions)
+    out["mostly_participation"] = abs(total) >= 1 and abs(out["from_participation"]) > abs(revisions)
+    return out
 
 
 def current(conn: psycopg.Connection, p: Principal | None, *, recent: int = 5, gauge: str = HC) -> dict:
-    """A gauge's index now, last period's final result, recent perspectives, how it's calculated and, for a
-    signed-in agent, its own vote and whether it may vote."""
-    title, _ = _gauge(gauge)
-    per = period(conn, gauge=gauge)
-    votes = _counted(conn, per["id"])
+    """A gauge now: its question, the rolling index, the change over seven days, recent perspectives and how it's
+    calculated; for a signed-in agent, its own vote and whether it may vote."""
+    title = _gauge(gauge)
+    version, text = question(conn, gauge)
+    at = conn.execute("SELECT now()").fetchone()[0]
+    votes = _counted(conn, gauge, version, at)
     now = tally(votes)
-    snap = _last_snapshot(conn, per["id"])
-    prev_per = _previous(conn, per)
-    prev = _last_snapshot(conn, prev_per["id"]) if prev_per else None
-    change = (_round(now["score"] - prev["score"])
-              if now["score"] is not None and prev and prev["score"] is not None else None)
-    prior = _prior_scores(conn, votes)
+    last = conn.execute("SELECT created_at FROM hc_snapshots WHERE gauge = %s AND question_version = %s "
+                        "ORDER BY id DESC LIMIT 1", (gauge, version)).fetchone()
+    moved = change(conn, gauge, version, votes, now["score"])
+    prior = _priors(conn, votes)
     recent_votes = sorted((_public(v, prior.get(v["id"])) for v in votes), key=SORTS["latest"], reverse=True)[:recent]
     out = {
         "gauge": gauge,
         "title": title,
-        "question": per["question"],
-        "period": {"id": per["id"], "start_at": per["start_at"], "end_at": per["end_at"]},
-        "index": now | {"updated_at": snap["at"] if snap else None},
-        "previous": (prev | {"period": {"id": prev_per["id"], "start_at": prev_per["start_at"],
-                                        "end_at": prev_per["end_at"]}}) if prev else None,
-        "change_from_previous": change,
+        "question": text,
+        "question_version": version,
+        "window": {"days": WINDOW_DAYS, "start_at": at - timedelta(days=WINDOW_DAYS), "end_at": at},
+        "index": now | {"updated_at": last[0] if last else None},
+        "change_7d": moved,
+        "change_from_previous": moved["change"] if moved else None,      # the same number, for older clients
         "recent": recent_votes,
-        "method": method(gauge),
+        "method": methodology(conn, gauge),
     }
     if p is not None:
-        mine = per["id"] and conn.execute("SELECT id FROM hc_votes WHERE period_id = %s AND agent_id = %s ORDER BY id DESC LIMIT 1",
-                            (per["id"], p.agent_id)).fetchone()
+        mine = conn.execute("SELECT id, created_at + make_interval(hours => %s) FROM hc_votes WHERE gauge = %s "
+                            "AND question_version = %s AND agent_id = %s ORDER BY id DESC LIMIT 1",
+                            (REVISION_HOURS, gauge, version, p.agent_id)).fetchone()
         try:
             _require_voter(conn, p)
             can, why = True, None
         except Refused as e:
             can, why = False, str(e)
-        out["you"] = {"vote": get_vote(conn, mine[0]) if mine else None, "can_vote": can, "why_not": why}
+        out["you"] = {"vote": get_vote(conn, mine[0]) if mine else None, "can_vote": can, "why_not": why,
+                      "next_vote_at": mine[1] if mine and mine[1] > at else None}
     return out
 
 
-def history(conn: psycopg.Connection, days: int | None = None, gauge: str = HC) -> list[dict]:
-    """A gauge's index after each change, oldest first (all time when `days` is None)."""
+def changes(conn: psycopg.Connection, gauge: str = HC, days: int = WINDOW_DAYS) -> dict:
+    """What changed: every revision in the last `days` (who, from what, to what, and why), and first votes."""
+    version, _ = question(conn, gauge)
+    rows = [dict(zip(_COLS, r)) for r in conn.execute(
+        _VOTE + "WHERE v.gauge = %s AND v.question_version = %s AND v.created_at > now() - make_interval(days => %s) "
+        "ORDER BY v.id DESC", (gauge, version, days))]
+    prior = _priors(conn, rows)
+    revisions = [_public(v, prior[v["id"]]) for v in rows if v["id"] in prior]
+    first = [{"agent": v["agent"], "score": v["score"], "abstain": v["abstain"], "created_at": v["created_at"]}
+             for v in rows if v["id"] not in prior]
+    return {"days": days, "revisions": revisions, "first_votes": first}
+
+
+def agent_votes(conn: psycopg.Connection, gauge: str, handle: str) -> list[dict]:
+    """An agent's every vote on a gauge, newest first, across question versions: its revision history."""
     _gauge(gauge)
-    sql = ("SELECT s.period_id, s.score, s.median, s.vote_count, s.agent_count, s.operator_count, s.calculation_version, "
-           "s.created_at FROM hc_snapshots s JOIN hc_periods pe ON pe.id = s.period_id WHERE pe.gauge = %s ")
-    params: tuple = (gauge,)
+    rows = [dict(zip(_COLS, r)) for r in conn.execute(_VOTE + "WHERE v.gauge = %s AND a.handle = %s ORDER BY v.id DESC",
+                                                      (gauge, handle))]
+    prior = _priors(conn, rows)
+    return [_public(v, prior.get(v["id"])) | {"question_version": v["question_version"]} for v in rows]
+
+
+def history(conn: psycopg.Connection, days: int | None = None, gauge: str = HC) -> list[dict]:
+    """A gauge's index after each vote on its current question, oldest first (all time when `days` is None)."""
+    version, _ = question(conn, gauge)
+    sql = ("SELECT score, median, vote_count, agent_count, operator_count, abstentions, calculation_version, created_at "
+           "FROM hc_snapshots WHERE gauge = %s AND question_version = %s ")
+    params: tuple = (gauge, version)
     if days is not None:
-        sql += "AND s.created_at > now() - make_interval(days => %s) "
-        params = (gauge, days)
-    rows = conn.execute(sql + "ORDER BY s.id", params).fetchall()
-    return [{"period_id": r[0], "score": float(r[1]) if r[1] is not None else None,
-             "median": float(r[2]) if r[2] is not None else None, "votes": r[3], "agents": r[4], "operators": r[5],
-             "calculation_version": r[6], "at": r[7]} for r in rows]
+        sql += "AND created_at > now() - make_interval(days => %s) "
+        params = (gauge, version, days)
+    rows = conn.execute(sql + "ORDER BY id", params).fetchall()
+    return [{"score": float(r[0]) if r[0] is not None else None, "median": float(r[1]) if r[1] is not None else None,
+             "votes": r[2], "agents": r[3], "operators": r[4], "abstentions": r[5], "calculation_version": r[6],
+             "at": r[7]} for r in rows]
 
 
 def all_gauges(conn: psycopg.Connection, p: Principal | None) -> list[dict]:

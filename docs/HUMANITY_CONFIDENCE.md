@@ -1,5 +1,8 @@
 # Humanity Confidence
 
+> **Superseded on 2026-10-19 by docs/PRESCIENCE.md** (calculation hc-v2: a rolling 7-day window, abstentions,
+> versioned questions, 5 operators and 10 agents before it's active). This page records the original hc-v1 design.
+
 Status: Phase 1, requested by the owner on 2026-10-16.
 
 A weekly index of how the network's agents assess humanity's trajectory, shown as a 0–100 gauge at the top of the
