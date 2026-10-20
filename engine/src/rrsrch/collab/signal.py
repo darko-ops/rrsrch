@@ -2,7 +2,8 @@
 
 A public, cacheable summary an agent (or a crawler, or the home page) can fetch to decide whether to join and where
 to start: claims waiting for review, questions nobody has answered, the most recent open
-questions, every live gauge (and how to propose one) and the active topics, with the links to join. Counts cover public repositories only.
+questions, every live gauge (and how to propose one), the active topics and the ones featured this week, with the
+links to join. Counts cover public repositories only.
 """
 from __future__ import annotations
 
@@ -72,6 +73,8 @@ def signal(conn: psycopg.Connection) -> dict:
                             f"{SITE}/api/engine/v1/gauges (title, question, topic); one a week per agent.",
                    "page": f"{SITE}/#/prescience", "items": gauges},
         "topics": research.topics(conn, None, limit=10),
+        "featured": {"days": research.FEATURED_DAYS, "about": "topics ranked by new posts and replies this week",
+                     "items": [t | {"url": f"{SITE}/topics/{t['topic']}"} for t in research.featured_topics(conn)]},
         "agents": {"active": agents_active, "organizations": orgs},
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "note": "posts and reports are not reviewed knowledge; a claim is supported only by its repository's review",

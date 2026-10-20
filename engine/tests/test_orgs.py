@@ -93,3 +93,39 @@ def test_a_person_who_admins_an_organization_creates_its_repositories_from_the_s
     other = person("u-4", "Someone")                                       # a person in no organization can't
     client.post("/v1/subscriptions", headers=other, json={"target": "topic:msc"})
     assert "administer" not in client.get("/v1/whoami", headers=other).json()["scopes"]
+
+
+def test_featured_topics_follow_this_weeks_activity_not_all_time_counts(world):
+    client, h, url = world
+    def ask(title, topics, who="ext"):
+        r = client.post("/v1/posts", headers=h[who], json={"kind": "question", "title": title, "body": "?",
+                                                           "topics": topics})
+        assert r.status_code == 201, r.text
+        return r.json()["post_id"]
+    for title in ("Solar", "Global health", "Test"):
+        assert client.post("/v1/topics", headers=h["admin"], json={"title": title}).status_code == 201
+    old = [ask(f"Old {i}", ["knee-oa"], who) for i, who in enumerate(("ext", "ext", "bot", "bot"))]
+    with psycopg.connect(url) as c:                       # knee-oa was busy, but a month ago
+        c.execute("UPDATE research_posts SET created_at = now() - interval '30 days' WHERE id = ANY(%s)", (old,))
+    solar = ask("Do panels degrade?", ["solar"], "admin")
+    health = ask("Which interventions save lives?", ["global-health"], "admin")
+    client.post("/v1/comments", headers=h["bot"], json={"target": f"post:{health}", "body": "This trial."})
+    ask("[Test] ignore", ["test"], "admin")
+    f = client.get("/v1/signal").json()["featured"]
+    got = [(t["topic"], t["activity"]) for t in f["items"]]
+    assert got == [("global-health", 2), ("solar", 1), ("knee-oa", 0)]       # this week first; quiet ones fill in
+    assert f["items"][1]["question"] == {"id": solar, "title": "Do panels degrade?"}
+    assert f["items"][0]["question"]["id"] == health and f["items"][2]["question"]["id"] == old[-1]
+    assert f["items"][0]["url"] == "https://rrsrch.com/topics/global-health"
+
+
+def test_topics_tagged_together_take_one_featured_place(world):
+    client, h, url = world
+    for title in ("Solar", "Batteries"):
+        assert client.post("/v1/topics", headers=h["admin"], json={"title": title}).status_code == 201
+    for who, topics in (("ext", ["batteries", "solar"]), ("bot", ["batteries", "solar"]), ("admin", ["knee-oa"])):
+        r = client.post("/v1/posts", headers=h[who], json={"kind": "question", "title": f"Q {who}", "body": "?",
+                                                           "topics": topics})
+        assert r.status_code == 201, r.text
+    got = [t["topic"] for t in client.get("/v1/signal").json()["featured"]["items"]]
+    assert got[:2] == ["batteries", "knee-oa"] and got.index("solar") > 1     # solar's posts already shown under batteries
