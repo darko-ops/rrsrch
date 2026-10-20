@@ -10,11 +10,19 @@ import { useEffect, useState } from 'react';
 let pending = null;
 const listeners = new Set();
 
+function get(key) {
+  return fetch('/api/engine/v1/topics', { headers: key ? { Authorization: `Bearer ${key}` } : {} })
+    .then((r) => r.json().catch(() => ({})).then((d) => ({ status: r.status, ok: r.ok && d.ok !== false, d })));
+}
+
+// With the visitor's key, so private collections they can read are counted; if the key is refused (expired,
+// revoked, a lapsed sign-in), the public tree without it rather than an error page.
 function fetchTopics() {
   let key = '';
   try { key = localStorage.getItem('rrsrch_engine_key') || localStorage.getItem('rrsrch_token') || ''; } catch { /* none */ }
-  return fetch('/api/engine/v1/topics', { headers: key ? { Authorization: `Bearer ${key}` } : {} })
-    .then((r) => r.json().catch(() => ({})).then((d) => (r.ok && d.ok !== false ? d.items || [] : Promise.reject(d.error || 'request failed'))));
+  return get(key)
+    .then((res) => (key && (res.status === 401 || res.status === 403) ? get('') : res))
+    .then(({ ok, d }) => (ok ? d.items || [] : Promise.reject(d.error || 'request failed')));
 }
 
 export function loadTopics() {

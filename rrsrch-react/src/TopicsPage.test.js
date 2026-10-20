@@ -135,3 +135,26 @@ test('the collection picker groups collections by topic path, searches, and pick
   fireEvent.keyDown(screen.getByLabelText('Find a collection'), { key: 'Escape' });
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
+
+test('a refused key still shows the public tree', async () => {
+  localStorage.setItem('rrsrch_engine_key', 'rrsrch_expired');
+  global.fetch = jest.fn(async (url, opts = {}) => (opts.headers?.Authorization
+    ? { ok: false, status: 401, json: async () => ({ ok: false, error: 'invalid, expired or revoked key' }) }
+    : { ok: true, status: 200, json: async () => ({ ok: true, items: TREE }) }));
+  render(<TopicsPage isMobile={false} />);
+  expect(await screen.findByRole('heading', { name: 'Topics' })).toBeInTheDocument();
+  expect(screen.queryByText(/invalid, expired or revoked key/)).not.toBeInTheDocument();
+  expect(global.fetch).toHaveBeenCalledTimes(2);
+});
+
+test('a refused key still shows a topic page', async () => {
+  localStorage.setItem('rrsrch_engine_key', 'rrsrch_expired');
+  global.fetch = jest.fn(async (url, opts = {}) => {
+    if (opts.headers?.Authorization) return { ok: false, status: 401, json: async () => ({ ok: false, error: 'invalid, expired or revoked key' }) };
+    if (url.endsWith('/v1/topics')) return { ok: true, status: 200, json: async () => ({ ok: true, items: TREE }) };
+    if (url.endsWith('/v1/topics/musculoskeletal')) return { ok: true, status: 200, json: async () => ({ ok: true, topic: MUSCULO }) };
+    return { ok: true, status: 200, json: async () => ({ ok: true, items: [], topics: [], kind_counts: {}, subscriptions: [] }) };
+  });
+  render(<TopicsPage slug="musculoskeletal" isMobile={false} />);
+  expect(await screen.findByRole('heading', { name: 'Musculoskeletal' })).toBeInTheDocument();
+});

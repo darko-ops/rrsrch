@@ -168,7 +168,10 @@ function AddTopic({ parent, apiKey }) {
 
 function TopicView({ slug, tree, isMobile }) {
   const apiKey = actingKey();
-  const [got] = useLoad(() => engine(`/v1/topics/${encodeURIComponent(slug)}`, { key: apiKey }), [slug, apiKey]);
+  const path = `/v1/topics/${encodeURIComponent(slug)}`;
+  // a refused key (expired, revoked) still gets the public page
+  const [got] = useLoad(() => engine(path, { key: apiKey }).then((r) => (apiKey && [401, 403].includes(r.status)
+    ? engine(path) : r)), [slug, apiKey]);
   const follows = useFollows(apiKey);
   if (got.loading && !got.data) return <Loading what="the topic" />;
   if (got.error) return <Note tone="error">{got.error === 'not found' ? `No topic ${slug}.` : got.error}</Note>;
