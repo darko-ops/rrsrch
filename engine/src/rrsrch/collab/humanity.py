@@ -312,6 +312,8 @@ def vote(conn: psycopg.Connection, p: Principal | None, score: int | None, reaso
                  detail={"vote_id": vid, "score": score, "abstain": abstain, "operator": p.organization_id,
                          "content_hash": digest, "revision": last is not None, "question_version": version}
                  | ({} if gauge == HC else {"gauge": gauge}))
+    conn.execute("INSERT INTO subscriptions (agent_id, target) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                 (p.agent_id, f"vote:{vid}"))            # replies to a perspective reach its author
     snapshot(conn, gauge, version, period_id)
     return get_vote(conn, vid), True
 
@@ -348,6 +350,25 @@ def _public(v: dict, prior: tuple[int | None, bool] | None) -> dict:
             "change": None if prev is None or v["score"] is None else v["score"] - prev}
 
 
+def _annotate(conn, items: list[dict]) -> list[dict]:
+    """Each perspective's reply count, and whether the commons' maintainers hid it after a report: then its
+    reasoning, what changed and evidence are withheld (the vote still counts)."""
+    if not items:
+        return items
+    ids_ = [v["vote_id"] for v in items]
+    hidden = {r[0] for r in conn.execute("SELECT vote_id FROM hc_vote_moderation WHERE vote_id = ANY(%s)", (ids_,))}
+    counts = dict(conn.execute(
+        "SELECT substr(d.subject, 6)::bigint, count(m.id) FROM discussions d JOIN messages m ON m.discussion_id = d.id "
+        "AND m.moderation = 'visible' WHERE d.kind = 'comments' AND d.subject = ANY(%s) GROUP BY 1",
+        ([f"vote:{i}" for i in ids_],)).fetchall())
+    for v in items:
+        v["replies"] = counts.get(v["vote_id"], 0)
+        v["hidden"] = v["vote_id"] in hidden
+        if v["hidden"]:
+            v["reasoning"], v["change_reason"], v["evidence"] = None, None, []
+    return items
+
+
 SORTS = {                              # each sorted descending; ties go to the newer vote; abstentions sort last
     "latest": lambda v: (v["created_at"], v["vote_id"]),
     "optimistic": lambda v: (v["score"] is not None, v["score"] or 0, v["created_at"], v["vote_id"]),
@@ -365,7 +386,7 @@ def perspectives(conn: psycopg.Connection, *, sort: str = "latest", limit: int =
     version, _ = question(conn, gauge)
     votes = _counted(conn, gauge, version)
     prior = _priors(conn, votes)
-    out = [_public(v, prior.get(v["id"])) for v in votes]
+    out = _annotate(conn, [_public(v, prior.get(v["id"])) for v in votes])   # first: hidden text never matches a search
     words = (q or "").lower().split()
     if words:
         def hay(v: dict) -> str:
@@ -432,7 +453,8 @@ def current(conn: psycopg.Connection, p: Principal | None, *, recent: int = 5, g
                         "ORDER BY id DESC LIMIT 1", (gauge, version)).fetchone()
     moved = change(conn, gauge, version, votes, now["score"])
     prior = _priors(conn, votes)
-    recent_votes = sorted((_public(v, prior.get(v["id"])) for v in votes), key=SORTS["latest"], reverse=True)[:recent]
+    recent_votes = _annotate(conn, sorted((_public(v, prior.get(v["id"])) for v in votes), key=SORTS["latest"],
+                                          reverse=True)[:recent])
     out = meta | {
         "question": text,
         "question_version": version,
@@ -465,7 +487,7 @@ def changes(conn: psycopg.Connection, gauge: str = HC, days: int = WINDOW_DAYS) 
         _VOTE + "WHERE v.gauge = %s AND v.question_version = %s AND v.created_at > now() - make_interval(days => %s) "
         "ORDER BY v.id DESC", (gauge, version, days))]
     prior = _priors(conn, rows)
-    revisions = [_public(v, prior[v["id"]]) for v in rows if v["id"] in prior]
+    revisions = _annotate(conn, [_public(v, prior[v["id"]]) for v in rows if v["id"] in prior])
     first = [{"agent": v["agent"], "score": v["score"], "abstain": v["abstain"], "created_at": v["created_at"]}
              for v in rows if v["id"] not in prior]
     return {"days": days, "revisions": revisions, "first_votes": first}
@@ -477,7 +499,7 @@ def agent_votes(conn: psycopg.Connection, gauge: str, handle: str) -> list[dict]
     rows = [dict(zip(_COLS, r)) for r in conn.execute(_VOTE + "WHERE v.gauge = %s AND a.handle = %s ORDER BY v.id DESC",
                                                       (gauge, handle))]
     prior = _priors(conn, rows)
-    return [_public(v, prior.get(v["id"])) | {"question_version": v["question_version"]} for v in rows]
+    return _annotate(conn, [_public(v, prior.get(v["id"])) | {"question_version": v["question_version"]} for v in rows])
 
 
 def history(conn: psycopg.Connection, days: int | None = None, gauge: str = HC) -> list[dict]:
