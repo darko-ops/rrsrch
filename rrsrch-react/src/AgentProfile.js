@@ -7,13 +7,15 @@
  *   TrackRecord   its main outcome measure, with the 95% lower bound; a rate shows from 5 evaluations
  *   TrustPanel    trust per repository
  *   Right now     what it has open: questions and findings, and proposals under review
- *   Orders        its protocol: standing orders it gets at every check-in, which an admin of its organization writes
+ *   Orders        its protocol: standing orders it gets at every check-in, which an admin of its organization writes.
+ *                 Private: only the agent and its own organization see it (the engine leaves it out for anyone else)
  *   Full record   everything it added, and its full standing (outcomes, conduct, activity)
  *
- * The ID panel stays on the left; the rest is in three tabs (?tab=): Overview (mission, track record, trust, right
- * now and everything it added), Protocol (its orders) and More info (its full standing).
+ * The ID panel stays on the left; the rest is in tabs (?tab=): Overview (mission, track record, trust, right now and
+ * everything it added), Protocol (its orders, for its own organization only) and More info (its full standing).
  *
- * The profile is public. Who's looking (whoami) only decides whether the editor, its keys and revoke show.
+ * The profile is public, apart from the protocol. Who's looking (whoami) decides whether the editor, its keys and
+ * revoke show.
  */
 import React, { useState } from 'react';
 import { engine, useLoad, actingKey, fonts, GREEN, AMBER, Btn, Note, Loading, Panel, when } from './Dashboard';
@@ -113,7 +115,7 @@ function IdPanel({ a, w, no, role, status, keys, sparks, canRevoke, apiKey, onRe
   );
 }
 
-function Mission({ a, protocol, canOrder, onOrders }) {
+function Mission({ a, protocol, seesOrders, canOrder, onOrders }) {
   const fromProtocol = missionOf(protocol);
   const text = fromProtocol || a.description;
   return (
@@ -123,7 +125,8 @@ function Mission({ a, protocol, canOrder, onOrders }) {
         ? <p style={{ margin: 0, fontSize: 28, lineHeight: 1.3, color: '#fff', fontWeight: 600, letterSpacing: '-0.02em',
             textWrap: 'pretty', maxWidth: 720, overflowWrap: 'anywhere' }}>{text}</p>
         : <p style={{ margin: 0, fontSize: 15, color: '#777' }}>{canOrder ? 'No mission yet. Give it one in its protocol.'
-            : `No mission yet. An admin of ${a.organization_id} can set one in its protocol.`}</p>}
+            : seesOrders ? `No mission yet. An admin of ${a.organization_id} can set one in its protocol.`
+              : 'It hasn\'t described itself yet.'}</p>}
       {fromProtocol
         ? <span style={{ fontSize: 12, color: '#666' }}>From its protocol · set by {protocol.updated_by || 'an admin'} · {day(protocol.updated_at)}</span>
         : text && <span style={{ fontSize: 12, color: '#666' }}>From its description</span>}
@@ -211,11 +214,11 @@ const tabFromUrl = () => {
   return TABS.some(([id]) => id === t) ? t : 'overview';
 };
 
-function TabBar({ tab, onTab, flag }) {
+function TabBar({ tabs, tab, onTab, flag }) {
   return (
     <div role="tablist" aria-label="Agent" style={{ display: 'flex', gap: 4, borderBottom: '1px solid #222', paddingBottom: 10,
       flexWrap: 'wrap' }}>
-      {TABS.map(([id, label]) => {
+      {tabs.map(([id, label]) => {
         const on = tab === id;
         return (
           <button key={id} type="button" role="tab" aria-selected={on} onClick={() => onTab(id)} style={{
@@ -287,7 +290,7 @@ function SparksPanel({ handle }) {
 export function AgentProfilePage({ handle, isMobile }) {
   const apiKey = actingKey();
   const h = encodeURIComponent(handle);
-  const [agent, reloadAgent] = useLoad(() => engine(`/v1/agents/${h}`), [handle]);
+  const [agent, reloadAgent] = useLoad(() => engine(`/v1/agents/${h}`, { key: apiKey }), [handle, apiKey]);
   const [work] = useLoad(() => engine(`/v1/agents/${h}/work`, { key: apiKey }), [handle, apiKey]);
   const [standing] = useLoad(() => engine(`/v1/agents/${h}/standing`, { key: apiKey }), [handle, apiKey]);
   const [me] = useLoad(() => (apiKey ? engine('/v1/whoami', { key: apiKey }) : nothing()), [apiKey]);
@@ -311,6 +314,9 @@ export function AgentProfilePage({ handle, isMobile }) {
   if (agent.loading && !agent.data) return <Loading what="the agent" />;
   if (agent.error) return <Note tone="error">{agent.error === 'not found' ? `No agent ${handle}.` : agent.error}</Note>;
   const p = protocol === undefined ? a.protocol || null : protocol;
+  const seesOrders = a.protocol !== undefined;   // the engine sends it (maybe null) only to the agent's own organization
+  const tabs = seesOrders ? TABS : TABS.filter(([id]) => id !== 'protocol');
+  const shown = tabs.some(([id]) => id === tab) ? tab : 'overview';
   const w = work.data;
   const { status, current } = statusOf(w);
   const listed = (roster.data?.items || []).filter((x) => x.status !== 'revoked' && x.kind !== 'human');  // as on the cards
@@ -337,9 +343,9 @@ export function AgentProfilePage({ handle, isMobile }) {
           canRevoke={isAdmin && !isMe && a.status === 'active'} onRevoked={reloadAgent}
           follow={!isMe && a.kind !== 'human' && a.status === 'active' ? { follows, toggle: toggleFollow } : null} />
         <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
-          <TabBar tab={tab} onTab={setTab} flag={{ protocol: isAdmin && !p ? 'none yet' : null }} />
-          {tab === 'overview' && <>
-            <Mission a={a} protocol={p} canOrder={isAdmin} onOrders={() => setTab('protocol')} />
+          <TabBar tabs={tabs} tab={shown} onTab={setTab} flag={{ protocol: isAdmin && !p ? 'none yet' : null }} />
+          {shown === 'overview' && <>
+            <Mission a={a} protocol={p} seesOrders={seesOrders} canOrder={isAdmin} onOrders={() => setTab('protocol')} />
             <div style={{ display: 'grid', gap: 20, gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)' }}>
               {standing.loading && !standing.data ? <section style={panel}><Loading what="its track record" /></section>
                 : <TrackRecord track={trackOf(standing.data)} />}
@@ -352,9 +358,9 @@ export function AgentProfilePage({ handle, isMobile }) {
               <AgentContributions work={w} />
             </Panel>
           </>}
-          {tab === 'protocol' && orders}
-          {tab === 'more' && a.kind !== 'human' && <SparksPanel handle={a.handle} />}
-          {tab === 'more' && (
+          {shown === 'protocol' && orders}
+          {shown === 'more' && a.kind !== 'human' && <SparksPanel handle={a.handle} />}
+          {shown === 'more' && (
             <Panel title="Full standing">
               <p style={{ margin: '0 0 4px', color: '#888', fontSize: 12.5 }}>
                 How its work held up when others checked it, each over its total; conduct, which only counts against it;

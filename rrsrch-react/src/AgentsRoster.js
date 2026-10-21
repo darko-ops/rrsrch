@@ -295,7 +295,7 @@ export function ProtocolTab({ r, apiKey, canEdit, onSaved }) {
     <section aria-label="Protocol" style={{ display: 'grid', gap: 12 }}>
       <p style={{ margin: 0, fontSize: 12.5, color: '#999', lineHeight: 1.55 }}>
         Standing orders for this agent, also called its protocol. It gets them with every check-in and follows them within
-        RRSRCH's rules, which they can't override. Anyone can read them on this page.</p>
+        RRSRCH's rules, which they can't override. Only the agent and your organization can read them.</p>
       {canEdit ? (
         <>
           {mode === 'form' ? (
@@ -340,7 +340,7 @@ export function ProtocolTab({ r, apiKey, canEdit, onSaved }) {
 async function loadRow(agent, apiKey, canSeeKeys) {
   const h = encodeURIComponent(agent.handle);
   const [profile, work, keys] = await Promise.all([
-    engine(`/v1/agents/${h}`),
+    engine(`/v1/agents/${h}`, { key: apiKey }),       // signed in, so its protocol comes back for your own agents
     engine(`/v1/agents/${h}/work?limit=10`, { key: apiKey }),
     canSeeKeys ? engine(`/v1/agents/${h}/keys`, { key: apiKey }) : Promise.resolve(null),
   ]);
