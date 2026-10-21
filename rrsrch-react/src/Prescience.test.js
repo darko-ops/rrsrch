@@ -46,16 +46,17 @@ function serve(extra = {}) {
 
 afterEach(() => window.history.replaceState(null, '', '/'));
 
-test('the overview: gauge, question and version, participation, distribution, the 7-day move and the sharpest split', async () => {
-  serve();
+test('the overview: only this gauge, its question, participation, distribution, the 7-day move and the sharpest split', async () => {
+  const calls = serve();
   render(<PresciencePage gauge="ai-safety" isMobile={false} />);
   expect(await screen.findByRole('heading', { name: 'AI Safety?', level: 1 })).toBeInTheDocument();   // the question
-  expect(screen.getByText('Prescience · Core')).toBeInTheDocument();
   expect(screen.getByText('← Radar')).toHaveAttribute('href', '#/radar');
-  const strip = await screen.findByRole('navigation', { name: 'Core gauges' });
-  expect(within(strip).getByText('AI Safety').closest('button')).toHaveAttribute('aria-current', 'page');
-  expect(within(strip).getAllByRole('button')).toHaveLength(4);
-  expect(screen.getByText(/AI Safety · question v1 · rolling 7 days/)).toBeInTheDocument();
+  expect(screen.getByText('AI Safety')).toBeInTheDocument();                        // which gauge, plainly
+  expect(screen.getByText('Core gauge')).toBeInTheDocument();
+  expect(screen.queryByRole('navigation', { name: 'Core gauges' })).not.toBeInTheDocument();   // not the other three
+  expect(screen.queryByText('Humanity Confidence')).not.toBeInTheDocument();
+  expect(calls.some((u) => /\/v1\/gauges(\?|$)/.test(u.replace('/api/engine', '')))).toBe(false);
+  expect(screen.queryByText(/question v1/)).not.toBeInTheDocument();             // the version is under Method
   expect(screen.getByRole('img', { name: /Scores by band: 0–20: 0, 21–40: 2, 41–59: 1/ })).toBeInTheDocument();
   const moved = screen.getByRole('region', { name: 'Over 7 days' });
   expect(moved).toHaveTextContent('−6.0');
@@ -109,12 +110,13 @@ test('a link straight to a view opens it, and an unknown gauge says so', async (
   expect(await screen.findByText('calculation hc-v2')).toBeInTheDocument();
 });
 
-test('a proposed gauge shows who proposed it and related gauges instead of the core strip', async () => {
+test('a proposed gauge says who proposed it, and shows no other gauges', async () => {
   serve();
   render(<PresciencePage gauge="clean-power" isMobile={false} />);
-  expect(await screen.findByText('Prescience · Proposed · Climate')).toBeInTheDocument();
-  expect(screen.getByText('clean-power-bot')).toBeInTheDocument();
-  expect(screen.getByText(/A proposed gauge — scored exactly like the core four/)).toBeInTheDocument();
+  expect(await screen.findByText('clean-power-bot')).toHaveAttribute('href', '/agents/clean-power-bot');
+  expect(screen.getByText('Clean Power')).toBeInTheDocument();
+  expect(screen.getByText('Climate')).toBeInTheDocument();
+  expect(screen.queryByText('Open Models')).not.toBeInTheDocument();
   expect(screen.queryByRole('navigation', { name: 'Core gauges' })).not.toBeInTheDocument();
 });
 
