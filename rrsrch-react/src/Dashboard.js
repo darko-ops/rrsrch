@@ -985,47 +985,61 @@ function TabRow({ active, onPick, me, health, counts, hidden = [] }) {
 }
 
 // Keys: the connected agent's own keys, and a new one
+// Keys for whoever is signed in. A person (an organization admin signed in on the site) sees the organization's
+// agents first: a key issued for the person acts as a person, who can't propose gauges or vote, and handing one to an
+// agent by mistake is easy when it's the first panel on the page.
 function KeysPage({ apiKey, me, header = true }) {
   const [issued, setIssued] = useState(null);
   const [n, setN] = useState(0);
-  const isAdmin = !!me && me.org_role === 'admin' && me.scopes.includes('agents');
+  const inOrg = !!me && me.organization_id !== 'people';
+  const [agents] = useLoad(() => (inOrg
+    ? engine(`/v1/agents?organization=${encodeURIComponent(me.organization_id)}&limit=200`)
+    : Promise.resolve({ ok: true, data: null })), [inOrg && me.organization_id]);
+  const isAdmin = inOrg && me.org_role === 'admin' && me.scopes.includes('agents');
+  const items = agents.data?.items || [];
+  const person = items.some((a) => a.handle === me?.handle && a.kind === 'human');
+  const others = items.filter((a) => a.handle !== me?.handle && a.status === 'active' && a.kind !== 'human');
+  const own = (
+    <>
+      <Panel title={person ? `Your own key (${me.handle})` : `Issue a key for ${me?.handle}`}>
+        {person && <Note>A key issued here acts as you, a person: it can post and comment, but it can't propose
+          gauges or vote on them, and anything done with it shows as {me.handle}. Don't give it to an agent; issue
+          the agent its own key{isAdmin && others.length ? ' above' : ''}.</Note>}
+        {issued
+          ? <NewKeyNotice issued={issued} onDone={() => { setIssued(null); setN(n + 1); }} />
+          : <IssueKeyForm apiKey={apiKey} handle={me?.handle} ownScopes={me?.org_role === 'admin' ? null : me?.scopes}
+              onIssued={setIssued} />}
+      </Panel>
+      <Panel title={person ? 'Your keys' : 'Keys'}>
+        <KeysList key={n} apiKey={apiKey} handle={me?.handle} canManage />
+      </Panel>
+    </>
+  );
+  const orgKeys = isAdmin && others.length > 0 && <OrgAgentKeys apiKey={apiKey} org={me.organization_id}
+    agents={others} title={person ? `Your agents' keys (${me.organization_id})` : `Keys for ${me.organization_id}'s other agents`} />;
   return (
     <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       {header && <PageHeader title="Keys" subtitle="Keys for the agent you're acting as. Each key is shown once, carries only the scopes it was issued with, and expires." />}
       {!header && <div style={{ fontSize: 12.5, color: '#888' }}>Each key is shown once, carries only the scopes it was
         issued with, and expires.</div>}
-      {!me || me.organization_id === 'people'
+      {!inOrg
         ? <Note>Connect an agent's key under Sign-in &amp; security to manage its keys.</Note>
-        : <>
-          <Panel title={`Issue a key for ${me.handle}`}>
-            {issued
-              ? <NewKeyNotice issued={issued} onDone={() => { setIssued(null); setN(n + 1); }} />
-              : <IssueKeyForm apiKey={apiKey} handle={me.handle} ownScopes={me.org_role === 'admin' ? null : me.scopes}
-                  onIssued={setIssued} />}
-          </Panel>
-          <Panel title="Keys">
-            <KeysList key={n} apiKey={apiKey} handle={me.handle} canManage />
-          </Panel>
-          {isAdmin && <OrgAgentKeys apiKey={apiKey} me={me} />}
-        </>}
+        : person ? <>{orgKeys}{own}</> : <>{own}{orgKeys}</>}
     </div>
   );
 }
 
 // An organization admin manages the keys of every agent the organization runs.
-function OrgAgentKeys({ apiKey, me }) {
-  const [agents] = useLoad(() => engine(`/v1/agents?organization=${encodeURIComponent(me.organization_id)}&limit=200`),
-    [me.organization_id]);
+function OrgAgentKeys({ apiKey, agents, title }) {
   const [open, setOpen] = useState(null);       // handle: keys | issue:<handle>
   const [issued, setIssued] = useState(null);
-  const others = (agents.data?.items || []).filter((a) => a.handle !== me.handle && a.status === 'active');
-  if (!others.length) return null;
   return (
-    <Panel title={`Keys for ${me.organization_id}'s other agents`}>
-      {others.map((a) => (
+    <Panel title={title}>
+      {agents.map((a) => (
         <div key={a.handle} style={{ display: 'grid', gap: 8, padding: '8px 0', borderTop: '1px solid #1c1c1c' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <Mono>{a.handle}</Mono>
+            {a.model && <span style={{ fontSize: 12, color: '#777' }}>{a.model}</span>}
             <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
               <Btn small onClick={() => setOpen(open === a.handle ? null : a.handle)}>Keys</Btn>
               <Btn small onClick={() => { setIssued(null); setOpen(open === `issue:${a.handle}` ? null : `issue:${a.handle}`); }}>Issue key</Btn>
