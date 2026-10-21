@@ -38,7 +38,11 @@ function serve(me, puts = []) {
         ...AGENT, protocol: { text: JSON.parse(opts.body).protocol, updated_at: hoursAgo(0), updated_by: 'admin' } } }) });
     }
     if (path === '/v1/whoami') return Promise.resolve({ ok: !!me, status: me ? 200 : 401, json: () => Promise.resolve({ ok: !!me, ...(me || {}) }) });
-    const body = DATA[path];
+    let body = DATA[path];
+    if (body?.agent && me?.organization_id !== body.agent.organization_id) {  // the engine keeps orders in the family
+      const { protocol, ...rest } = body.agent;
+      body = { ...body, agent: rest };
+    }
     return Promise.resolve({ ok: !!body, status: body ? 200 : 404, json: () => Promise.resolve(body ? { ok: true, ...body } : { ok: false, error: 'not found' }) });
   });
   return puts;
@@ -48,7 +52,7 @@ beforeEach(() => localStorage.setItem('rrsrch_engine_key', 'rrsrch_k'));
 afterEach(() => { localStorage.clear(); window.history.replaceState(null, '', '/'); });
 
 test('the profile leads with the protocol\'s mission, then the ID panel, track record, trust and current work', async () => {
-  serve({ handle: 'visitor', organization_id: 'elsewhere', org_role: 'member', scopes: ['read'] });
+  serve({ handle: 'colleague', organization_id: 'lab', org_role: 'member', scopes: ['read'] });
   render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
   const mission = await screen.findByRole('region', { name: 'Mission' });
   expect(mission).toHaveTextContent('Read every knee OA trial and propose its outcomes.');
@@ -73,7 +77,7 @@ test('the profile leads with the protocol\'s mission, then the ID panel, track r
   expect(screen.getByText('Everything it added')).toBeInTheDocument();                  // the overview has its posts
   expect(screen.queryByRole('region', { name: 'Orders' })).not.toBeInTheDocument();
   expect(screen.queryByText('Full standing')).not.toBeInTheDocument();
-  // the protocol tab: its orders, read-only for visitors, and in the address
+  // the protocol tab: its orders, read-only for a member who isn't an admin, and in the address
   fireEvent.click(screen.getByRole('tab', { name: 'Protocol' }));
   expect(window.location.search).toBe('?tab=protocol');
   const orders = screen.getByRole('region', { name: 'Orders' });
@@ -121,13 +125,28 @@ test('an admin of the agent\'s organization gives it orders, sees its keys and c
   expect(within(id).queryByRole('button', { name: 'Revoke agent and all keys' })).not.toBeInTheDocument();
 });
 
-test('signed out, the profile is public and read-only', async () => {
+test('signed out, the profile is public and read-only, without its orders', async () => {
   localStorage.clear();
   serve(null);
   render(<AgentProfilePage handle="trial-reader" isMobile />);
-  expect(await screen.findByRole('region', { name: 'Mission' })).toHaveTextContent('Read every knee OA trial');
+  expect(await screen.findByRole('region', { name: 'Mission' })).toHaveTextContent('Reads knee OA trials.');
+  expect(screen.queryByRole('tab', { name: 'Protocol' })).not.toBeInTheDocument();
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   expect(global.fetch.mock.calls.some(([u]) => u.includes('/whoami'))).toBe(false);
+});
+
+test('another operator sees the agent\'s work but not its orders, even from a ?tab=protocol link', async () => {
+  serve({ handle: 'visitor', organization_id: 'elsewhere', org_role: 'admin', scopes: ['agents', 'read'] });
+  window.history.replaceState(null, '', '/agents/trial-reader?tab=protocol');
+  render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
+  const mission = await screen.findByRole('region', { name: 'Mission' });
+  expect(mission).toHaveTextContent('Reads knee OA trials.');
+  expect(mission).toHaveTextContent('From its description');
+  expect(screen.queryByRole('tab', { name: 'Protocol' })).not.toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.queryByRole('region', { name: 'Orders' })).not.toBeInTheDocument();
+  expect(screen.getByRole('complementary', { name: 'trial-reader ID' })).not.toHaveTextContent('Trial reader');
+  expect(document.body).not.toHaveTextContent('MSCs');
 });
 
 test('an unknown handle says so', async () => {
