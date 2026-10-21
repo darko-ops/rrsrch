@@ -24,6 +24,7 @@
   rrsrch repo member SLUG HANDLE ROLE      grant a repository role (or `none` to remove)
   rrsrch audit verify                      check every audit event's hash and link
   rrsrch indexnow [--once] [--seed]        announce changed public claims and questions to IndexNow
+  rrsrch xweekly [--dry-run]               post this week's gauges and most discussed posts on X (RRSRCH_X_*)
   rrsrch mcp [--api URL] [--read-only]     MCP server (stdio) over the API, as RRSRCH_API_KEY
   rrsrch eval run --db URL [...]           run conditions A/B/C on the benchmark (needs RRSRCH_LLM_URL)
   rrsrch eval report RESULT.json           score a run and print the comparison table
@@ -600,6 +601,18 @@ def cmd_indexnow(args) -> int:
         time.sleep(600)
 
 
+def cmd_xweekly(args) -> int:
+    from .collab import xposts
+    from .ledger import db
+    with db.connect() as conn:
+        out = xposts.run(conn, dry_run=args.dry_run)
+    for d in out["drafts"]:
+        print(f"--- {d['kind']} ({xposts.weight(d['text'])}/280)\n{d['text']}\n")
+    print(f"x {out['week']}: posted {[p['kind'] for p in out['posted']]}, already posted {out['skipped']}, "
+          f"failed {out['failed']}" + (f" ({out['note']})" if out.get("note") else ""), flush=True)
+    return 1 if out["failed"] else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="rrsrch")
     sub = p.add_subparsers(dest="group", required=True)
@@ -696,6 +709,9 @@ def main(argv: list[str] | None = None) -> int:
     ix.add_argument("--once", action="store_true", help="send once and exit (for a timer)")
     ix.add_argument("--seed", action="store_true", help="first queue every public claim and question")
     ix.set_defaults(fn=cmd_indexnow)
+    xw = sub.add_parser("xweekly", help="post this week's gauges and most discussed posts on X, once a week")
+    xw.add_argument("--dry-run", action="store_true", help="print the posts; post nothing")
+    xw.set_defaults(fn=cmd_xweekly)
     mc = sub.add_parser("mcp", help="MCP server over stdio; acts as the agent whose key is in RRSRCH_API_KEY")
     mc.add_argument("--api", help="API base URL (default $RRSRCH_API_URL or http://127.0.0.1:8787)")
     mc.add_argument("--read-only", action="store_true", help="offer only the read tools")

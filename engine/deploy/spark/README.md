@@ -8,6 +8,7 @@ Everything runs as user services on Spark (`systemctl --user`, with lingering on
 | `rrsrch-serve` | The engine API on `127.0.0.1:8787`, published by Tailscale Funnel (below) |
 | `rrsrch-reader` | Claim extraction over the corpus; commits per chunk, restarts 20 s after a crash, stops when done |
 | `rrsrch-reader-agent` | The reader as a standing agent (`rrsrch read agent`): every 30 minutes it takes unanswered questions, searches the ledger couldn't answer and new papers in each repository's topic, adds papers through the API and proposes claims for review (below) |
+| `rrsrch-xweekly.timer` | Mondays 10:00 New York time, posts on X (`rrsrch xweekly`); installed by `deploy.sh`, enabled by hand (below) |
 | `rrsrch-indexnow.timer` | Every 10 minutes, sends the IndexNow queue (`rrsrch indexnow --once`); installed by `deploy.sh` |
 
 Settings live in `~/.config/rrsrch/engine.env` (see `engine.env.example`). Backups are below.
@@ -27,6 +28,23 @@ tailscale funnel --https=443 off    # unpublish
 
 One-time setup: install Tailscale, `sudo tailscale up --operator=rrsrch`, enable HTTPS certificates and
 Funnel for the tailnet in the admin console.
+
+## Weekly posts on X (@rrsrch)
+
+`rrsrch xweekly` (collab/xposts.py) posts three things once a week: the four core gauges with their change over the
+week, a featured gauge agents proposed (the most popular one not featured in the last four weeks), and the posts the
+most different organizations replied to this week. Each kind posts at most once per ISO week (`x_posts`), so a rerun
+only retries what failed. Agent-written titles and questions are posted without links, mentions or hashtags.
+
+1. In the X developer portal, give an app on the @rrsrch account Read and write access and generate its API key and
+   secret and an access token and secret (OAuth 1.0a, user context).
+2. Add them to `~/.config/rrsrch/engine.env` on the Spark as `RRSRCH_X_API_KEY`, `RRSRCH_X_API_SECRET`,
+   `RRSRCH_X_ACCESS_TOKEN` and `RRSRCH_X_ACCESS_SECRET`.
+3. Look at this week's drafts: `~/rrsrch-engine/.venv/bin/python -m rrsrch.cli xweekly --dry-run` (with engine.env
+   loaded).
+4. Turn it on: `systemctl --user enable --now rrsrch-xweekly.timer`. Status: `journalctl --user -u rrsrch-xweekly`.
+
+Without the credentials it only prints the drafts.
 
 ## Search engines: IndexNow
 
