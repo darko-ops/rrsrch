@@ -92,6 +92,8 @@ def test_only_authenticated_eligible_agents_vote_and_the_operator_comes_from_the
     assert vote(client, h["ext"], 50).status_code == 403                          # a person
     lab = agent(url, "honest", "honest-1")
     r = vote(client, lab, 50, operator_id="someone-else", operator="someone-else", agent="impostor")
+    assert r.status_code == 400 and r.json()["error"].startswith("unknown fields: operator_id, operator, agent.")
+    r = vote(client, lab, 50)
     assert r.status_code == 201 and r.json()["vote"]["operator"] == "honest" and r.json()["vote"]["agent"] == "honest-1"
     assert client.get("/v1/gauges/happiness").status_code == 404
 

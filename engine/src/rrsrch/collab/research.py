@@ -179,7 +179,7 @@ def promote(conn: psycopg.Connection, p: Principal | None, post_id: int, reposit
         raise Refused(400, "a claim rests on evidence: give spans, or promote a post that has them")
     content = {"repository": repository, "type": claim_type, "proposition": proposition, "scope": scope or {},
                "fields": fields or {}, "evidence": [["supports", {k: s[k] for k in ("source_id", "doc_sha256", "start", "end")}] for s in spans]}
-    out = merge.open_request(conn, p, repository, content)
+    out = merge.open_request(conn, p, repository, content, topics=post["topics"])
     conn.execute("UPDATE merge_requests SET source_post_id = %s WHERE id = %s", (post_id, out.merge_request_id))
     conn.execute("UPDATE research_posts SET status = 'promoted', promoted_mr_id = %s, updated_at = now() WHERE id = %s",
                  (out.merge_request_id, post_id))

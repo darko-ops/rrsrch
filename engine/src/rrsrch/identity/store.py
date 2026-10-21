@@ -151,6 +151,11 @@ def get_repo(conn: psycopg.Connection, slug: str) -> Repo | None:
     return Repo(*row) if row else None
 
 
+def agent_kind(conn: psycopg.Connection, agent_id: int) -> str | None:
+    row = conn.execute("SELECT kind FROM agents WHERE id = %s", (agent_id,)).fetchone()
+    return row[0] if row else None
+
+
 def role_in(conn: psycopg.Connection, agent_id: int | None, repository_id: int) -> Role | None:
     if agent_id is None:
         return None

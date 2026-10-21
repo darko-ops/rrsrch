@@ -17,7 +17,7 @@ from urllib.parse import unquote
 import psycopg
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, Field
+from pydantic import Field
 from starlette.exceptions import HTTPException
 
 from ..collab import directory, feed
@@ -27,6 +27,8 @@ from ..identity.access import Action, Principal, Role
 from ..knowledge.models import HANDLE, AgentKind
 from ..trust import audit
 from ..trust.merge import Refused
+from . import idempotency
+from .body import Body
 
 router = APIRouter(prefix="/v1")
 
@@ -34,6 +36,8 @@ router = APIRouter(prefix="/v1")
 def conn(request: Request) -> Iterator[psycopg.Connection]:
     with request.app.state.connect() as c:
         yield c
+        if idempotency.dry_run(request):              # a dry run keeps nothing, whichever route it went to
+            c.rollback()
 
 
 SITE_SCOPES = frozenset({"read", "propose", "review"})
@@ -146,7 +150,7 @@ def protocol_of(agent: dict) -> dict | None:
             "updated_by": agent["protocol_updated_by"]}
 
 
-class NewAgent(BaseModel):
+class NewAgent(Body):
     handle: str = Field(pattern=HANDLE)
     kind: AgentKind
     capabilities: list[str] = Field(default_factory=list, max_length=32)
@@ -154,14 +158,14 @@ class NewAgent(BaseModel):
     org_role: str = Field(default="member", pattern=r"^(member|admin)$")
 
 
-class NewKey(BaseModel):
+class NewKey(Body):
     scopes: list[str] = Field(min_length=1)
     days: int | None = Field(default=None, ge=1, le=store.MAX_KEY_DAYS)   # a fixed lifetime; omit to keep it alive
                                                                            # while used (expires 90 idle days)
     label: str = Field(default="", max_length=100)
 
 
-class SelfRegistration(BaseModel):
+class SelfRegistration(Body):
     handle: str = Field(pattern=HANDLE)
     kind: Literal["service", "model"] = "model"
     model: str | None = Field(default=None, max_length=200)
@@ -169,30 +173,30 @@ class SelfRegistration(BaseModel):
     description: str = Field(default="", max_length=500)
 
 
-class ProfileUpdate(BaseModel):
+class ProfileUpdate(Body):
     description: str | None = Field(default=None, max_length=500)
     model: str | None = Field(default=None, max_length=200)
 
 
-class ProtocolUpdate(BaseModel):
+class ProtocolUpdate(Body):
     protocol: str = Field(max_length=store.PROTOCOL_MAX)     # empty clears it
 
 
-class NewOrganization(BaseModel):
+class NewOrganization(Body):
     id: str = Field(min_length=3, max_length=39)
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=500)
 
 
-class OrgVerification(BaseModel):
+class OrgVerification(Body):
     verified: bool
 
 
-class Claim(BaseModel):
+class Claim(Body):
     code: str = Field(min_length=10, max_length=100)
 
 
-class MemberRole(BaseModel):
+class MemberRole(Body):
     role: Role
 
 
@@ -253,7 +257,9 @@ def claim_agent(body: Claim, p: Principal | None = Depends(principal), c: psycop
     audit.append(c, "agent.claim", f"agent:{got['handle']}", actor_id=p.agent_id,
                  detail={"organization_id": p.organization_id})
     return {"ok": True, "handle": got["handle"], "organization_id": p.organization_id,
-            "note": "the agent's current key keeps its scopes; issue it a broader one if it needs more"}
+            "note": "the agent's current key keeps its scopes; issue it a broader one if it needs more",
+            "agent_next": "its next check-in (GET /v1/checkin) welcomes it: what it can now do with its key, where "
+                          "to post (claims too, in rrsrch/network) and a starter task"}
 
 
 @router.post("/agents", status_code=201)

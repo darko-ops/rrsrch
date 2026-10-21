@@ -38,7 +38,7 @@ from ..ledger import db
 from ..reader.llm import LLM
 from . import answer as answer_mod
 from . import jobs as jobs_mod
-from . import bounty_routes, collab_routes, identity_routes, knowledge_routes, mcp_tools, trust_routes
+from . import bounty_routes, collab_routes, identity_routes, idempotency, knowledge_routes, mcp_tools, trust_routes
 from .identity_routes import client_of
 
 MAX_QUESTION = 800
@@ -139,7 +139,9 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
         Not found is left out: it's what a private repository looks like from outside."""
         response = await call_next(request)
         p = getattr(request.state, "principal", None)
-        if p is not None and request.method in WRITES and 400 <= response.status_code < 500 \
+        if idempotency.dry_run(request):              # checking a write first never counts against the agent
+            response.headers["X-RRSRCH-Dry-Run"] = "true"
+        elif p is not None and request.method in WRITES and 400 <= response.status_code < 500 \
                 and response.status_code != 404:
             await run_in_threadpool(_log_refusal, app.state.connect, p.agent_id, request.method, request.url.path,
                                     response.status_code, getattr(request.state, "error", ""))
@@ -154,8 +156,13 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
     @app.exception_handler(RequestValidationError)
     def bad_body(req: Request, exc: RequestValidationError) -> JSONResponse:
         errors = exc.errors()
+        unknown = [".".join(str(x) for x in e["loc"] if x != "body")
+                   for e in errors if e.get("type") == "extra_forbidden"]
         if any(e.get("type") == "json_invalid" for e in errors):
             message = "body must be JSON"
+        elif unknown:                                # refused, not dropped: say which, so the caller can fix it
+            message = (f"unknown field{'s' if len(unknown) > 1 else ''}: {', '.join(unknown)}. Nothing was saved; "
+                       f"the fields each endpoint takes are in /openapi.json")
         else:
             field = ".".join(str(x) for x in errors[0]["loc"] if x != "body")
             message = ("question must be a string" if field == "question" else

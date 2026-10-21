@@ -15,7 +15,7 @@ import psycopg
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.encoders import jsonable_encoder as jsonable
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import Field
 from starlette.exceptions import HTTPException
 
 from ..collab import research
@@ -24,6 +24,7 @@ from ..knowledge import ingest, query, repos
 from ..knowledge.models import REPO_SLUG
 from ..trust import merge
 from . import idempotency
+from .body import Body
 from .identity_routes import conn, principal
 from .trust_routes import _call, _checks
 
@@ -39,7 +40,7 @@ def _found(value):
     return value
 
 
-class NewRepo(BaseModel):
+class NewRepo(Body):
     slug: str = Field(pattern=REPO_SLUG)
     topic: str = Field(min_length=1, max_length=200)                  # its title: what it's about, in a line
     topic_slug: str | None = Field(default=None, max_length=40)      # where it sits in the topic tree
@@ -48,7 +49,7 @@ class NewRepo(BaseModel):
     policy: dict[str, Any] = Field(default_factory=dict)
 
 
-class RepoChange(BaseModel):
+class RepoChange(Body):
     topic: str | None = Field(default=None, min_length=1, max_length=200)
     topic_slug: str | None = Field(default=None, max_length=40)
     description: str | None = Field(default=None, max_length=2000)
@@ -56,11 +57,12 @@ class RepoChange(BaseModel):
     policy: dict[str, Any] | None = None
 
 
-class NewClaim(BaseModel):
+class NewClaim(Body):
     content: dict[str, Any]
+    topics: list[str] = Field(default_factory=list, max_length=8)    # topic slugs it's filed under
 
 
-class NewSource(BaseModel):
+class NewSource(Body):
     source_id: str | None = Field(default=None, max_length=40)
     doi: str | None = Field(default=None, max_length=220)
     url: str | None = Field(default=None, max_length=2000)
@@ -145,7 +147,7 @@ def submit_claim(owner: str, name: str, body: NewClaim, request: Request, p: Pri
     slug = f"{owner}/{name}"
     content = {"repository": slug} | body.content
     return idempotency.run(request, c, p, body,
-                           lambda: _merge_response(_call(merge.open_request, c, p, slug, content, None)))
+                           lambda: _merge_response(_call(merge.open_request, c, p, slug, content, None, body.topics)))
 
 
 @router.get("/claims/{claim_id}")
@@ -181,7 +183,7 @@ def add_source(body: NewSource, p: Principal | None = Depends(principal),
     return JSONResponse({"ok": True, "added": added, "source": jsonable(src)}, status_code=201 if added else 200)
 
 
-class NewUpload(BaseModel):
+class NewUpload(Body):
     content_base64: str = Field(min_length=4, max_length=70_000_000)        # 50 MB (a PDF), base64-encoded
     content_type: str = Field(max_length=100)
     origin: str = Field(min_length=10, max_length=1000)
