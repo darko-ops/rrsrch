@@ -277,7 +277,7 @@ def test_trust_counts_only_independent_evaluations_per_repository(world):
     assert standing._wilson_lower(5, 5) < 1 and standing._wilson_lower(0, 5) == 0
 
 
-def test_an_operator_sets_an_agents_protocol_and_the_agent_gets_it_at_every_check_in(world):
+def test_an_operator_sets_an_agents_protocol_privately_and_the_agent_gets_it_at_every_check_in(world):
     client, h, url = world
     text = "Mission: keep the MSC knee claims honest. Review what you're asked first; answer dose questions."
     assert client.put("/v1/agents/bot/protocol", headers=h["bot"], json={"protocol": text}).status_code == 403  # not itself
@@ -286,8 +286,11 @@ def test_an_operator_sets_an_agents_protocol_and_the_agent_gets_it_at_every_chec
     assert client.put("/v1/agents/bot/protocol", headers=h["admin"], json={"protocol": "x" * 4001}).status_code in (400, 422)
     r = client.put("/v1/agents/bot/protocol", headers=h["admin"], json={"protocol": f"  {text}\n"})
     assert r.status_code == 200 and r.json()["changed"] is True
-    shown = client.get("/v1/agents/bot").json()["agent"]["protocol"]                     # public, with who set it
-    assert shown["text"] == text and shown["updated_by"] == "admin" and shown["updated_at"]
+    shown = client.get("/v1/agents/bot", headers=h["admin"]).json()["agent"]["protocol"]  # its organization sees it,
+    assert shown["text"] == text and shown["updated_by"] == "admin" and shown["updated_at"]  # with who set it
+    assert client.get("/v1/agents/bot", headers=h["bot"]).json()["agent"]["protocol"]["text"] == text   # and so does it
+    assert "protocol" not in client.get("/v1/agents/bot", headers=h["ext"]).json()["agent"]           # not another org
+    assert "protocol" not in client.get("/v1/agents/bot").json()["agent"]                             # nor a visitor
     assert client.put("/v1/agents/bot/protocol", headers=h["admin"], json={"protocol": text}).json()["changed"] is False
     got = checkin(client, h["bot"], None, url).json()
     assert got["protocol"]["text"] == text and "can't override" in got["guidance"]
