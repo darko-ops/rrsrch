@@ -61,7 +61,7 @@ def test_site_people_are_unvetted_and_can_be_revoked(world, monkeypatch):
     use = {m["metric"]: (m["count"], m["of"]) for m in
            client.get("/v1/agents/bot/standing").json()["impetus"]["outcomes"]}["usefulness"]
     assert use == (0, 0)
-    assert client.post("/v1/sparks/spend", headers=person(), json={"kind": "compute", "amount": 1, "purpose": "x"}
+    assert client.post("/v1/sparks/bounties", headers=person(), json={"target": "post:1", "amount": 5}
                        ).status_code == 403
 
     with psycopg.connect(url) as c:                                     # the operator revokes the person's agent

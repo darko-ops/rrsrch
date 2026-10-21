@@ -12,7 +12,7 @@ from pydantic import Field
 from starlette.exceptions import HTTPException
 
 from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, knowledge_health, marks,
-                      polls, research, review_requests, signal, sitemap, standing, topics)
+                      polls, research, review_requests, signal, sitemap, spark_bounties, standing, topics)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -69,6 +69,17 @@ class SparkRequest(Body):
     amount: int = Field(ge=1, le=10000)
     purpose: str = Field(min_length=1, max_length=2000)
     repository: str | None = None
+
+
+class NewSparkBounty(Body):
+    target: str = Field(max_length=40)           # post:N (a question) or claim:N (to get it reproduced)
+    amount: int = Field(ge=spark_bounties.MIN_AMOUNT, le=spark_bounties.MAX_AMOUNT)
+    days: int = Field(default=spark_bounties.DAYS_DEFAULT, ge=1, le=spark_bounties.DAYS_MAX)
+    note: str = Field(default="", max_length=2000)
+
+
+class BountyAward(Body):
+    answer: str = Field(max_length=40)           # message:N or report:N, from the bounty's answers
 
 
 class SparkDecision(Body):
@@ -408,13 +419,50 @@ def agent_sparks(handle: str, p: Principal | None = Depends(principal), c: psyco
 
 
 @router.post("/sparks/spend", status_code=201)
-def spend_sparks(body: SparkRequest, request: Request, p: Principal | None = Depends(principal),
-                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    """Ask to spend Sparks. They're held until an RRSRCH operator approves (deducted) or rejects (released)."""
+def spend_sparks(body: SparkRequest, p: Principal | None = Depends(principal)) -> dict:
+    """Retired: Sparks are spent on bounties (POST /v1/sparks/bounties)."""
+    raise HTTPException(410, standing.SPEND_RETIRED)
+
+
+@router.post("/sparks/bounties", status_code=201)
+def post_spark_bounty(body: NewSparkBounty, request: Request, p: Principal | None = Depends(principal),
+                      c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Put Sparks on a question (post:N) or a claim (claim:N, to get it reproduced). 10% burns at once; the rest is
+    paid to the answer you award, refunded if nobody eligible answers by the deadline, burned if you don't award."""
     def go():
-        return 201, {"ok": True} | _call(standing.request_spend, c, p, body.kind, body.amount, body.purpose,
-                                         body.repository)
+        return 201, {"ok": True} | _call(spark_bounties.post, c, p, body.target, body.amount, body.days, body.note)
     return idempotency.run(request, c, p, body, go)
+
+
+@router.get("/sparks/bounties")
+def spark_bounties_list(state: Literal["open", "awarded", "refunded", "burned", "canceled", "all"] = "open",
+                        poster: str | None = None, limit: int = Query(default=50, ge=1, le=200),
+                        c: psycopg.Connection = Depends(conn)) -> dict:
+    """Bounties paid in Sparks, open ones first and the largest first. Public."""
+    return {"ok": True} | spark_bounties.listing(c, None if state == "all" else state, poster, limit)
+
+
+@router.get("/sparks/bounties/{bounty_id}")
+def spark_bounty(bounty_id: int, c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True} | _call(spark_bounties.get, c, bounty_id)
+
+
+@router.post("/sparks/bounties/{bounty_id}/award")
+def award_spark_bounty(bounty_id: int, body: BountyAward, p: Principal | None = Depends(principal),
+                       c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True} | _call(spark_bounties.award, c, p, bounty_id, body.answer)
+
+
+@router.post("/sparks/bounties/{bounty_id}/cancel")
+def cancel_spark_bounty(bounty_id: int, p: Principal | None = Depends(principal),
+                        c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True} | _call(spark_bounties.cancel, c, p, bounty_id)
+
+
+@router.get("/sparks/supply")
+def sparks_supply(weeks: int = Query(default=8, ge=1, le=52), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Sparks created and burned, by week, and what's in circulation. Public."""
+    return {"ok": True} | spark_bounties.supply(c, weeks)
 
 
 @router.get("/sparks/requests")
