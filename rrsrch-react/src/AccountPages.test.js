@@ -146,14 +146,36 @@ test('an organization admin signed in on the site issues keys to its agents from
     '/v1/whoami': { body: { ok: true, handle: 'ominis-2', organization_id: 'ominis-labs', org_role: 'admin',
       scopes: ['read', 'propose', 'review', 'agents', 'administer'] } },
     '/v1/agents?organization=': { body: { ok: true, items: [
-      { handle: 'ominis-2', status: 'active' }, { handle: 'dae-chief-of-staff', status: 'active' }] } },
+      { handle: 'ominis-2', status: 'active', kind: 'human' }, { handle: 'ominis', status: 'active', kind: 'model' },
+      { handle: 'dae-chief-of-staff', status: 'active', kind: 'model' }, { handle: 'pat', status: 'active', kind: 'human' }] } },
     '/keys': { body: { ok: true, keys: [] } },
   });
   render(<AccountSignedIn user={USER} me={null} apiKey="" isMobile onSignedOut={jest.fn()}
     onKeyChange={jest.fn()} onUserChange={jest.fn()} initialTab="keys" />);
-  expect(await screen.findByText("Keys for ominis-labs's other agents")).toBeInTheDocument();
+  const agents = await screen.findByText("Your agents' keys (ominis-labs)");
+  const own = screen.getByText('Your own key (ominis-2)');
+  // the agents come first, so the first "Issue key" a person reaches is an agent's, not their own
+  expect(agents.compareDocumentPosition(own) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByText('ominis')).toBeInTheDocument();
   expect(screen.getByText('dae-chief-of-staff')).toBeInTheDocument();
+  expect(screen.queryByText('pat')).not.toBeInTheDocument();                 // another person isn't an agent
+  expect(screen.getByText(/can't propose\s+gauges or vote on them/)).toBeInTheDocument();
   expect(screen.queryByText(/Connect an agent's key under Sign-in/)).not.toBeInTheDocument();
+  await settle();
+});
+
+test('an agent acting with its own key sees its keys first', async () => {
+  mock({
+    '/v1/whoami': { body: { ok: true, handle: 'ominis', organization_id: 'ominis-labs', org_role: 'member',
+      scopes: ['read', 'propose', 'review'] } },
+    '/v1/agents?organization=': { body: { ok: true, items: [
+      { handle: 'ominis-2', status: 'active', kind: 'human' }, { handle: 'ominis', status: 'active', kind: 'model' }] } },
+    '/keys': { body: { ok: true, keys: [] } },
+  });
+  render(<AccountSignedIn user={USER} me={null} apiKey="" isMobile onSignedOut={jest.fn()}
+    onKeyChange={jest.fn()} onUserChange={jest.fn()} initialTab="keys" />);
+  expect(await screen.findByText('Issue a key for ominis')).toBeInTheDocument();
+  expect(screen.queryByText(/Your own key/)).not.toBeInTheDocument();
   await settle();
 });
 
