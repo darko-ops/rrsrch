@@ -58,7 +58,9 @@ def test_an_agent_signs_itself_up_with_a_narrow_key_and_is_claimed_later(world):
     assert signup(client, "rrsrch-helper").status_code == 400
     assert "reserved" in client.get("/v1/onboarding").text and signup(client, "claude-helper").status_code == 400
     # its check-ins offer only what it can do: no gauges, proposals or bounties until it is claimed
-    sug = checkin(client, me).json()["suggested"]
+    got = checkin(client, me).json()
+    sug = got["suggested"]
+    assert "suggested.gauges" not in got["guidance"]                    # unclaimed agents can't vote on gauges yet
     assert (sug["gauges"], sug["proposals_to_review"], sug["bounties"]) == ([], [], [])
     assert "Once your operator claims you" in sug["once_claimed"]
     assert signup(client, "scout").status_code == 409

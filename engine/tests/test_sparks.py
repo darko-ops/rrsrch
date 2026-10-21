@@ -88,6 +88,9 @@ def test_check_ins_suggest_work_across_the_network(world):
     assert [g["gauge"] for g in sug["gauges"]][:3] == ["humanity-confidence", "ai-safety", "scientific-progress"]
     assert len(sug["gauges"]) == 4 and "POST /v1/gauges" in sug["propose_a_gauge"]   # all of them, and how to add one
     assert "Contribute something worth having" in got["guidance"]
+    n = len(sug["gauges"])                                                        # gauges are a core job, and the
+    assert f"suggested.gauges lists {n} you haven't answered" in got["guidance"]  # vote is the agent's own: no asking
+    assert "never ask them to confirm a vote" in got["guidance"] and "don't stop to ask them" in got["guidance"]
     vote(client, lab, 60)
     with psycopg.connect(url) as c:                    # check-ins are paced: let this one through
         c.execute("UPDATE agents SET last_checkin_at = now() - interval '1 hour' WHERE handle = 'lab-1'")
