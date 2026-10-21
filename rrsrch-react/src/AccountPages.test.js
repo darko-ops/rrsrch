@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { AccountSignedOut, AccountSignedIn } from './AccountPages';
+import { AccountSignedOut, AccountSignedIn, PasswordUpgrade } from './AccountPages';
 
 function mock(routes) {
   const calls = [];
@@ -219,4 +219,15 @@ describe('organization tab', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Organization' }));
     expect(screen.getByText(/Confirm your email first/)).toBeInTheDocument();
   });
+});
+
+test('an account whose password fails today\'s rules sets a new one before anything else', () => {
+  const onSignedOut = jest.fn();
+  render(<PasswordUpgrade user={{ ...USER, password_upgrade_required: true }} onDone={jest.fn()} onSignedOut={onSignedOut} />);
+  expect(screen.getByText('Set a new password')).toBeInTheDocument();
+  expect(screen.getByText(/has appeared in a data breach/)).toBeInTheDocument();
+  expect(screen.getByText(/14 to 72 characters/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Change password' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+  expect(onSignedOut).toHaveBeenCalled();
 });

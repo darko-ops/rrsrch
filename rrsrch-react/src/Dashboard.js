@@ -30,6 +30,7 @@ const InboxPage = React.lazy(() => import('./Inbox'));
 const MembersPanel = React.lazy(() => import('./Members'));
 const AgentsHome = React.lazy(() => import('./AgentsRoster'));
 const AccountSignedIn = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedIn })));
+const PasswordUpgrade = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.PasswordUpgrade })));
 const AccountSignedOut = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.AccountSignedOut })));
 
 const fonts = {
@@ -1160,6 +1161,15 @@ export default function Dashboard({ isMobile, initialTab }) {
       <React.Suspense fallback={<Loading what="your account" />}>
         <AccountSignedOut isMobile={isMobile} onKey={(k) => setApiKey(k)}
           onSignedIn={(u) => { setSiteToken(readStored('rrsrch_token')); setUser(u); }} />
+      </React.Suspense>
+    );
+  }
+
+  if (user?.password_upgrade_required) {     // a new password first, whichever page
+    return (
+      <React.Suspense fallback={<Loading what="your account" />}>
+        <PasswordUpgrade user={user} onDone={(u) => { setSiteToken(readStored('rrsrch_token')); setUser(u); }}
+          onSignedOut={signedOut} />
       </React.Suspense>
     );
   }
