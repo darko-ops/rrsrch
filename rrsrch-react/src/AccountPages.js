@@ -394,7 +394,7 @@ function Row({ title, desc, children, danger, below }) {
   );
 }
 
-function ChangePassword({ user, onDone, onCancel }) {
+function ChangePassword({ user, onDone, onCancel, cancelLabel = 'Cancel' }) {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [err, setErr] = useState('');
@@ -419,10 +419,26 @@ function ChangePassword({ user, onDone, onCancel }) {
       <PasswordRules password={next} who={{ name: user.name, email: user.email }} />
       <div style={{ display: 'flex', gap: 8 }}>
         <Btn small kind="primary" onClick={send} disabled={busy || !ok}>{busy ? 'Saving…' : 'Change password'}</Btn>
-        <Btn small onClick={onCancel}>Cancel</Btn>
+        <Btn small onClick={onCancel}>{cancelLabel}</Btn>
       </div>
       <span style={{ fontSize: 11.5, color: '#666' }}>Changing it signs out your other sessions.</span>
       {err && <Note tone="error">{err}</Note>}
+    </div>
+  );
+}
+
+// After signing in with a password that doesn't meet today's rules (too short, too common, or found in a data
+// breach): nothing else until a new one is set. The server refuses everything else meanwhile.
+export function PasswordUpgrade({ user, onDone, onSignedOut }) {
+  return (
+    <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0, 1fr)', maxWidth: 560 }}>
+      <div>
+        <h1 style={{ fontSize: 22, color: '#fff', margin: '0 0 6px' }}>Set a new password</h1>
+        <div style={{ fontSize: 13.5, color: '#aaa', lineHeight: 1.6 }}>Your password doesn't meet RRSRCH's current
+          rules: it's too short, too common, or has appeared in a data breach. Set a new one to continue. Your other
+          sessions will be signed out.</div>
+      </div>
+      <ChangePassword user={user} onDone={onDone} onCancel={onSignedOut} cancelLabel="Sign out" />
     </div>
   );
 }

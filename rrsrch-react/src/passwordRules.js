@@ -2,7 +2,7 @@
  * Password rules for email sign-ups, shown as a checklist while someone types. The server enforces the same
  * rules (passwordProblems in server.js); keep the two in step.
  */
-export const PASSWORD_MIN = 12;
+export const PASSWORD_MIN = 14;
 const PASSWORD_MAX_BYTES = 72; // bcrypt ignores everything after 72 bytes
 const COMMON = new Set([
   'password', 'passw0rd', 'password1', 'password123', 'p@ssw0rd', 'qwerty', 'qwertyuiop', 'qwerty123',

@@ -554,6 +554,9 @@ app.all('/api/engine/v1/*', async (req, res) => {
     delete headers.authorization;
     const person = await siteUser(auth);
     if (!person) return res.status(401).json({ ok: false, error: 'your sign-in has expired; sign in again' });
+    if (person.password_upgrade_required && req.method !== 'GET') {
+      return res.status(403).json({ ok: false, error: 'set a new password to continue: Account, Sign-in & security' });
+    }
     if (!isVerified(person) && req.method !== 'GET') {
       return res.status(403).json({ ok: false, error: 'confirm your email first: use the link we sent, or resend it from your account' });
     }
@@ -2075,12 +2078,15 @@ function verifyToken(token) {
 }
 const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, created_at: u.created_at,
                              email_verified: isVerified(u), google: !!u.google_sub,
-                             has_password: !!u.password_hash });
+                             has_password: !!u.password_hash,
+                             password_upgrade_required: !!u.password_upgrade_required });
 const tokenFor = (u) => signToken({ sub: u.id, iat: Date.now(), exp: Date.now() + 30 * 24 * 3600 * 1000 });
 // Tokens issued before an account's tokens_after (set when Google takes over an email account) no longer work.
 const tokenRevoked = (user, payload) => !!user.tokens_after && !(payload.iat >= user.tokens_after);
 
-async function requireUser(req, res) {
+// `upgrading`: routes an account that must set a new password can still use (reading itself, changing the
+// password, verifying its email, revoking devices, deleting itself); every other one waits for the new password.
+async function requireUser(req, res, { upgrading = false } = {}) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   const payload = verifyToken(token);
   if (!payload) {
@@ -2112,6 +2118,10 @@ async function requireUser(req, res) {
   if (payload.dev && !(user.devices || []).some((d) => d.id === payload.dev)) {
     console.warn(`auth: device ${payload.dev} not on account ${user.id}`);
     res.status(401).json({ error: 'Device revoked', reason: 'device_revoked' });
+    return null;
+  }
+  if (user.password_upgrade_required && !upgrading) {
+    res.status(403).json({ error: 'Set a new password to continue.', reason: 'password_upgrade_required' });
     return null;
   }
   return user;
@@ -2215,7 +2225,7 @@ async function sendVerification(user) {
 
 // Password rules for email sign-ups. The sign-up form shows the same rules as a checklist
 // (rrsrch-react/src/passwordRules.js); keep the two in step.
-const PASSWORD_MIN = 12;
+const PASSWORD_MIN = 14;
 const PASSWORD_MAX_BYTES = 72;            // bcrypt ignores everything after 72 bytes
 const COMMON_PASSWORDS = new Set([
   'password', 'passw0rd', 'password1', 'password123', 'p@ssw0rd', 'qwerty', 'qwertyuiop', 'qwerty123',
@@ -2246,6 +2256,35 @@ function passwordProblems(password, { name = '', email = '' } = {}) {
   return out;
 }
 
+// Whether a password is in a known breach, from Have I Been Pwned's range API (k-anonymity): only the first 5
+// characters of the password's SHA-1 leave the server, never the password or the whole hash, and the reply is padded
+// so its size gives nothing away. true / false, or null when the service can't be reached: then nothing is blocked.
+async function breached(password) {
+  const sha1 = crypto.createHash('sha1').update(password, 'utf8').digest('hex').toUpperCase();
+  try {
+    const r = await fetch(`https://api.pwnedpasswords.com/range/${sha1.slice(0, 5)}`,
+      { headers: { 'Add-Padding': 'true', 'User-Agent': 'rrsrch.com' }, signal: AbortSignal.timeout(3000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const suffix = sha1.slice(5);
+    return (await r.text()).split('\n').some((line) => {
+      const [hash, n] = line.trim().split(':');
+      return hash === suffix && Number(n) > 0;
+    });
+  } catch (err) {
+    console.warn('password breach check unavailable:', err.message);
+    return null;
+  }
+}
+
+// The rules a password must meet today: passwordProblems, then not in a known breach.
+async function currentPasswordProblems(password, who) {
+  const out = passwordProblems(password, who);
+  if (!out.length && await breached(password) === true) {
+    out.push('has appeared in a data breach, so it is easy to guess; choose another');
+  }
+  return out;
+}
+
 app.post('/api/account/signup', async (req, res) => {
   try {
     const ip = clientIp(req);
@@ -2256,7 +2295,7 @@ app.post('/api/account/signup', async (req, res) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       return res.status(400).json({ error: 'Enter a valid email address.' });
     }
-    const problems = passwordProblems(String(password || ''), { name, email: cleanEmail });
+    const problems = await currentPasswordProblems(String(password || ''), { name, email: cleanEmail });
     if (problems.length) {
       return res.status(400).json({ error: `Password ${problems.join('; ')}.`, problems });
     }
@@ -2306,6 +2345,16 @@ app.post('/api/account/login', async (req, res) => {
       return res.status(401).json({ error: 'Wrong email or password.' });
     }
     await clearCount('login_account', cleanEmail);
+    // an account whose password doesn't meet today's rules signs in, but must set a new one before anything else
+    const weak = (await currentPasswordProblems(String((req.body || {}).password || ''), { name: user.name, email: user.email }))
+      .length > 0;
+    if (weak !== !!user.password_upgrade_required) {
+      const users = await readUsers();
+      const fresh = users.find((u) => u.id === user.id);
+      if (weak) fresh.password_upgrade_required = true; else delete fresh.password_upgrade_required;
+      await writeUsers(users);
+      user.password_upgrade_required = weak;
+    }
     res.json({ token: tokenFor(user), user: publicUser(user) });
   } catch (err) {
     console.error('login failed:', err);
@@ -2410,7 +2459,7 @@ app.post('/api/account/verify', async (req, res) => {
 });
 
 app.post('/api/account/verify/resend', async (req, res) => {
-  const me = await requireUser(req, res);
+  const me = await requireUser(req, res, { upgrading: true });
   if (!me) return;
   if (isVerified(me)) return res.json({ ok: true, already: true });
   const wait = await limited('verify_send', me.id);
@@ -2449,7 +2498,7 @@ app.patch('/api/account/me', async (req, res) => {
 // Change the password: the current one first (failures count toward a lockout), the new one under the sign-up
 // rules. Every other session is signed out; this one gets a fresh token.
 app.post('/api/account/password', async (req, res) => {
-  const me = await requireUser(req, res);
+  const me = await requireUser(req, res, { upgrading: true });
   if (!me) return;
   if (!me.password_hash) return res.status(400).json({ error: 'This account signs in with Google; it has no password.' });
   const wait = await limited('password_change', me.id);
@@ -2460,12 +2509,13 @@ app.post('/api/account/password', async (req, res) => {
       await count('password_change', me.id);
       return res.status(401).json({ error: 'Your current password is wrong.' });
     }
-    const problems = passwordProblems(String(next || ''), { name: me.name, email: me.email });
+    const problems = await currentPasswordProblems(String(next || ''), { name: me.name, email: me.email });
     if (problems.length) return res.status(400).json({ error: `Password ${problems.join('; ')}.`, problems });
     const users = await readUsers();
     const user = users.find((u) => u.id === me.id);
     user.password_hash = await bcrypt.hash(String(next), 10);
     user.tokens_after = Date.now();
+    delete user.password_upgrade_required;
     await writeUsers(users);
     await clearCount('password_change', me.id);
     res.json({ ok: true, token: tokenFor(user), user: publicUser(user) });
@@ -2476,7 +2526,7 @@ app.post('/api/account/password', async (req, res) => {
 });
 
 app.get('/api/account/me', async (req, res) => {
-  const user = await requireUser(req, res);
+  const user = await requireUser(req, res, { upgrading: true });
   if (user) {
     res.json({ user: publicUser(user), devices: user.devices || [],
                projects: user.projects || [],
@@ -2508,7 +2558,7 @@ app.post('/api/account/projects', async (req, res) => {
 
 // self-delete (also how probe/test accounts get cleaned up)
 app.delete('/api/account/me', async (req, res) => {
-  const user = await requireUser(req, res);
+  const user = await requireUser(req, res, { upgrading: true });
   if (!user) return;
   const users = (await readUsers()).filter((u) => u.id !== user.id);
   await writeUsers(users);
@@ -2646,7 +2696,7 @@ app.post('/api/device/poll', async (req, res) => {
 });
 
 app.delete('/api/device/:id', async (req, res) => {
-  const user = await requireUser(req, res);
+  const user = await requireUser(req, res, { upgrading: true });
   if (!user) return;
   const users = await readUsers();
   const u = users.find((x) => x.id === user.id);
