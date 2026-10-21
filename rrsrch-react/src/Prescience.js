@@ -4,8 +4,9 @@
  *
  *   #/radar                 All gauges (#/prescience too): the four core gauges, then every gauge agents proposed, by category (most
  *                           popular, newest, most divided, biggest movers, needs votes), topic and search
- *   #/prescience/<gauge>    One gauge ("broadsheet"): the core strip or a proposed gauge's provenance, the question as
- *                           the headline, and five views: Overview, Perspectives, History, What changed? and Method
+ *   #/prescience/<gauge>    One gauge, and only that gauge: its name (and who proposed it), the question as the
+ *                           headline with its dial, and five views: Overview, Perspectives, History, What changed? and
+ *                           Method (where the question's version and the window are)
  *
  * Index state (?cat=, &topic=, &q=) and the detail view (?view=) are kept in the address. Old #/gauges/<gauge> and
  * #/humanity-confidence links land on the detail page.
@@ -277,52 +278,18 @@ export function PrescienceIndex({ isMobile }) {
 // One gauge
 // =====================================================================================================================
 
-function CoreStrip({ items, current, isMobile }) {
+// The gauge page's header: back to the Radar, then which gauge this is, and nothing about the others.
+function DetailHead({ data }) {
   return (
-    <nav aria-label="Core gauges" style={{ display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 2 : 4}, minmax(0, 1fr))`,
-      border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, overflow: 'hidden', background: 'rgba(10,10,10,0.6)' }}>
-      {items.map((g, i) => {
-        const on = g.gauge === current;
-        const s = shown(g);
-        return (
-          <button key={g.gauge} type="button" onClick={() => open(g.gauge)} aria-current={on ? 'page' : undefined} style={{
-            padding: '16px 18px', textAlign: 'left', border: 'none', cursor: 'pointer', fontFamily: fonts.main, display: 'grid', gap: 4,
-            borderRight: i < items.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
-            background: on ? 'rgba(255,77,77,0.06)' : 'transparent', boxShadow: on ? `inset 0 2px 0 ${RED.line}` : 'none' }}>
-            <span style={{ ...mono(10.5, 600), color: on ? RED.soft : '#888', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{g.title}</span>
-            {s ? <span style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-              <span style={{ ...mono(26, 600), color: '#fff' }}>{s.score.toFixed(1)}</span><ChangeText c={g.change_7d} suffix="" size={11} />
-            </span> : <span style={{ ...mono(26, 600), color: '#444' }}>—</span>}
-            <span style={{ fontSize: 12, color: s ? bandColor(s.score) : '#666' }}>{s ? s.label : 'Awaiting'}</span>
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
-
-function Provenance({ g, related }) {
-  return (
-    <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', padding: '14px 18px',
-      border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, background: 'rgba(10,10,10,0.6)' }}>
-      <TopicTag label={g.topic_label} />
-      <span style={{ fontSize: 13, color: '#aaa' }}>Proposed by <strong style={{ color: '#fff', fontWeight: 600 }}>{g.proposed_by}</strong>
-        {' '}on {day(g.proposed_at)}</span>
-      <span style={{ fontSize: 12, color: '#666' }}>A proposed gauge — scored exactly like the core four.</span>
-      {related.length > 0 && (
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ ...mono(10.5), color: '#666', textTransform: 'uppercase' }}>Related</span>
-          {related.map((r) => {
-            const s = shown(r);
-            return (
-              <button key={r.gauge} type="button" onClick={() => open(r.gauge)} style={{ border: '1px solid #2a2a2a', borderRadius: 999,
-                background: 'transparent', padding: '4px 11px', fontSize: 12, color: '#ccc', cursor: 'pointer', fontFamily: fonts.main }}>
-                {r.title}{s && <span style={{ ...mono(11), color: bandColor(s.score), marginLeft: 6 }}>{s.score.toFixed(1)}</span>}
-              </button>
-            );
-          })}
-        </span>
-      )}
+    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+      <a href="#/radar" style={{ color: '#aaa', fontSize: 13, textDecoration: 'none' }}>← Radar</a>
+      <span style={{ color: '#333' }}>/</span>
+      <span style={{ color: '#fff', fontSize: 14, fontWeight: 600 }}>{data.title}</span>
+      {data.core ? <TopicTag label="Core gauge" /> : <>
+        {data.topic_label && <TopicTag label={data.topic_label} />}
+        <span style={{ fontSize: 12.5, color: '#888' }}>Proposed by <a href={`/agents/${data.proposed_by}`}
+          style={{ color: '#ccc' }}>{data.proposed_by}</a>{data.proposed_at && ` on ${day(data.proposed_at)}`}</span>
+      </>}
     </div>
   );
 }
@@ -331,17 +298,16 @@ function Hero({ data, isMobile }) {
   const i = data.index;
   const s = shown(data);
   const facts = [participation(i), i.model_families > 0 && plural(i.model_families, 'model family', 'model families'),
-    i.verified_operators > 0 && plural(i.verified_operators, 'verified operator'), i.median != null && `median ${i.median.toFixed(1)}`];
+    i.verified_operators > 0 && plural(i.verified_operators, 'verified operator'), i.median != null && `median ${i.median.toFixed(1)}`,
+    i.updated_at && `updated ${day(i.updated_at)}`];
   return (
     <section style={{ display: 'grid', gap: isMobile ? 20 : 48, alignItems: 'center', padding: '18px 4px 26px',
       gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 300px' }}>
       <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-        <span style={{ ...mono(11), color: RED.label, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-          {data.title} · question v{data.question_version} · rolling {data.window?.days || 7} days
-          {i.updated_at && ` · updated ${when(i.updated_at)}`}</span>
         <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 24 : 32, fontWeight: 600, lineHeight: 1.25,
           letterSpacing: '-0.02em', textWrap: 'balance' }}>{data.question}</h1>
         <span style={{ fontSize: 13, color: '#888', lineHeight: 1.6 }}>{facts.filter(Boolean).join(' · ')}</span>
+        <span style={{ fontSize: 12, color: '#666', lineHeight: 1.5 }}>{LABEL}</span>
       </div>
       <div style={{ display: 'grid', justifyItems: 'center', gap: 6 }}>
         <Gauge score={s ? s.score : null} width={280} dim={!s} label={data.title} />
@@ -749,20 +715,14 @@ export default function PresciencePage({ gauge, isMobile }) {
   const apiKey = actingKey();
   const [view, setViewState] = useHashParam('view', 'overview', (v) => VIEWS.some(([k]) => k === v));
   const setView = (v) => { setViewState(v); setHashParams(pageOf(gauge), { view: v === 'overview' ? '' : v }); };
-  const [all] = useLoad(() => engine('/v1/gauges', { key: apiKey }), [apiKey]);
   const [got] = useLoad(() => engine(`/v1/gauges/${gauge}`, { key: apiKey }), [gauge, apiKey]);
   const data = got.data;
-  const items = all.data?.items || [];
-  const core = items.filter((g) => g.core);
-  const related = data && !data.core ? items.filter((g) => !g.core && g.gauge !== gauge && g.topic === data.topic).slice(0, 2) : [];
-  const crumb = !data ? 'Prescience' : data.core ? 'Prescience · Core' : `Prescience · Proposed · ${data.topic_label}`;
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      <TopRow back={['#/radar', '← Radar']} crumb={crumb} isMobile={isMobile} />
+      {data ? <DetailHead data={data} /> : <a href="#/radar" style={{ color: '#aaa', fontSize: 13, textDecoration: 'none' }}>← Radar</a>}
       {got.loading && !data && <Loading what="the gauge" />}
       {got.error && <Note tone="error">{got.error === 'not found' ? `No gauge ${gauge}.` : got.error}</Note>}
       {data && <>
-        {data.core ? core.length > 0 && <CoreStrip items={core} current={gauge} isMobile={isMobile} /> : <Provenance g={data} related={related} />}
         <Hero data={data} isMobile={isMobile} />
         <UnderlineTabs items={VIEWS} value={view} onChange={setView} label="Views" />
         {view === 'overview' && <Overview data={data} gauge={gauge} isMobile={isMobile} onView={setView} />}
