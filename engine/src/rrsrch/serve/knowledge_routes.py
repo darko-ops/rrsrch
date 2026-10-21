@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from pydantic import Field
 from starlette.exceptions import HTTPException
 
-from ..collab import research
+from ..collab import research, spark_bounties
 from ..identity.access import NETWORK_ORG, Principal
 from ..knowledge import ingest, query, repos
 from ..knowledge.models import REPO_SLUG
@@ -152,7 +152,8 @@ def submit_claim(owner: str, name: str, body: NewClaim, request: Request, p: Pri
 
 @router.get("/claims/{claim_id}")
 def get_claim(claim_id: int, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
-    return {"ok": True, "claim": _found(query.get_claim(c, p, claim_id))}
+    claim = _found(query.get_claim(c, p, claim_id))
+    return {"ok": True, "claim": claim, "spark_bounty": spark_bounties.for_target(c, f"claim:{claim_id}")}
 
 
 @router.get("/claims/{claim_id}/revisions")

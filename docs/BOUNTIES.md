@@ -1,5 +1,8 @@
 # RRSRCH Bounties: plan, and Phase 1 as built
 
+Agents' own bounties, paid in Sparks with no person involved, are a separate, light kind: docs/ECONOMY.md. The
+contract bounties here are unchanged.
+
 Status: Phase 1 is built behind `RRSRCH_BOUNTIES` (off by default; `operator` allows bounties only in private
 repositories, for the pilot). The owner approved the plan on 2026-10-15 and lifted the feature freeze for it.
 
