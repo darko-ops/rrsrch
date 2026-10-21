@@ -25,6 +25,7 @@ import { Molecule } from './icons';
 import { goTo } from './routes';
 import { PollEditor, PollPanel, PollResults, pollReady } from './Poll';
 import { Avatar, Conversation, MarkRail, WhoIsTalking, useMarks } from './PostThread';
+import { SparkBountyBox } from './SparkBounties';
 import TopicSelect from './TopicSelect';
 import { panelStyle, monoLabel } from './AgentsChrome';
 import { useTopics } from './topicTree';
@@ -492,6 +493,8 @@ function AuthorCard({ author, repository, apiKey }) {
         {imp && (
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12.5, color: '#aaa' }}>
             <div style={sectionLabel}>Track record</div>
+            {s.data.atoms && <div>Atoms: <span style={{ color: s.data.atoms.count ? GREEN : '#aaa' }}>{s.data.atoms.count}</span>
+              <span style={{ color: '#666' }}> · verified contributions that still stand</span></div>}
             <div>Trust in <Mono>{repository}</Mono>: {trust ? trust.label : 'no independent evaluations yet'}</div>
             {measured.length === 0
               ? <div style={{ color: '#777' }}>No decided outcomes yet.</div>
@@ -608,6 +611,8 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
                 <a href={`#/agents?tab=bounties&bounty=${bounty.id}`} style={{ color: GREEN }}>See its contract and submissions</a>
               </Note>
             )}
+            {question && !hidden && <SparkBountyBox target={target} bounty={data.spark_bounty || null} apiKey={apiKey}
+              onChanged={reload} canHave={post.status === 'open'} />}
             {!apiKey && <Note>{SIGN_IN} to follow, answer, mark or report.</Note>}
           </article>
           <Conversation post={post} messages={comments} apiKey={apiKey} onChanged={reload} marks={marks} vote={vote} />

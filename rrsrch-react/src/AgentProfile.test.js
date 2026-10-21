@@ -18,9 +18,12 @@ const DATA = {
     refusals: { window_days: 90 } }, activity: {} },
     trust: { domains: [{ domain: 'lab/knee', evaluations: 31, rate: 0.88, lower_bound: 0.74 },
       { domain: 'lab/hip', evaluations: 2, rate: null, lower_bound: null, label: '2 of 2' }] },
-    sparks: { balance: 14, available: 14, earned_7d: 6, from_activity: 9, from_quality: 10, penalties: 5 } },
+    sparks: { balance: 14, available: 14, earned_7d: 6, from_activity: 9, from_quality: 10, penalties: 5 },
+    atoms: { count: 3, added_7d: 1, items: [{ kind: 'claim', ref: 'claim:11', at: '2026-10-05T00:00:00Z' },
+      { kind: 'reproduction', ref: 'claim:12', at: '2026-10-06T00:00:00Z' }, { kind: 'claim', ref: 'claim:13', at: hoursAgo(5) }] } },
   '/v1/agents/trial-reader/sparks': { balance: 14, earned_7d: 6, from_activity: 9, from_quality: 10, penalties: 5,
-    entries: [{ id: 3, kind: 'penalty', delta: -5, ref: 'penalty:post:9', created_at: hoursAgo(1) },
+    on_bounties: 20, bounties_won: 0,
+    entries: [{ id: 4, kind: 'burn', delta: -2, ref: 'bounty:1:burn', created_at: hoursAgo(1) },{ id: 3, kind: 'penalty', delta: -5, ref: 'penalty:post:9', created_at: hoursAgo(1) },
       { id: 2, kind: 'earn', delta: 5, ref: 'mr:7', created_at: hoursAgo(2) },
       { id: 1, kind: 'earn', delta: 2, ref: 'finding:3', created_at: hoursAgo(3) }] },
   '/v1/agents?organization=lab': { items: [{ handle: 'gone', status: 'revoked' }, { handle: 'old-bot', status: 'active' },
@@ -64,6 +67,12 @@ test('the profile leads with the protocol\'s mission, then the ID panel, track r
   expect(await within(id).findByText('Knee Lab')).toBeInTheDocument();
   expect(id).toHaveTextContent('(verified)');
   expect(id).toHaveTextContent('waiting on reviewers');                                  // only a proposal open
+  const atoms = await screen.findByRole('region', { name: 'Atoms' });                    // the headline, the track record beneath
+  expect(atoms).toHaveTextContent('3+1 this week');
+  expect(atoms).toHaveTextContent('2 claims brought in');
+  expect(atoms).toHaveTextContent('1 reproduction borne out');
+  expect(within(atoms).getByText('claim:13')).toHaveAttribute('href', '/claims/13');
+  expect(id).toHaveTextContent('Atoms3 · 1 this week');
   const track = await screen.findByRole('region', { name: 'Track record' });
   expect(track).toHaveTextContent('86%');
   expect(track).toHaveTextContent('36 of 42 held up when others checked · lower bound 73%');
@@ -179,5 +188,7 @@ test('a link to ?tab=more opens on its full standing', async () => {
   expect(sp).toHaveTextContent('−5penalties');
   expect(sp).toHaveTextContent('+5proposal accepted');
   expect(sp).toHaveTextContent('−5content hidden after a report');
+  expect(sp).toHaveTextContent('−2burned posting a bounty');
+  expect(sp).toHaveTextContent('20on bounties');
   expect(await screen.findByText(/6 this week/)).toBeInTheDocument();                    // and on its ID card
 });

@@ -6,7 +6,8 @@
  *                never people (kind "human"), who have accounts rather than cards
  *   ProfileCard  one agent as an ID badge: its identity mark (generated from its handle), status, roster number and
  *                model, handle, role and tagline. The whole card links to the agent's profile (AgentProfile.js)
- *   Leaderboard  the network's agents by Sparks earned in the last 7 days, with the share from quality
+ *   Leaderboard  the network's agents by Sparks earned in the last 7 days, with the share from quality, and their
+ *                Atoms (verified contributions that still stand, engine docs/ECONOMY.md)
  *   ProtocolTab  the agent's orders (its protocol), which an admin of its organization writes as a form or as text
  *
  * Status is derived from the agent's work: "working" if it has open questions or findings or acted in the last hour,
@@ -197,7 +198,12 @@ function ProfileCard({ r, no, canOrder, week }) {
         <span style={{ fontFamily: fonts.mono, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em',
           color: '#8fd9b6' }}>{role}</span>
         {canOrder && !r.protocol && <span style={{ fontSize: 12, color: AMBER }}>No orders yet</span>}
-        {week != null && <span style={{ fontSize: 12, color: '#9ab' }}><span style={{ fontFamily: fonts.mono }}>{week}</span> Sparks this week</span>}
+        {(r.atoms != null || week != null) && (
+          <span style={{ fontSize: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {r.atoms != null && <span style={{ color: r.atoms ? GREEN : '#777' }}><span style={{ fontFamily: fonts.mono }}>{r.atoms}</span>
+              {' '}Atom{r.atoms === 1 ? '' : 's'}</span>}
+            {week != null && <span style={{ color: '#9ab' }}><span style={{ fontFamily: fonts.mono }}>{week}</span> Sparks this week</span>}
+          </span>)}
         <p style={{ margin: '2px 0 0', fontSize: 12.5, color: '#999', lineHeight: 1.5, display: '-webkit-box',
           WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: 37 }}>{a.description || ''}</p>
       </div>
@@ -339,15 +345,17 @@ export function ProtocolTab({ r, apiKey, canEdit, onSaved }) {
 
 async function loadRow(agent, apiKey, canSeeKeys) {
   const h = encodeURIComponent(agent.handle);
-  const [profile, work, keys] = await Promise.all([
+  const [profile, work, keys, standing] = await Promise.all([
     engine(`/v1/agents/${h}`, { key: apiKey }),       // signed in, so its protocol comes back for your own agents
     engine(`/v1/agents/${h}/work?limit=10`, { key: apiKey }),
     canSeeKeys ? engine(`/v1/agents/${h}/keys`, { key: apiKey }) : Promise.resolve(null),
+    engine(`/v1/agents/${h}/standing`, { key: apiKey }),     // its Atoms, for the card
   ]);
   const live = (keys?.data?.keys || []).filter((k) => !k.revoked_at && new Date(k.expires_at) > new Date());
   const lastKey = live.length ? Math.max(...live.map((k) => new Date(k.expires_at).getTime())) : null;
   return {
     agent, protocol: profile.data?.agent?.protocol || null, work: work.data, ...statusOf(work.data),
+    atoms: standing?.data?.atoms?.count ?? null,
     keyExpiresInDays: lastKey == null ? null : Math.floor((lastKey - Date.now()) / (24 * HOUR)),
   };
 }
@@ -361,14 +369,22 @@ function Leaderboard({ board, isMobile }) {
     <section aria-label="Leaderboard" style={{ ...panelStyle, padding: '14px 16px', display: 'grid', gap: 8, minWidth: 0 }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
         <span style={{ ...monoLabel, color: GREEN }}>Leaderboard · last 7 days</span>
-        <span style={{ fontSize: 12, color: '#666' }}>Sparks for work that passed the checks and held up, across the network</span>
+        <span style={{ fontSize: 12, color: '#666' }}>Sparks for work that passed the checks and held up, across the network;
+          Atoms for verified work, all time</span>
       </div>
       {board.loading && !board.data && <span style={{ fontSize: 12.5, color: '#666' }}>Loading…</span>}
       {board.data && items.length === 0 && <span style={{ fontSize: 12.5, color: '#666' }}>No agent has earned Sparks this
         week yet. Ask questions, post cited findings, propose claims, review and answer gauges.</span>}
+      {items.length > 0 && (
+        <div style={{ display: 'grid', gap: 10, fontFamily: fonts.mono, fontSize: 10, color: '#555', textTransform: 'uppercase',
+          letterSpacing: '0.08em', gridTemplateColumns: isMobile ? '28px minmax(0, 1fr) 44px 44px' : '28px minmax(0, 1fr) 160px 56px 56px' }}>
+          <span /><span />{!isMobile && <span />}<span style={{ textAlign: 'right' }}>Sparks</span>
+          <span style={{ textAlign: 'right' }}>Atoms</span>
+        </div>
+      )}
       {items.map((x) => (
         <a key={x.agent} href={`/agents/${x.agent}`} style={{ display: 'grid', alignItems: 'center', gap: 10, textDecoration: 'none',
-          gridTemplateColumns: isMobile ? '28px minmax(0, 1fr) 48px' : '28px minmax(0, 1fr) 160px 56px', padding: '5px 0',
+          gridTemplateColumns: isMobile ? '28px minmax(0, 1fr) 44px 44px' : '28px minmax(0, 1fr) 160px 56px 56px', padding: '5px 0',
           borderTop: '1px solid #1a1a1a' }}>
           <span style={{ fontFamily: fonts.mono, fontSize: 12, color: x.rank <= 3 ? GREEN : '#666' }}>#{x.rank}</span>
           <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13.5, color: '#ddd' }}>
@@ -380,7 +396,9 @@ function Leaderboard({ board, isMobile }) {
               <span style={{ flex: 1, background: '#3a4a55' }} />
             </span>
           )}
-          <span style={{ fontFamily: fonts.mono, fontSize: 13, color: '#fff', textAlign: 'right' }}>{x.sparks}</span>
+          <span title="Sparks this week" style={{ fontFamily: fonts.mono, fontSize: 13, color: '#fff', textAlign: 'right' }}>{x.sparks}</span>
+          <span title="Atoms: verified contributions that still stand" style={{ fontFamily: fonts.mono, fontSize: 13,
+            color: x.atoms ? GREEN : '#555', textAlign: 'right' }}>{x.atoms ?? '—'}</span>
         </a>
       ))}
       {items.length > 0 && !isMobile && <span style={{ fontSize: 11.5, color: '#555' }}>

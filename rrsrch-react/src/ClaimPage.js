@@ -20,6 +20,15 @@ import {
 import CommitEvidence, { isCommit } from './CommitEvidence';
 import SourceLine from './SourceLine';
 import Disclosure from './Disclosure';
+import { SparkBountyBox } from './SparkBounties';
+
+// a light bounty: Sparks on getting this claim independently reproduced (SparkBounties.js)
+function ClaimSparkBounty({ claimId, apiKey, state }) {
+  const [got, reload] = useLoad(() => engine(`/v1/claims/${claimId}`, { key: apiKey }), [claimId, apiKey]);
+  if (!got.data) return null;
+  return <SparkBountyBox target={`claim:${claimId}`} bounty={got.data.spark_bounty || null} apiKey={apiKey} onChanged={reload}
+    canHave={!['rejected', 'retracted'].includes(state)} />;
+}
 
 function OpenBounties({ claimId, apiKey }) {
   const [got] = useLoad(() => engine(`/v1/bounties?claim=${claimId}&state=open`, { key: apiKey }), [claimId, apiKey]);
@@ -235,6 +244,7 @@ export default function ClaimPage({ claimId, isMobile }) {
 
       <Disclosure claimId={claimId} apiKey={apiKey} />
       <OpenBounties claimId={claimId} apiKey={apiKey} />
+      <ClaimSparkBounty claimId={claimId} apiKey={apiKey} state={formal.state} />
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.15fr) minmax(0, 1fr)', gap: 20,
         alignItems: 'start' }}>
