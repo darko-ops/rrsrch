@@ -13,7 +13,7 @@ from typing import Any, Literal
 import psycopg
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import Field
 from starlette.exceptions import HTTPException
 
 from ..collab import challenges, verification
@@ -23,18 +23,20 @@ from ..identity.access import Action, Principal
 from ..knowledge import query
 from ..trust import claim_review, disclosure, merge, reviews
 from . import idempotency
+from .body import Body
 from .identity_routes import conn, principal
 
 router = APIRouter(prefix="/v1")
 
 
-class NewMergeRequest(BaseModel):
+class NewMergeRequest(Body):
     repository: str
     claim_id: int | None = None
     content: dict[str, Any]
+    topics: list[str] = Field(default_factory=list, max_length=8)    # topic slugs it's filed under
 
 
-class Close(BaseModel):
+class Close(Body):
     state: Literal["withdrawn", "rejected"]
 
 
@@ -53,7 +55,7 @@ def _checks(checks) -> list[dict]:
 def open_merge_request(body: NewMergeRequest, request: Request, p: Principal | None = Depends(principal),
                        c: psycopg.Connection = Depends(conn)) -> JSONResponse:
     def go():
-        out = _call(merge.open_request, c, p, body.repository, body.content, body.claim_id)
+        out = _call(merge.open_request, c, p, body.repository, body.content, body.claim_id, body.topics)
         return 201, {"ok": True, "merge_request_id": out.merge_request_id, "state": out.state,
                      "checks_passed": all(x.passed for x in out.checks), "checks": _checks(out.checks)}
     return idempotency.run(request, c, p, body, go)
@@ -101,7 +103,7 @@ CHECKS = {"reproduced": ("reproduction", "reproduced"), "could_not_reproduce": (
           "missing_step": ("usage", "missing_step"), "unclear": ("usage", "unclear")}
 
 
-class Review(BaseModel):
+class Review(Body):
     target: str = Field(pattern=r"^(proposal|mr|claim|post):[1-9][0-9]{0,17}$")
     verdict: Literal["approve", "request_changes", "reject", "object", "reproduced", "could_not_reproduce",
                      "inconclusive", "insufficient_evidence", "worked", "worked_with_conditions", "did_not_work",
@@ -146,8 +148,9 @@ def review_anything(body: Review, request: Request, p: Principal | None = Depend
                                              "it, propose a revision")
                 return 200, {"ok": True, "target": body.target} | _call(claim_review.review, c, p, int(n),
                                                                          body.verdict, body.findings)
-            _call(merge.review, c, p, int(n), body.verdict, body.findings)
-            return 200, {"ok": True, "target": f"proposal:{n}", "merge_request_id": int(n), "verdict": body.verdict}
+            merged = _call(merge.review, c, p, int(n), body.verdict, body.findings)
+            return 200, {"ok": True, "target": f"proposal:{n}", "merge_request_id": int(n), "verdict": body.verdict,
+                         "merged": merged}
         if not body.findings.strip():
             raise HTTPException(400, "say what you found in `findings`")
         if body.verdict == "object":
@@ -271,16 +274,16 @@ def events(owner: str, name: str, after: int = Query(default=0, ge=0), limit: in
 
 # holding a finding back while it is disclosed, and the record of that disclosure (trust/disclosure.py)
 
-class Embargo(BaseModel):
+class Embargo(Body):
     until: datetime
     reason: str = Field(min_length=1, max_length=500)
 
 
-class Lift(BaseModel):
+class Lift(Body):
     note: str = Field(default="", max_length=500)
 
 
-class DisclosureEntry(BaseModel):
+class DisclosureEntry(Body):
     kind: Literal[disclosure.KINDS]  # type: ignore[valid-type]
     party: str = Field(min_length=1, max_length=200)
     occurred_at: datetime

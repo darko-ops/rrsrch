@@ -9,11 +9,12 @@ merge onto the same head is refused rather than silently forked.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 import psycopg
 
-from ..identity import access
+from ..identity import access, onboarding
 from ..identity import store as ids
 from ..identity.access import Action, Principal
 from ..knowledge import states
@@ -49,11 +50,38 @@ def repo_and_role(conn, p: Principal | None, repository_id: int) -> tuple[access
     return repo, ids.role_in(conn, p.agent_id if p else None, repo.id)
 
 
+def open_claims(conn, repository_id: int) -> bool:
+    """Whether a repository takes claims from any claimed agent (the commons, rrsrch/network)."""
+    row = conn.execute("SELECT coalesce((contribution_policy->>'open_claims')::boolean, false) FROM repositories "
+                       "WHERE id = %s", (repository_id,)).fetchone()
+    return bool(row and row[0])
+
+
+def _open_to(conn, p: Principal | None, action: Action) -> access.Decision:
+    """In a repository open for claims, any claimed agent proposes and reviews with its own key, given the scope.
+    People don't: claims there are proposed and reviewed by agents, and only other organizations' approvals count."""
+    if p is None:
+        return access.Decision(False, "authentication required")
+    if p.status != "active":
+        return access.Decision(False, f"agent is {p.status}")
+    if action.value not in p.scopes:
+        return access.Decision(False, f"key lacks the {action.value!r} scope; an admin of {p.organization_id} can "
+                                      f"issue this agent a key with it")
+    if p.organization_id == onboarding.PEOPLE or ids.agent_kind(conn, p.agent_id) == "human":
+        return access.Decision(False, "claims here are proposed and reviewed by agents")
+    if onboarding.is_unvetted(p.organization_id):
+        return access.Decision(False, "only agents an operator has claimed can propose or review claims; ask an "
+                                      "operator to claim this agent")
+    return access.Decision(True, "open to claimed agents")
+
+
 def require(conn, p: Principal | None, action: Action, repository_id: int) -> access.Repo:
     repo, role = repo_and_role(conn, p, repository_id)
     if not access.decide(p, Action.READ, repo, role):
         raise Refused(404, "not found")
     d = access.decide(p, action, repo, role)
+    if not d and action in (Action.PROPOSE, Action.REVIEW) and open_claims(conn, repo.id):
+        d = _open_to(conn, p, action)
     if not d:
         raise Refused(401 if d.reason == "authentication required" else 403, d.reason)
     return repo
@@ -131,13 +159,26 @@ def _within_proposal_limits(conn: psycopg.Connection, agent_id: int) -> None:
         raise Refused(429, f"too many proposals in the last day ({PROPOSALS_PER_DAY}); try again later")
 
 
+TOPIC = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+
+
+def topics_of(topics: list[str] | None) -> list[str]:
+    """Topic slugs a claim is filed under (as on posts), so the commons' claims can be found by topic."""
+    out = sorted({t.strip().lower().replace(" ", "-") for t in topics or [] if t and t.strip()})
+    if len(out) > 8 or any(not TOPIC.match(t) for t in out):
+        raise Refused(400, "topics: up to 8, each lowercase letters, digits and dashes (max 40)")
+    return out
+
+
 def open_request(conn: psycopg.Connection, p: Principal | None, repository_slug: str, content: dict,
-                 claim_id: int | None = None) -> Outcome:
-    """Propose a new claim, or a new revision of `claim_id` (content.parent_hash names the head it builds on)."""
+                 claim_id: int | None = None, topics: list[str] | None = None) -> Outcome:
+    """Propose a new claim, or a new revision of `claim_id` (content.parent_hash names the head it builds on).
+    `topics` file it under the topic tree's slugs; a revision without them keeps the claim's."""
     repo = ids.get_repo(conn, repository_slug)
     if repo is None:
         raise Refused(404, "not found")
     require(conn, p, Action.PROPOSE, repo.id)
+    topics = topics_of(topics)
     _within_proposal_limits(conn, p.agent_id)
     policy_version = conn.execute("SELECT policy_version FROM repositories WHERE id = %s", (repo.id,)).fetchone()[0]
     base = None
@@ -154,9 +195,9 @@ def open_request(conn: psycopg.Connection, p: Principal | None, repository_slug:
         raise Refused(400, checks[0].detail)
     mr_id = conn.execute(
         "INSERT INTO merge_requests (repository_id, claim_id, base_revision_id, content, content_hash, author_id, "
-        "policy_version) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        "policy_version, topics) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
         (repo.id, claim_id, base[0] if base else None, json.dumps(parsed.canonical()), parsed.content_hash(),
-         p.agent_id, policy_version)).fetchone()[0]
+         p.agent_id, policy_version, topics)).fetchone()[0]
     _record_run(conn, checks, policy_version, merge_request_id=mr_id)
     audit.append(conn, "merge_request.open", f"mr:{mr_id}", actor_id=p.agent_id, repository_id=repo.id,
                  policy_version=policy_version,
@@ -175,7 +216,9 @@ def _load(conn, mr_id: int, lock: bool = False) -> dict:
                      "author_id", "policy_version", "state"), row))
 
 
-def review(conn: psycopg.Connection, p: Principal | None, mr_id: int, verdict: str, findings: str = "") -> None:
+def review(conn: psycopg.Connection, p: Principal | None, mr_id: int, verdict: str, findings: str = "") -> bool:
+    """Record a decision on a proposal. Returns whether it merged: in a repository open for claims, the approval
+    that satisfies its policy merges the claim then and there, so nobody has to come back to do it."""
     mr = _load(conn, mr_id)
     require(conn, p, Action.REVIEW, mr["repository_id"])
     if mr["state"] != "open":
@@ -192,6 +235,14 @@ def review(conn: psycopg.Connection, p: Principal | None, mr_id: int, verdict: s
                  "WHERE merge_request_id = %s AND reviewer_id = %s AND state = 'open'", (mr_id, p.agent_id))
     audit.append(conn, f"review.{verdict}", f"mr:{mr_id}", actor_id=p.agent_id,
                  repository_id=mr["repository_id"], policy_version=mr["policy_version"])
+    if verdict != "approve" or not open_claims(conn, mr["repository_id"]):
+        return False
+    repo, _ = repo_and_role(conn, p, mr["repository_id"])
+    proposal = _proposal(conn, repo, mr["policy_version"], mr["content"], mr["author_id"], mr["claim_id"], mr_id)
+    _, checks = pipeline.verify(proposal)
+    if not pipeline.authorize(proposal, checks, AUTOMATIC):
+        return False
+    return merge(conn, p, mr_id, automatic=True).state == "merged"
 
 
 def evaluate(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> tuple[dict, list[Check], pipeline.MergeDecision]:
@@ -202,20 +253,39 @@ def evaluate(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> tuple
         raise Refused(404, "not found")
     proposal = _proposal(conn, repo, mr["policy_version"], mr["content"], mr["author_id"], mr["claim_id"], mr_id)
     _, checks = pipeline.verify(proposal)
-    return mr, checks, pipeline.authorize(proposal, checks, access.decide(p, Action.MAINTAIN, repo, role))
+    return mr, checks, pipeline.authorize(proposal, checks, _merger(conn, p, repo, role, mr))
 
 
-def merge(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> Outcome:
+def _merger(conn, p: Principal | None, repo: access.Repo, role, mr: dict) -> access.Decision:
+    """Who may merge: a maintainer, or, in a repository open for claims, the proposal's own author, so an approved
+    claim in the commons doesn't wait on a person. Either way the checks and independent approvals must pass."""
+    d = access.decide(p, Action.MAINTAIN, repo, role)
+    if not d and p is not None and p.agent_id == mr["author_id"] and open_claims(conn, repo.id) \
+            and _open_to(conn, p, Action.PROPOSE):
+        return access.Decision(True, "its author, in a repository open for claims")
+    return d
+
+
+AUTOMATIC = access.Decision(True, "approved in a repository open for claims")
+
+
+def merge(conn: psycopg.Connection, p: Principal | None, mr_id: int, *, automatic: bool = False) -> Outcome:
+    """Merge a proposal. `automatic`: the approving review that satisfied the policy of a repository open for claims
+    merges it (review() decides that); the checks and approvals are still enforced here."""
     mr = _load(conn, mr_id, lock=True)
-    repo = require(conn, p, Action.MAINTAIN, mr["repository_id"])
+    repo, role = repo_and_role(conn, p, mr["repository_id"])
+    if not access.decide(p, Action.READ, repo, role):
+        raise Refused(404, "not found")
+    merger = AUTOMATIC if automatic and open_claims(conn, repo.id) else _merger(conn, p, repo, role, mr)
+    if not merger:
+        raise Refused(401 if merger.reason == "authentication required" else 403, merger.reason)
     if mr["state"] != "open":
         raise Refused(409, f"merge request is {mr['state']}")
     if mr["claim_id"] is not None:
         conn.execute("SELECT 1 FROM claims WHERE id = %s FOR UPDATE", (mr["claim_id"],))
-    _, role = repo_and_role(conn, p, repo.id)
     proposal = _proposal(conn, repo, mr["policy_version"], mr["content"], mr["author_id"], mr["claim_id"], mr_id)
     _, checks = pipeline.verify(proposal)
-    decision = pipeline.authorize(proposal, checks, access.decide(p, Action.MAINTAIN, repo, role))
+    decision = pipeline.authorize(proposal, checks, merger)
     if not decision:
         # returned, not raised: the refusal is part of the record, so this transaction must commit
         audit.append(conn, "merge.refused", f"mr:{mr_id}", actor_id=p.agent_id, repository_id=repo.id,
@@ -244,6 +314,8 @@ def merge(conn: psycopg.Connection, p: Principal | None, mr_id: int) -> Outcome:
                      "text = %s, fields = %s, scope = %s, type = %s, extractor = %s WHERE id = %s",
                      (*claim_cols, f"mr:{mr_id}", claim_id))
         conn.execute("DELETE FROM evidence_links WHERE claim_id = %s", (claim_id,))
+    conn.execute("UPDATE claims SET topics = mr.topics FROM merge_requests mr "     # a revision without topics keeps them
+                 "WHERE claims.id = %s AND mr.id = %s AND cardinality(mr.topics) > 0", (claim_id, mr_id))
 
     # a merge is a completed review: walk the claim to supported, one legal step at a time
     path = {states.ClaimState.SUBMITTED: ("structurally_valid", "under_review", "supported"),

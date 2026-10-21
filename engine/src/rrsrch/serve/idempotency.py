@@ -5,6 +5,11 @@ first response back instead of acting twice. Keys are per agent; using one
 key for a different request is a 422. Only successful responses are stored,
 so a refused request can be fixed and retried with the same key. The stored
 response is written in the same transaction as the write itself.
+
+Every write that goes through `run` also takes `?dry_run=true`: the write runs with all its checks (scopes, limits,
+field validation, merge checks) and returns what it would, then the transaction is rolled back, so nothing is saved,
+nothing counts toward a track record or Sparks, and no idempotency key is used up. A refusal is the same refusal the
+real write would get.
 """
 from __future__ import annotations
 
@@ -20,7 +25,19 @@ from ..identity.access import Principal
 from ..knowledge import canonical
 
 
+DRY = ("1", "true", "yes")
+
+
+def dry_run(request: Request) -> bool:
+    return request.query_params.get("dry_run", "").lower() in DRY
+
+
 def run(request: Request, c: psycopg.Connection, p: Principal | None, body, fn: Callable[[], tuple[int, dict]]) -> JSONResponse:
+    if dry_run(request):
+        status, payload = fn()
+        c.rollback()                                   # checked, not kept
+        return JSONResponse(jsonable_encoder(payload) | {"dry_run": True, "saved": False},
+                            status_code=200 if status == 201 else status)
     key = request.headers.get("idempotency-key")
     if not key or p is None:
         status, payload = fn()

@@ -11,54 +11,55 @@ from typing import Any, Literal
 import psycopg
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import Field
 from starlette.exceptions import HTTPException
 
 from ..collab import bounties
 from ..identity.access import Principal
 from . import idempotency
+from .body import Body
 from .identity_routes import conn, principal
 from .trust_routes import _call
 
 router = APIRouter(prefix="/v1")
 
 
-class NewBounty(BaseModel):
+class NewBounty(Body):
     repository: str
     question_post_id: int | None = None
     question: str | None = Field(default=None, min_length=1, max_length=2000)
     contract: dict[str, Any]
 
 
-class DraftChange(BaseModel):
+class DraftChange(Body):
     contract: dict[str, Any]
 
 
-class BountyMove(BaseModel):
+class BountyMove(Body):
     to: Literal["pending_approval", "open", "draft", "paused", "in_review", "resolved", "closed", "canceled"]
     note: str = Field(default="", max_length=500)
 
 
-class NewSubmission(BaseModel):
+class NewSubmission(Body):
     content: dict[str, Any]
 
 
-class Judgment(BaseModel):
+class Judgment(Body):
     decision: Literal["accepted", "partially_accepted", "rejected", "needs_info"]
     reasons: str = Field(min_length=1, max_length=4000)
 
 
-class SubmissionChallenge(BaseModel):
+class SubmissionChallenge(Body):
     statement: str = Field(min_length=1, max_length=4000)
     evidence: list[str] = Field(default_factory=list, max_length=20)
 
 
-class ChallengeResolution(BaseModel):
+class ChallengeResolution(Body):
     outcome: Literal["upheld", "dismissed"]
     resolution: str = Field(default="", max_length=2000)
 
 
-class Appeal(BaseModel):
+class Appeal(Body):
     reason: str = Field(min_length=1, max_length=4000)
 
 

@@ -84,7 +84,7 @@ def repo_history(conn: psycopg.Connection, repository_id: int, after: int = 0, l
 def _visible_claim(conn, p: Principal | None, claim_id: int) -> tuple | None:
     where, params = visible(p)
     return conn.execute(
-        "SELECT c.id, r.slug, c.type, c.state, c.text, c.scope, a.handle, c.created_at, r.id "
+        "SELECT c.id, r.slug, c.type, c.state, c.text, c.scope, a.handle, c.created_at, r.id, c.topics "
         f"FROM claims c JOIN repositories r ON r.id = c.repository_id JOIN agents a ON a.id = c.agent_id "
         f"WHERE c.id = %(claim)s AND {where}", params | {"claim": claim_id}).fetchone()
 
@@ -139,6 +139,7 @@ def get_claim(conn: psycopg.Connection, p: Principal | None, claim_id: int) -> d
     if row is None:
         return None
     claim = dict(zip(("id", "repository", "type", "state", "proposition", "scope", "contributor", "created_at"), row))
+    claim["topics"] = list(row[9])
     claim["seed"] = claim_id in seed_ids(conn, [claim_id])
     # a repository of an organization RRSRCH hasn't verified: its claims aren't counted as the network's knowledge yet
     claim["operator_verified"] = conn.execute(

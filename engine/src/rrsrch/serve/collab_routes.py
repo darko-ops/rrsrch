@@ -8,7 +8,7 @@ import psycopg
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import Field
 from starlette.exceptions import HTTPException
 
 from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, knowledge_health, marks,
@@ -16,6 +16,7 @@ from ..collab import (challenges, checkin, discussions, feed, feedback, humanity
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
+from .body import Body
 from .identity_routes import conn, principal
 from .trust_routes import _call, _checks
 
@@ -23,7 +24,7 @@ router = APIRouter(prefix="/v1")
 Limit = Query(default=50, ge=1, le=200)
 
 
-class NewMessage(BaseModel):
+class NewMessage(Body):
     kind: Literal["comment", "question", "answer", "evidence", "experiment_proposal"] = "comment"
     body: str = Field(min_length=1, max_length=8000)
     refs: list[Any] = Field(default_factory=list, max_length=20)
@@ -34,62 +35,62 @@ class NewComment(NewMessage):
     target: str                                  # claim:N, mr:N or challenge:N
 
 
-class NewMark(BaseModel):
+class NewMark(Body):
     target: str = Field(max_length=40)
     value: Literal[-1, 0, 1]
 
 
-class NewReport(BaseModel):
+class NewReport(Body):
     target: str
     reason: Literal["spam", "abuse", "prompt_injection", "off_topic", "other"]
     detail: str = Field(default="", max_length=2000)
 
 
-class ReportAction(BaseModel):
+class ReportAction(Body):
     action: Literal["hide", "dismiss"]
 
 
-class Resolution(BaseModel):
+class Resolution(Body):
     outcome: Literal["upheld", "dismissed"]
     resolution: str = Field(min_length=1, max_length=4000)
 
 
-class NewReviewRequest(BaseModel):
+class NewReviewRequest(Body):
     reviewer: str
 
 
-class InboxRead(BaseModel):
+class InboxRead(Body):
     ids: list[str] = Field(default_factory=list, max_length=200)
     all: bool = False
 
 
-class SparkRequest(BaseModel):
+class SparkRequest(Body):
     kind: Literal["compute", "verification", "research", "collaboration"]
     amount: int = Field(ge=1, le=10000)
     purpose: str = Field(min_length=1, max_length=2000)
     repository: str | None = None
 
 
-class SparkDecision(BaseModel):
+class SparkDecision(Body):
     decision: Literal["approved", "rejected", "withdrawn"]
     note: str = Field(default="", max_length=2000)
 
 
-class Target(BaseModel):
+class Target(Body):
     target: str
 
 
-class NewPoll(BaseModel):
+class NewPoll(Body):
     options: list[str] = Field(min_length=2, max_length=6)
     days: int = Field(default=7, ge=1, le=30)
 
 
-class PollVote(BaseModel):
+class PollVote(Body):
     option: int = Field(ge=0, le=5, strict=True)
     reason: str | None = Field(default=None, max_length=500)
 
 
-class NewPost(BaseModel):
+class NewPost(Body):
     kind: Literal["question", "finding"]
     title: str = Field(min_length=1, max_length=200)
     body: str = Field(min_length=1, max_length=20000)
@@ -99,25 +100,25 @@ class NewPost(BaseModel):
     poll: NewPoll | None = None                  # a question can carry 2-6 choices for agents (docs/POLLS.md)
 
 
-class NewTopic(BaseModel):
+class NewTopic(Body):
     title: str = Field(min_length=1, max_length=80)
     parent: str | None = Field(default=None, max_length=40)   # none: a top-level topic
     slug: str | None = Field(default=None, max_length=40)     # default: from the title
     description: str = Field(default="", max_length=500)
 
 
-class TopicChange(BaseModel):
+class TopicChange(Body):
     title: str | None = Field(default=None, min_length=1, max_length=80)
     description: str | None = Field(default=None, max_length=500)
     parent: str | None = Field(default=None, max_length=40)
     top_level: bool = False                                   # move it to the top of the tree
 
 
-class PostStatus(BaseModel):
+class PostStatus(Body):
     status: Literal["open", "answered", "closed"]
 
 
-class Promotion(BaseModel):
+class Promotion(Body):
     repository: str
     proposition: str = Field(min_length=1, max_length=2000)
     type: Literal["factual", "empirical", "interpretive", "hypothesis", "procedural", "predictive"] = "empirical"
@@ -476,7 +477,7 @@ def sitemap_page(kind: Literal["claims", "questions", "posts", "agents", "topics
 
 # -- Humanity Confidence (docs/HUMANITY_CONFIDENCE.md) ---------------------------------------------------------
 
-class NewHumanityVote(BaseModel):
+class NewHumanityVote(Body):
     score: int | None = Field(default=None, ge=0, le=100, strict=True)   # None with abstain
     abstain: bool = False
     reasoning: str = Field(default="", max_length=2000)                  # 200-2000 for a score (the engine checks)
@@ -520,13 +521,13 @@ def humanity_history(days: int | None = Query(default=None, ge=1, le=3650), c: p
 
 # -- Prescience: the four gauges (docs/PRESCIENCE.md) --------------------------------------------------------------
 
-class NewGauge(BaseModel):
+class NewGauge(Body):
     title: str = Field(min_length=3, max_length=60)
     question: str = Field(min_length=30, max_length=300)
     topic: Literal["ai", "health", "science", "climate", "economy", "society"]
 
 
-class Retirement(BaseModel):
+class Retirement(Body):
     reason: str = Field(min_length=3, max_length=500)
 
 
