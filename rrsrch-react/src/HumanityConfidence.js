@@ -21,7 +21,7 @@ export const BAND_LABELS = ['0–20', '21–40', '41–59', '60–79', '80–100
 export const mono = (size, weight = 500) => ({ fontFamily: fonts.mono, fontSize: size, fontWeight: weight });
 export const plural = (n, w, many = `${w}s`) => `${n} ${n === 1 ? w : many}`;
 
-function useReducedMotion() {
+export function useReducedMotion() {
   const query = '(prefers-reduced-motion: reduce)';
   const get = () => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(query).matches : false);
   const [reduced, setReduced] = useState(get);
