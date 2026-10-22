@@ -35,10 +35,9 @@ function useReducedMotion() {
   return reduced;
 }
 
-// A semi-circle from 0 (left) to 100 (right). `score` null draws the empty, inactive gauge.
-
-// A semi-circle from 0 (left) to 100 (right). `score` null draws the empty, inactive gauge.
-export function Gauge({ score, width = 260, dim = false, label = 'Humanity Confidence' }) {
+// A semi-circle from 0 (left) to 100 (right). `score` null draws the empty, inactive gauge. `mini`: a small dial (the
+// home page's core gauges) with thicker strokes and no ticks or 0/100 labels.
+export function Gauge({ score, width = 260, dim = false, label = 'Humanity Confidence', mini = false }) {
   const reduced = useReducedMotion();
   const f = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
   const color = bandColor(score);
@@ -48,24 +47,24 @@ export function Gauge({ score, width = 260, dim = false, label = 'Humanity Confi
     <svg viewBox="0 0 200 112" width={width} height={width * 0.56} role="img"
       aria-label={score == null ? `${label} gauge: no score yet` : `${label} gauge: ${score} out of 100`}
       style={{ display: 'block', maxWidth: '100%', height: 'auto', opacity: dim ? 0.6 : 1 }}>
-      <path d={arc} fill="none" stroke="#1d1d1d" strokeWidth="12" strokeLinecap="round" />
-      {[20, 40, 60, 80].map((t) => {
+      <path d={arc} fill="none" stroke="#1d1d1d" strokeWidth={mini ? 16 : 12} strokeLinecap="round" />
+      {!mini && [20, 40, 60, 80].map((t) => {
         const a = Math.PI * (1 - t / 100);
         return <line key={t} x1={100 + 66 * Math.cos(a)} y1={100 - 66 * Math.sin(a)} x2={100 + 72 * Math.cos(a)}
           y2={100 - 72 * Math.sin(a)} stroke="#2e2e2e" strokeWidth="1.5" />;
       })}
       {score != null && f > 0 && (     // (a zero-length dash with round caps would draw dots at both ends)
-        <path d={arc} fill="none" stroke={color} strokeWidth="12" strokeLinecap="round" pathLength="100"
+        <path d={arc} fill="none" stroke={color} strokeWidth={mini ? 16 : 12} strokeLinecap="round" pathLength="100"
           strokeDasharray={`${f * 100} 200`} style={{ transition: move }} />
       )}
       {score != null && (
         <g style={{ transform: `rotate(${f * 180 - 90}deg)`, transformOrigin: '100px 100px', transition: move }}>
-          <line x1="100" y1="100" x2="100" y2="36" stroke="#d8d8d8" strokeWidth="2" strokeLinecap="round" />
+          <line x1="100" y1="100" x2="100" y2="36" stroke="#d8d8d8" strokeWidth={mini ? 6 : 2} strokeLinecap="round" />
         </g>
       )}
-      <circle cx="100" cy="100" r="5" fill={score == null ? '#2a2a2a' : '#d8d8d8'} />
-      <text x="16" y="111" fill="#555" style={mono(8)}>0</text>
-      <text x="176" y="111" fill="#555" style={mono(8)}>100</text>
+      <circle cx="100" cy="100" r={mini ? 9 : 5} fill={score == null ? '#2a2a2a' : '#d8d8d8'} />
+      {!mini && <text x="16" y="111" fill="#555" style={mono(8)}>0</text>}
+      {!mini && <text x="176" y="111" fill="#555" style={mono(8)}>100</text>}
     </svg>
   );
 }
