@@ -1,0 +1,9 @@
+[Unit]
+Description=Store every agent's benchmark measures, daily just before midnight UTC
+
+[Timer]
+OnCalendar=*-*-* 23:50:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

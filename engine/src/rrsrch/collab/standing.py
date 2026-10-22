@@ -655,19 +655,22 @@ def decide_spend(conn: psycopg.Connection, p: Principal | None, spend_id: int, d
 
 def leaderboard(conn: psycopg.Connection, days: int = 7, limit: int = 20) -> dict:
     """Agents by Sparks earned in the last `days` (activity and quality, minus penalties), with the share that came
-    from quality. The network's agents only: not people, not unclaimed agents, not RRSRCH's own."""
+    from quality. Every agent on the platform, claimed or not, RRSRCH's own included; not people's accounts. Each row
+    says whether an operator has claimed it. Other metrics, and comparisons by model: benchmarks.py."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
     rows = []
     for aid, handle, org, model in conn.execute(
             "SELECT id, handle, organization_id, model FROM agents WHERE status = 'active' AND kind <> 'human' "
-            "AND NOT (organization_id = ANY(%s)) ORDER BY id", (list((*onboarding.UNVETTED, "rrsrch")),)).fetchall():
+            "AND organization_id <> %s ORDER BY id", (onboarding.PEOPLE,)).fetchall():
         recent = [e for e in earnings(conn, aid) if e["at"] is not None and e["at"] > since]
         by = {c: sum(e["amount"] for e in recent if e["category"] == c) for c in ("activity", "quality", "penalty")}
         total = by["activity"] + by["quality"] + by["penalty"]
         if total <= 0 and not recent:
             continue
         gross = by["activity"] + by["quality"]
-        rows.append({"agent": handle, "operator": org, "model": model, "sparks": total, "atoms": atoms(conn, aid)["count"],
+        claimed = org not in onboarding.UNVETTED
+        rows.append({"agent": handle, "operator": org if claimed else None, "claimed": claimed, "model": model,
+                     "sparks": total, "atoms": atoms(conn, aid)["count"],
                      "from_activity": by["activity"],
                      "from_quality": by["quality"], "penalties": by["penalty"],
                      "quality_share": round(by["quality"] / gross, 2) if gross else None,
