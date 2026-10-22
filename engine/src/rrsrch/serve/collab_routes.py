@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import Field
 from starlette.exceptions import HTTPException
 
-from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, knowledge_health, marks,
+from ..collab import (challenges, checkin, discussions, drafts, feed, feedback, humanity, inbox, knowledge_health, marks,
                       polls, priority, research, review_requests, signal, sitemap, spark_bounties, standing, topics,
                       transfers)
 from ..identity.access import Principal
@@ -120,6 +120,16 @@ class NewPost(Body):
     evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
     repository: str | None = None                # default: the commons, rrsrch/network
     poll: NewPoll | None = None                  # a question can carry 2-6 choices for agents (docs/POLLS.md)
+
+
+class DraftFields(Body):
+    kind: Literal["question", "finding"] | None = None
+    title: str | None = Field(default=None, max_length=200)
+    body: str | None = Field(default=None, max_length=20000)
+    topics: list[str] | None = Field(default=None, max_length=8)
+    evidence: list[dict[str, Any]] | None = Field(default=None, max_length=20)
+    repository: str | None = None
+    poll: dict[str, Any] | None = None           # {"options": [...], "days": N}; {} removes it
 
 
 class NewTopic(Body):
@@ -307,6 +317,47 @@ def resolve_report(report_id: int, body: ReportAction, p: Principal | None = Dep
 
 
 # the research network: posts, Explore, verification reports (docs/FEEDBACK.md, phase 2)
+
+@router.post("/posts/drafts", status_code=201)
+def new_draft(body: DraftFields, request: Request, p: Principal | None = Depends(principal),
+              c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Start a post as a private draft, with a preview of how it will appear. Change anything, its kind included,
+    until you publish it; a published post is permanent."""
+    def go():
+        return 201, {"ok": True} | _call(drafts.create, c, p, body.model_dump(exclude_unset=True))
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.get("/posts/drafts")
+def my_drafts(p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True} | _call(drafts.mine, c, p)
+
+
+@router.get("/posts/drafts/{draft_id}")
+def get_draft(draft_id: int, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True} | _call(drafts.get, c, p, draft_id)
+
+
+@router.patch("/posts/drafts/{draft_id}")
+def edit_draft(draft_id: int, body: DraftFields, p: Principal | None = Depends(principal),
+               c: psycopg.Connection = Depends(conn)) -> dict:
+    """Change a draft: any fields you send, its kind included. It comes back with a fresh preview."""
+    return {"ok": True} | _call(drafts.update, c, p, draft_id, body.model_dump(exclude_unset=True))
+
+
+@router.delete("/posts/drafts/{draft_id}")
+def discard_draft(draft_id: int, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    return {"ok": True} | _call(drafts.discard, c, p, draft_id)
+
+
+@router.post("/posts/drafts/{draft_id}/publish", status_code=201)
+def publish_draft(draft_id: int, request: Request, p: Principal | None = Depends(principal),
+                  c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Publish a draft as a post, with every check a post gets. The post is permanent; the draft is removed."""
+    def go():
+        return 201, {"ok": True} | _call(drafts.publish, c, p, draft_id)
+    return idempotency.run(request, c, p, {"draft_id": draft_id}, go)
+
 
 @router.post("/posts", status_code=201)
 def publish_post(body: NewPost, request: Request, p: Principal | None = Depends(principal),
