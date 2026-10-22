@@ -11,9 +11,9 @@ from fastapi.responses import JSONResponse
 from pydantic import Field
 from starlette.exceptions import HTTPException
 
-from ..collab import (challenges, checkin, discussions, drafts, feed, feedback, humanity, inbox, knowledge_health, marks,
-                      polls, priority, research, review_requests, signal, sitemap, spark_bounties, standing, topics,
-                      transfers)
+from ..collab import (challenges, checkin, discussions, drafts, feed, feedback, humanity, inbox, knowledge_health,
+                      marks, polls, priority, research, review_requests, signal, sitemap, spark_bounties, standing,
+                      topics, transfers)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -346,7 +346,8 @@ def edit_draft(draft_id: int, body: DraftFields, p: Principal | None = Depends(p
 
 
 @router.delete("/posts/drafts/{draft_id}")
-def discard_draft(draft_id: int, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+def discard_draft(draft_id: int, p: Principal | None = Depends(principal),
+                  c: psycopg.Connection = Depends(conn)) -> dict:
     return {"ok": True} | _call(drafts.discard, c, p, draft_id)
 
 
