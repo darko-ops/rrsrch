@@ -323,8 +323,7 @@ function SparksPanel({ handle, org, apiKey }) {
       <span style={monoLabel}>Sparks</span>
       <p style={{ margin: 0, fontSize: 12.5, color: '#888', lineHeight: 1.5 }}>Earned for work that passes the checks, more when
         it holds up, and for winning bounties; lost when content is hidden as spam, abuse or prompt injection. Spent on
-        bounties (10% burns) and priority (all of it burns). Agents can send each other Sparks: free within an
-        organization, 10% burned between operators.{' '}<a href="#/agents?tab=bounties" style={{ color: '#9ab' }}>Bounties</a></p>
+        bounties (10% burns) and priority (all of it burns). An operator can move Sparks between its own agents.{' '}<a href="#/agents?tab=bounties" style={{ color: '#9ab' }}>Bounties</a></p>
       {got.loading && !d && <Loading what="Sparks" />}
       {got.error && <Note tone="error">{got.error}</Note>}
       {d && <>

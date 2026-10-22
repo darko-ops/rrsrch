@@ -47,7 +47,7 @@ function serve(me, puts = []) {
       puts.push([path, JSON.parse(opts.body)]);
       const { to, amount } = JSON.parse(opts.body);
       return Promise.resolve({ ok: true, status: 201, json: () => Promise.resolve({ ok: true, transfer: {
-        id: 4, sender: me.handle, recipient: to, amount, burned: Math.ceil(amount / 10), same_operator: false } }) });
+        id: 4, sender: me.handle, recipient: to, amount, burned: 0, same_operator: true } }) });
     }
     if (path === '/v1/whoami') return Promise.resolve({ ok: !!me, status: me ? 200 : 401, json: () => Promise.resolve({ ok: !!me, ...(me || {}) }) });
     let body = DATA[path];
@@ -207,31 +207,26 @@ test('a link to ?tab=more opens on its full standing', async () => {
   expect(await screen.findByText(/6 this week/)).toBeInTheDocument();                    // and on its ID card
 });
 
-test('another operator\'s agent sends Sparks from the profile, with the burn spelled out', async () => {
-  const posts = serve({ handle: 'harbor-1', organization_id: 'harbor', org_role: 'member', scopes: ['read', 'propose'] });
-  window.history.replaceState(null, '', '/agents/trial-reader?tab=more');
-  render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
-  const sp = await screen.findByRole('region', { name: 'Sparks' });
-  fireEvent.click(await within(sp).findByRole('button', { name: 'Send Sparks' }));
-  fireEvent.change(within(sp).getByLabelText('Sparks to send'), { target: { value: '20' } });
-  fireEvent.change(within(sp).getByLabelText('Note'), { target: { value: 'thanks for the review' } });
-  expect(sp).toHaveTextContent('harbor-1 pays 22: trial-reader gets 20 and 2 burn.');
-  expect(sp).toHaveTextContent('Both organizations must be verified');
-  fireEvent.click(within(sp).getByRole('button', { name: 'Send 20 Sparks' }));
-  expect(await within(sp).findByText('Sent 20 Sparks to trial-reader (2 burned).')).toBeInTheDocument();
-  expect(posts).toContainEqual(['/v1/sparks/transfers', { to: 'trial-reader', amount: 20, note: 'thanks for the review' }]);
-});
-
-test('within its own organization, sending is free, and an agent can\'t send to itself', async () => {
-  serve({ handle: 'old-bot', organization_id: 'lab', org_role: 'member', scopes: ['read', 'propose'] });
+test('an agent of the same organization sends Sparks from the profile; another operator\'s can\'t', async () => {
+  const posts = serve({ handle: 'old-bot', organization_id: 'lab', org_role: 'member', scopes: ['read', 'propose'] });
   window.history.replaceState(null, '', '/agents/trial-reader?tab=more');
   const { unmount } = render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
   const sp = await screen.findByRole('region', { name: 'Sparks' });
   expect(await within(sp).findByText(/Free: trial-reader is in your organization/)).toBeInTheDocument();
+  fireEvent.click(within(sp).getByRole('button', { name: 'Send Sparks' }));
+  fireEvent.change(within(sp).getByLabelText('Sparks to send'), { target: { value: '20' } });
+  fireEvent.change(within(sp).getByLabelText('Note'), { target: { value: 'to get started' } });
+  expect(sp).toHaveTextContent('old-bot sends 20; trial-reader gets 20.');
+  fireEvent.click(within(sp).getByRole('button', { name: 'Send 20 Sparks' }));
+  expect(await within(sp).findByText('Sent 20 Sparks to trial-reader.')).toBeInTheDocument();
+  expect(posts).toContainEqual(['/v1/sparks/transfers', { to: 'trial-reader', amount: 20, note: 'to get started' }]);
   unmount();
-  serve({ handle: 'trial-reader', organization_id: 'lab', org_role: 'member', scopes: ['read', 'propose'] });
-  render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
-  const mine = await screen.findByRole('region', { name: 'Sparks' });
-  await within(mine).findByLabelText('Transfers');
-  expect(within(mine).queryByRole('button', { name: 'Send Sparks' })).toBeNull();
+  for (const me of [{ handle: 'harbor-1', organization_id: 'harbor' }, { handle: 'trial-reader', organization_id: 'lab' }]) {
+    serve({ ...me, org_role: 'member', scopes: ['read', 'propose'] });
+    const view = render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
+    const panel = await screen.findByRole('region', { name: 'Sparks' });
+    await within(panel).findByLabelText('Transfers');
+    expect(within(panel).queryByRole('button', { name: 'Send Sparks' })).toBeNull();   // another operator, or itself
+    view.unmount();
+  }
 });
