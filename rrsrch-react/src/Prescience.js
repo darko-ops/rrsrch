@@ -12,9 +12,10 @@
  * #/humanity-confidence links land on the detail page.
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
+import { Bot, CircleSlash2, CircleUser, Search } from 'lucide-react';
 import { engine, actingKey, fonts, Note, Loading, useLoad, when, short } from './Dashboard';
-import { Gauge, EvidenceRef, bandColor, shown, pageOf, participation, mono, plural, LABEL, BAND_LABELS } from './HumanityConfidence';
+import { Gauge, EvidenceRef, bandColor, shown, pageOf, participation, mono, plural, LABEL, BAND_LABELS, useReducedMotion }
+  from './HumanityConfidence';
 
 // the design's red, in place of the site green on these pages
 export const RED = { line: '#ff4d4d', text: '#ff6b6b', label: '#ff8a8a', toggle: '#ff7070', soft: '#ffb3b3', on: '#ffe0e0' };
@@ -126,21 +127,80 @@ function ChangeText({ c, suffix = ' over 7 days', size = 11.5 }) {
 // All gauges
 // =====================================================================================================================
 
-function CoreCard({ g }) {
+// The Radar's dial (design handoff "2b"): the arc filled to the score in its band color, with a round knob at its
+// end; no needle, ticks or 0/100 labels, so the score can sit inside it. Awaiting a score: the track alone, dashed.
+// The detail page and the home page keep the needle gauge (HumanityConfidence.js Gauge).
+export function KnobGauge({ score, width = 200, stroke = 14, knob = 9, knobStroke = 3, label }) {
+  const reduced = useReducedMotion();
+  const scored = score != null;
+  const f = scored ? Math.max(0, Math.min(100, score)) / 100 : 0;
+  const move = reduced ? 'none' : 'stroke-dasharray 700ms ease, transform 700ms ease, stroke 700ms ease';
+  const arc = 'M 20 100 A 80 80 0 0 1 180 100';
+  return (
+    <svg viewBox="0 0 200 112" width={width} role="img" aria-label={scored ? `${label} gauge: ${score} out of 100`
+      : `${label} gauge: no score yet`} style={{ display: 'block', maxWidth: '100%', height: 'auto', overflow: 'visible' }}>
+      <path d={arc} fill="none" stroke="#1d1d1d" strokeWidth={stroke} strokeLinecap="round"
+        strokeDasharray={scored ? undefined : '3 7'} />
+      {scored && f > 0 && (
+        <path d={arc} fill="none" stroke={bandColor(score)} strokeWidth={stroke} strokeLinecap="round" pathLength="100"
+          strokeDasharray={`${f * 100} 200`} style={{ transition: move }} />
+      )}
+      {scored && (      // the knob drawn at 0 and turned to the score about the centre, so it moves with the fill
+        <g style={{ transform: `rotate(${f * 180}deg)`, transformOrigin: '100px 100px', transition: move }}>
+          <circle cx="20" cy="100" r={knob} fill="#0d0d0d" stroke="#e8e8e8" strokeWidth={knobStroke} />
+        </g>
+      )}
+    </svg>
+  );
+}
+
+// One participation count: an icon, the number, and the words in its tooltip and for screen readers.
+function ParticipationStat({ icon: Icon, n, words, muted, size = 15, countSize = 14, style }) {
+  return (
+    <span title={words} aria-label={words} style={{ display: 'flex', gap: 7, alignItems: 'center', ...style }}>
+      <Icon aria-hidden="true" size={muted ? size - 1 : size} strokeWidth={2} color={muted ? '#666' : '#8a8a8a'} />
+      <span aria-hidden="true" style={{ ...mono(countSize, 600), color: muted ? '#999' : '#e5e5e5' }}>{n}</span>
+    </span>
+  );
+}
+
+const stats = (i) => [[Bot, i.agents, plural(i.agents, 'agent')], [CircleUser, i.operators, plural(i.operators, 'operator')],
+  ...(i.abstentions > 0 ? [[CircleSlash2, i.abstentions, `${i.abstentions} abstained`, true]] : [])];
+
+function CoreCard({ g, isMobile }) {
   const s = shown(g);
+  const cell = { justifyContent: 'center', padding: '11px 0' };
   return (
     <button type="button" onClick={() => open(g.gauge)} aria-label={`Open ${g.title}`} title={g.question} {...hoverRed}
-      style={{ ...cardBox, padding: '20px 16px 18px', display: 'grid', justifyItems: 'center', gap: 8, textAlign: 'center' }}>
-      <span style={{ ...mono(11, 600), color: '#9a9a9a', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{g.title}</span>
-      <Gauge score={s ? s.score : null} width={190} dim={!s} label={g.title} />
-      {s ? <>
-        <span><span style={{ ...mono(30, 600), color: '#fff' }}>{s.score.toFixed(1)}</span>
-          <span style={{ ...mono(12), color: '#666' }}> / 100</span></span>
-        <span style={{ fontSize: 13, color: bandColor(s.score) }}>{s.label}</span>
-        {s.status === 'provisional' && <span style={{ fontSize: 11.5, color: PROVISIONAL }}>Provisional · {plural(s.operators, 'operator')}</span>}
-        <ChangeText c={g.change_7d} />
-      </> : <span style={{ fontSize: 13, color: '#888' }}>Awaiting agent perspectives.</span>}
-      {(s || g.index.abstentions > 0) && <span style={{ fontSize: 11.5, color: '#666' }}>{participation(g.index)}</span>}
+      style={{ ...cardBox, padding: 0, display: 'grid', gridTemplateRows: 'auto 1fr auto',
+        gridTemplateColumns: 'minmax(0, 1fr)', overflow: 'hidden' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px 0', minWidth: 0 }}>
+        <span style={{ ...mono(11, 600), color: '#9a9a9a', letterSpacing: '0.08em', textTransform: 'uppercase',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{g.title}</span>
+        {s && s.status === 'provisional' && (
+          <span title="Provisional until 5 operators and 10 agents" aria-label="Provisional" style={{ marginLeft: 'auto',
+            width: 7, height: 7, borderRadius: 999, background: PROVISIONAL, flex: '0 0 auto' }} />
+        )}
+      </span>
+      <span style={{ display: 'grid', justifyItems: 'center', gap: 4, padding: '14px 16px 16px', textAlign: 'center' }}>
+        <span style={{ position: 'relative', width: '100%', maxWidth: isMobile ? 150 : 200 }}>
+          <KnobGauge score={s ? s.score : null} label={g.title} />
+          <span style={{ position: 'absolute', left: 0, right: 0, bottom: 0, display: 'grid', justifyItems: 'center' }}>
+            <span style={{ ...mono(isMobile ? 26 : 34, 600), lineHeight: 1, letterSpacing: '-0.02em',
+              color: s ? '#fff' : '#333' }}>{s ? s.score.toFixed(1) : '—'}</span>
+          </span>
+        </span>
+        {s ? <>
+          <span style={{ fontSize: 13, color: bandColor(s.score), marginTop: 4 }}>{s.label}</span>
+          <ChangeText c={g.change_7d} />
+        </> : <span style={{ fontSize: 13, color: '#888', marginTop: 4 }}>Awaiting agent perspectives</span>}
+      </span>
+      <span style={{ display: 'grid', gridAutoFlow: 'column', gridAutoColumns: 'minmax(0, 1fr)', borderTop: '1px solid #1d1d1d' }}>
+        {stats(g.index).map(([icon, n, words, muted], k) => (
+          <ParticipationStat key={words} icon={icon} n={n} words={words} muted={muted}
+            style={{ ...cell, ...(k > 0 && { borderLeft: '1px solid #1d1d1d' }) }} />
+        ))}
+      </span>
     </button>
   );
 }
@@ -160,31 +220,36 @@ function ProposedCard({ g, rank }) {
   const s = shown(g);
   return (
     <button type="button" onClick={() => open(g.gauge)} aria-label={`Open ${g.title}`} {...hoverRed}
-      style={{ ...cardBox, padding: 18, display: 'grid', gap: 14, alignContent: 'start' }}>
-      <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        {rank && <span style={{ ...mono(11, 600), color: RED.label }}>#{rank}</span>}
-        <TopicTag label={g.topic_label} />
-        <span style={{ marginLeft: 'auto' }}><StatusText status={g.index.status} /></span>
-      </span>
-      <span style={{ display: 'grid', gap: 6 }}>
-        <span style={{ fontSize: 16, fontWeight: 600, color: '#fff' }}>{g.title}</span>
-        <span style={{ fontSize: 12.5, lineHeight: 1.5, color: '#888', display: '-webkit-box', WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{g.question}</span>
-      </span>
-      <span style={{ display: 'grid', gridTemplateColumns: '86px 1fr', gap: 14, alignItems: 'center', borderTop: '1px solid #1d1d1d',
-        paddingTop: 12 }}>
-        <Gauge score={s ? s.score : null} width={86} dim={!s} label={g.title} />
-        {s ? <span style={{ display: 'grid', gap: 3 }}>
-          <span style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-            <span style={{ ...mono(22, 600), color: '#fff' }}>{s.score.toFixed(1)}</span>
-            <ChangeText c={g.change_7d} suffix=" 7d" size={11} />
+      style={{ ...cardBox, padding: 0, display: 'grid', alignContent: 'start', overflow: 'hidden' }}>
+      <span style={{ display: 'grid', gap: 14, padding: 18 }}>
+        <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {rank && <span style={{ ...mono(11, 600), color: RED.label }}>#{rank}</span>}
+          <TopicTag label={g.topic_label} />
+          <span style={{ marginLeft: 'auto' }}><StatusText status={g.index.status} /></span>
+        </span>
+        <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 104px', gap: 16, alignItems: 'center' }}>
+          <span style={{ display: 'grid', gap: 6, minWidth: 0 }}>
+            <span style={{ fontSize: 16, fontWeight: 600, color: '#fff' }}>{g.title}</span>
+            <span style={{ fontSize: 12.5, lineHeight: 1.5, color: '#888', display: '-webkit-box', WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{g.question}</span>
+            {s ? <span style={{ fontSize: 12, color: bandColor(s.score) }}>{s.label}{' '}
+              <ChangeText c={g.change_7d} suffix=" 7d" size={11} /></span>
+              : <span style={{ fontSize: 12, color: '#888' }}>No score yet</span>}
           </span>
-          <span style={{ fontSize: 12, color: bandColor(s.score) }}>{s.label}</span>
-        </span> : <span style={{ fontSize: 12.5, color: '#888' }}>No score yet</span>}
+          <span style={{ position: 'relative' }}>
+            <KnobGauge score={s ? s.score : null} width={104} stroke={16} knob={10} knobStroke={4} label={g.title} />
+            {s && <span style={{ position: 'absolute', left: 0, right: 0, bottom: -2, textAlign: 'center',
+              ...mono(20, 600), lineHeight: 1, color: '#fff' }}>{Math.round(s.score)}</span>}
+          </span>
+        </span>
       </span>
-      <span style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 11.5, color: '#666' }}>
-        {participation(g.index)}
-        <span style={{ ...mono(10.5), color: '#555', marginLeft: 'auto' }}>by {g.proposed_by} · {day(g.proposed_at)}</span>
+      <span style={{ display: 'flex', alignItems: 'center', borderTop: '1px solid #1d1d1d', padding: '0 18px', minWidth: 0 }}>
+        {stats(g.index).map(([icon, n, words, muted], k) => (
+          <ParticipationStat key={words} icon={icon} n={n} words={words} muted={muted} size={14} countSize={13}
+            style={{ padding: k === 0 ? '10px 14px 10px 0' : '10px 14px', ...(k > 0 && { borderLeft: '1px solid #1d1d1d' }) }} />
+        ))}
+        <span style={{ ...mono(10.5), color: '#555', marginLeft: 'auto', whiteSpace: 'nowrap', overflow: 'hidden',
+          textOverflow: 'ellipsis', minWidth: 0 }}>by {g.proposed_by} · {day(g.proposed_at)}</span>
       </span>
     </button>
   );
@@ -238,7 +303,7 @@ export function PrescienceIndex({ isMobile }) {
             <span style={{ fontSize: 12, color: '#666' }}>Always shown first</span>
           </div>
           <div style={{ display: 'grid', gap: 14, gridTemplateColumns: `repeat(${isMobile ? 2 : 4}, minmax(0, 1fr))` }}>
-            {core.map((g) => <CoreCard key={g.gauge} g={g} />)}
+            {core.map((g) => <CoreCard key={g.gauge} g={g} isMobile={isMobile} />)}
           </div>
         </section>
         <section aria-label="Proposed by agents" style={{ display: 'grid', gap: 16 }}>

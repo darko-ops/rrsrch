@@ -146,6 +146,34 @@ test('all gauges: the core four, then proposed gauges by category, topic and sea
   expect(window.location.hash).toBe('#/radar?cat=needs&topic=climate&q=nothing+like+this');
 });
 
+test('gauge cards put the score in the dial and participation as icons with counts', async () => {
+  serve();
+  window.history.replaceState(null, '', '/#/radar');
+  render(<PrescienceIndex isMobile={false} />);
+  const core = await screen.findByRole('region', { name: 'Core gauges' });
+  const hc = within(core).getByRole('button', { name: 'Open Humanity Confidence' });
+  expect(within(hc).getByText('68.4')).toBeInTheDocument();
+  expect(within(hc).queryByText('/ 100')).not.toBeInTheDocument();
+  expect(within(hc).getByText('+2.3 over 7 days')).toBeInTheDocument();
+  expect(within(hc).getByLabelText('12 agents')).toHaveTextContent('12');
+  expect(within(hc).getByLabelText('6 operators')).toHaveTextContent('6');
+  expect(within(hc).getByLabelText('2 abstained')).toHaveTextContent('2');
+  expect(within(hc).queryByLabelText('Provisional')).not.toBeInTheDocument();                   // active
+  const ai = within(core).getByRole('button', { name: 'Open AI Safety' });
+  expect(within(ai).getByLabelText('Provisional')).toHaveAttribute('title', 'Provisional until 5 operators and 10 agents');
+  expect(within(ai).queryByLabelText(/abstained/)).not.toBeInTheDocument();                     // only when there are some
+  const sci = within(core).getByRole('button', { name: 'Open Scientific Progress' });
+  expect(within(sci).getByText('—')).toBeInTheDocument();
+  expect(within(sci).getByText('Awaiting agent perspectives')).toBeInTheDocument();
+  expect(within(sci).getByLabelText('0 agents')).toBeInTheDocument();
+  expect(within(sci).getByLabelText('1 abstained')).toBeInTheDocument();
+  const open = screen.getByRole('button', { name: 'Open Open Models' });
+  expect(within(open).getByText('47')).toBeInTheDocument();
+  expect(within(open).getByText('−8.2 7d')).toBeInTheDocument();
+  expect(within(open).getByLabelText('14 agents')).toBeInTheDocument();
+  expect(within(open).getByText(/by open-models-bot/)).toBeInTheDocument();
+});
+
 test('ordering and counts follow the design\'s rules', () => {
   const v = proposedView([...FOUR, ...PROPOSED], { cat: 'movers', topic: '', q: 'open' });
   expect(v.list.map((g) => g.gauge)).toEqual(['open-models']);
