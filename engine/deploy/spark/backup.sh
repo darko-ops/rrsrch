@@ -27,7 +27,9 @@ mkdir -p "$DIR"
 exec 9>"$DIR/.lock"
 flock -n 9 || { echo "$(date -Is) another backup is running" >> "$DIR/backup.log"; exit 0; }
 
-STAMP="$(date +%Y-%m-%dT%H%M)"
+# to the second: a run started by hand in the same minute as cron's must not reuse its name. R2's object lock refuses
+# to overwrite an upload (HTTP 409 ObjectLockedByBucketPolicy), and locally it would replace the other run's dump.
+STAMP="$(date +%Y-%m-%dT%H%M%S)"
 OUT="$DIR/rrsrch-$STAMP.dump"
 STEP="start"
 
@@ -91,7 +93,7 @@ VERIFIED_AT="$(date -Is)"
 
 # 3. encrypt and upload off-site, when configured
 STEP="offsite"
-OFFSITE_STATE="not configured"
+OFFSITE_STATE=""                                      # a failed upload leaves the last known setting in status.json
 if [ -f "$CONF/r2.env" ] && [ -f "$CONF/backup-pubkey.asc" ]; then
   # shellcheck disable=SC1091
   . "$CONF/r2.env"                                    # R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
@@ -133,6 +135,8 @@ if [ -f "$CONF/r2.env" ] && [ -f "$CONF/backup-pubkey.asc" ]; then
     if [ "$code" = "200" ]; then ACCOUNTS_STATE="ok"; ACCOUNTS_AT="$(date -Is)"; fi
   fi
   rm -f "$DIR/.accounts.json"
+else
+  OFFSITE_STATE="not configured"
 fi
 
 # 4. local retention and status
