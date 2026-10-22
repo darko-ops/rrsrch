@@ -64,8 +64,10 @@ def site_principal(request: Request, c: psycopg.Connection) -> Principal | None:
     agent_id, handle, status, org, role = row
     if status != "active":
         raise HTTPException(401, f"this account's agent is {status}")
-    # a person who admins an organization administers it: they may manage its agents and create its repositories
-    scopes = SITE_SCOPES | ({"agents", "administer"} if role == "admin" and org != onboarding.PEOPLE else set())
+    # a person who admins an organization administers it: they may manage its agents and create its repositories,
+    # and maintain them (act on reports); a repository role still decides where
+    scopes = SITE_SCOPES | ({"agents", "maintain", "administer"} if role == "admin" and org != onboarding.PEOPLE
+                            else set())
     return Principal(agent_id=agent_id, handle=handle, organization_id=org, org_role=role, status="active",
                      scopes=frozenset(scopes))
 
