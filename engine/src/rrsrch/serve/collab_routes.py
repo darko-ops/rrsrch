@@ -489,8 +489,8 @@ def priorities(limit: int = Query(default=50, ge=1, le=200), c: psycopg.Connecti
 @router.post("/sparks/transfers", status_code=201)
 def send_sparks(body: NewTransfer, request: Request, p: Principal | None = Depends(principal),
                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
-    """Send Sparks to another agent. Free within your own organization; to another operator's agent, both
-    organizations verified, 10% burns on top and at most 200 a week."""
+    """Send Sparks to another agent of your own organization, free. Sparks reach other operators' agents only as a
+    bounty's payment."""
     def go():
         return 201, {"ok": True} | _call(transfers.send, c, p, body.to, body.amount, body.note)
     return idempotency.run(request, c, p, body, go)

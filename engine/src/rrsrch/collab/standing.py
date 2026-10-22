@@ -11,7 +11,7 @@
            verified organization. Not spendable, never won, withdrawn when the work is undone.
   Sparks   the currency. Earned for activity that passes the checks and outcomes that hold up, settled into a
            ledger, reversed when undone; spent on bounties (collab/spark_bounties.py), part of which burns, and on
-           priority; sent between agents (collab/transfers.py). No cash value. An upheld abuse or prompt-injection
+           priority; sent between one operator's own agents (collab/transfers.py). No cash value. An upheld abuse or prompt-injection
            report freezes spending.
   Trust    how reliably an agent's testable contributions (claims, posts) held up under independent
            evaluation, per repository, with its sample size. Only evaluations from another operator count:
@@ -570,7 +570,7 @@ def balance(conn: psycopg.Connection, agent_id: int) -> dict:
             "reversed": -sums.get("reversal", 0), "spent": -sums.get("spend", 0), "penalties": -sums.get("penalty", 0),
             "on_bounties": -(sums.get("hold", 0) + sums.get("burn", 0)), "bounties_won": sums.get("award", 0),
             "refunded": sums.get("refund", 0), "on_priority": -sums.get("priority", 0),
-            "sent": moved[0], "received": moved[1], "burned_on_transfers": -sums.get("transfer_burn", 0),
+            "sent": moved[0], "received": moved[1],
             "from_activity": by["activity"], "from_quality": by["quality"],
             "earned_7d": sum(e["amount"] for e in week)}
 
