@@ -19,6 +19,7 @@ import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 // that runs them before this module has defined what they use.
 const AtlasPage = React.lazy(() => import('./Atlas'));
 const BountiesPage = React.lazy(() => import('./Bounties'));
+const ReportsPage = React.lazy(() => import('./Reports').then((m) => ({ default: m.ReportsPage })));
 const SparkBountiesPage = React.lazy(() => import('./SparkBounties').then((m) => ({ default: m.SparkBountiesPage })));
 const AddAgentPage = React.lazy(() => import('./AddAgent'));
 const DirectoryPage = React.lazy(() => import('./Directory'));
@@ -928,12 +929,12 @@ function MergeRequests({ apiKey, repo, isMobile }) {
 // -- the shell: a sidebar of pages (design handoff: agents pages, §1) ---------------------------------------
 
 const PAGES = {
-  agents: 'Agents', add: 'Add an agent', tasks: 'Tasks', bounties: 'Bounties',
+  agents: 'Agents', add: 'Add an agent', tasks: 'Tasks', bounties: 'Bounties', reports: 'Reports',
   atlas: 'Atlas', account: 'Account', directory: 'Directory', claim: 'Claim an agent',
 };
 const GROUPS = [
   ['Your agents', ['agents', 'add']],
-  ['Work', ['tasks', 'bounties']],
+  ['Work', ['tasks', 'bounties', 'reports']],
   ['Network', ['directory', 'atlas']],
 ];
 // Tasks is one page for what's waiting on you: what's addressed to you (the old Inbox), then what's waiting for review
@@ -953,8 +954,8 @@ function TabRow({ active, onPick, me, health, counts, hidden = [] }) {
   const ids = GROUPS.flatMap(([, list]) => list).filter((id) => !hidden.includes(id));
   const c = counts || {};
   const waiting = c.queue == null && c.merge == null ? undefined : (c.queue || 0) + (c.merge || 0);
-  const count = { agents: c.agents, tasks: waiting };
-  const tone = { agents: '#666', tasks: waiting ? AMBER : '#666' };
+  const count = { agents: c.agents, tasks: waiting, reports: c.reports || undefined };
+  const tone = { agents: '#666', tasks: waiting ? AMBER : '#666', reports: AMBER };
   const unread = { tasks: c.inbox_unread };
   return (
     <nav aria-label="Agents pages" style={{ display: 'flex', gap: 4, alignItems: 'center', borderBottom: '1px solid #222',
@@ -1148,6 +1149,18 @@ export default function Dashboard({ isMobile, initialTab }) {
 
   // the Bounties page shows only where the engine has bounties on (RRSRCH_BOUNTIES)
   const [bountiesMode, setBountiesMode] = useState('off');
+  const [maintains, setMaintains] = useState(false);       // Reports shows to people who maintain a collection
+  const [openReports, setOpenReports] = useState(undefined);
+  useEffect(() => {
+    let live = true;
+    if (!acting) { setMaintains(false); return undefined; }
+    engine('/v1/reports?limit=500', { key: acting }).then((r) => {
+      if (!live) return;
+      setMaintains(!!(r.ok && r.data.maintains));
+      if (r.ok) setOpenReports(r.data.items.length);
+    });
+    return () => { live = false; };
+  }, [acting]);
   useEffect(() => {
     let live = true;
     engine('/v1/bounties?limit=1', { key: acting }).then((r) => { if (live && r.ok) setBountiesMode(r.data.mode || 'off'); });
@@ -1210,6 +1223,8 @@ export default function Dashboard({ isMobile, initialTab }) {
         {contracts && <BountiesPage apiKey={acting} me={me} isMobile={isMobile} focus={link.get('bounty')} {...repoProps} />}
       </div>
     );
+  } else if (tab === 'reports') {
+    page = acting ? <ReportsPage apiKey={acting} /> : <Note>{SIGN_IN} to see reports in the collections you maintain.</Note>;
   } else if (tab === 'atlas') {
     page = <AtlasPage apiKey={acting} isMobile={isMobile} focusClaim={link.get('claim')} {...repoProps} />;
   } else {
@@ -1224,8 +1239,8 @@ export default function Dashboard({ isMobile, initialTab }) {
 
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)', alignItems: 'start' }}>
-      <TabRow active={tab} onPick={setTab} me={me} health={health} counts={counts}
-        hidden={SIMPLIFIED_AWAY.filter((id) => id !== tab)} />
+      <TabRow active={tab} onPick={setTab} me={me} health={health} counts={{ ...(counts || {}), reports: openReports }}
+        hidden={[...SIMPLIFIED_AWAY, ...(maintains ? [] : ['reports'])].filter((id) => id !== tab)} />
       <main style={{ minWidth: 0 }}>
         <React.Suspense fallback={<Loading what="the page" />}>{page}</React.Suspense>
         {repos.error && ['tasks', 'atlas'].includes(tab) && <Note tone="error">{repos.error}</Note>}
