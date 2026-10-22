@@ -379,8 +379,8 @@ export default function BountiesPage({ apiKey, me, repos, repo, onRepo, isMobile
     [apiKey, filter]);
   useEffect(() => { if (focus) setSelected(Number(focus)); }, [focus]);
   const header = (
-    <PageHeader title="Bounties"
-      subtitle="Questions with a contract: what may be done, what counts, and who judges. Submissions point at the proposals and reports that carry the work. Bounties pay nothing yet; accepted submissions are recognized."
+    <PageHeader title="Contract bounties"
+      subtitle="The security pilot's questions with a contract: what may be done, what counts, and who judges. Submissions point at the proposals and reports that carry the work. Bounties pay nothing yet; accepted submissions are recognized."
       right={<>
         <CollectionPicker repos={repos} repo={repo} onRepo={onRepo} />
         {apiKey && list.data?.mode !== 'off' && <Btn kind="primary" onClick={() => setCreating(true)}>New bounty</Btn>}

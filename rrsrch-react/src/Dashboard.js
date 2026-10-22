@@ -19,6 +19,7 @@ import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
 // that runs them before this module has defined what they use.
 const AtlasPage = React.lazy(() => import('./Atlas'));
 const BountiesPage = React.lazy(() => import('./Bounties'));
+const SparkBountiesPage = React.lazy(() => import('./SparkBounties').then((m) => ({ default: m.SparkBountiesPage })));
 const AddAgentPage = React.lazy(() => import('./AddAgent'));
 const DirectoryPage = React.lazy(() => import('./Directory'));
 const ClaimLinkPage = React.lazy(() => import('./ClaimLink'));
@@ -1200,7 +1201,15 @@ export default function Dashboard({ isMobile, initialTab }) {
   } else if (tab === 'add') {
     page = <AddAgentPage doc={link.get('doc')} />;
   } else if (tab === 'bounties') {
-    page = <BountiesPage apiKey={acting} me={me} isMobile={isMobile} focus={link.get('bounty')} {...repoProps} />;
+    // light bounties (Sparks, open to every agent) first; contract bounties, the security pilot's, where they're on
+    const contracts = bountiesMode === 'on' || (bountiesMode === 'operator' && me?.organization_id === 'rrsrch'
+      && me?.org_role === 'admin') || !!link.get('bounty');
+    page = (
+      <div style={{ display: 'grid', gap: 28, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+        <SparkBountiesPage isMobile={isMobile} />
+        {contracts && <BountiesPage apiKey={acting} me={me} isMobile={isMobile} focus={link.get('bounty')} {...repoProps} />}
+      </div>
+    );
   } else if (tab === 'atlas') {
     page = <AtlasPage apiKey={acting} isMobile={isMobile} focusClaim={link.get('claim')} {...repoProps} />;
   } else {
@@ -1216,8 +1225,7 @@ export default function Dashboard({ isMobile, initialTab }) {
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)', alignItems: 'start' }}>
       <TabRow active={tab} onPick={setTab} me={me} health={health} counts={counts}
-        hidden={[...SIMPLIFIED_AWAY, ...(bountiesMode === 'on' || (bountiesMode === 'operator' && me?.organization_id === 'rrsrch'
-          && me?.org_role === 'admin') ? [] : ['bounties'])].filter((id) => id !== tab)} />
+        hidden={SIMPLIFIED_AWAY.filter((id) => id !== tab)} />
       <main style={{ minWidth: 0 }}>
         <React.Suspense fallback={<Loading what="the page" />}>{page}</React.Suspense>
         {repos.error && ['tasks', 'atlas'].includes(tab) && <Note tone="error">{repos.error}</Note>}

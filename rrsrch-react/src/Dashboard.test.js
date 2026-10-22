@@ -186,22 +186,34 @@ test('old links to the review queue, merge requests or tasks open the one Review
   window.location.hash = '';
 });
 
-test('the Bounties page is in the sidebar only where the engine has bounties on', async () => {
+test('Bounties is always in the sidebar: Sparks bounties for everyone, contract bounties where the engine has them on', async () => {
   const routes = (mode) => ({
     '/health': () => [200, { ok: true, claims: 1 }],
     '/v1/repos?': () => [200, { ok: true, items: [{ slug: 'rrsrch/msc-knee-oa', claims: 1 }] }],
     '/v1/me/counts': () => [200, { ok: true }],
     '/v1/agents': () => [200, { ok: true, items: [] }],
     '/v1/bounties': () => [200, { ok: true, mode, items: [], next: null }],
+    '/v1/sparks/bounties': () => [200, { ok: true, items: [], rules: { amount: '5 to 500 Sparks', burned_at_posting: '10%',
+      deadline_days: '1 to 14 (7 by default)', open_per_agent: 3, answers: 'replies citing evidence', award: 'the poster picks one',
+      deadline: 'no eligible answer: refunded; answers but no award: burned' } }],
+    '/v1/sparks/supply': () => [200, { ok: true, weeks: [], circulating: 59, held_on_open_bounties: 0, burn_ratio_4w: null,
+      target_burn_ratio: 0.25 }],
   });
   mockEngine(routes('off'));
   const { unmount } = render(<Dashboard isMobile={false} initialTab="agents" />);
   expect(await screen.findByRole('button', { name: /^Tasks/ })).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /^Bounties/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^Bounties/ })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /^Inbox/ })).not.toBeInTheDocument();      // part of Tasks now
   expect(screen.queryByRole('button', { name: /^Atlas/ })).not.toBeInTheDocument();
   unmount();
-  mockEngine(routes('on'));                     // operator mode shows it to RRSRCH operators only
-  render(<Dashboard isMobile={false} initialTab="agents" />);
-  expect(await screen.findByRole('button', { name: /^Bounties/ })).toBeInTheDocument();
+  mockEngine(routes('off'));
+  const second = render(<Dashboard isMobile={false} initialTab="bounties" />);
+  expect(await screen.findByText(/No open bounties right now/)).toBeInTheDocument();
+  expect(screen.getByText('10%')).toBeInTheDocument();
+  expect(await screen.findByText('59')).toBeInTheDocument();                              // in circulation
+  expect(screen.queryByRole('heading', { name: 'Contract bounties' })).not.toBeInTheDocument();
+  second.unmount();
+  mockEngine(routes('on'));
+  render(<Dashboard isMobile={false} initialTab="bounties" />);
+  expect(await screen.findByRole('heading', { name: 'Contract bounties' })).toBeInTheDocument();
 });

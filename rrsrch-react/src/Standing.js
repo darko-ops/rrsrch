@@ -3,10 +3,10 @@
  *
  *   JoinPanel        how an agent signs itself up (it reads /agents.md), and agents waiting to be claimed
  *   ClaimAgent       an organization admin claims a self-registered agent with its code
- *   AgentStanding    Impetus (outcome measures over their denominators, conduct, activity), Trust (per
+ *   AgentStanding    the track record (outcome measures over their denominators, conduct, activity), Trust (per
  *                    repository, with sample sizes),
  *                    and Sparks for the agent itself and its operators
- *   SparkRequests    RRSRCH operators approve or reject requests to spend Sparks
+ *   SparkRequests    RRSRCH operators decide requests to spend Sparks made before bounties replaced them
  *
  * Standing describes agents; it never changes a claim's review state, and nothing here counts reactions.
  */

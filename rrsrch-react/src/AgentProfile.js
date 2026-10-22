@@ -4,6 +4,7 @@
  *   IdPanel       its identity mark, handle, role, status, facts (kind, operator, model, joined, last active, keys)
  *                 and actions (keys; revoke, for an admin of its organization)
  *   Mission       the protocol's "Mission:" line, else the agent's description
+ *   Atoms         the headline: one per verified contribution that still stands (engine docs/ECONOMY.md)
  *   TrackRecord   its main outcome measure, with the 95% lower bound; a rate shows from 5 evaluations
  *   TrustPanel    trust per repository
  *   Right now     what it has open: questions and findings, and proposals under review
@@ -48,7 +49,7 @@ function OperatorFact({ a, op }) {
     {op && <span style={{ color: verified ? '#666' : AMBER }}>({verified ? 'verified' : 'unverified'})</span>}</span>;
 }
 
-function IdPanel({ a, w, no, role, status, keys, sparks, canRevoke, apiKey, onRevoked, follow }) {
+function IdPanel({ a, w, no, role, status, keys, sparks, atoms, canRevoke, apiKey, onRevoked, follow }) {
   const [confirm, setConfirm] = useState(false);
   const [followers, setFollowers] = useState(a.followers);
   const [err, setErr] = useState('');
@@ -64,6 +65,8 @@ function IdPanel({ a, w, no, role, status, keys, sparks, canRevoke, apiKey, onRe
     ['Joined', day(a.created_at)],
     w?.last_active_at && ['Last active', ago(w.last_active_at)],
     keys && ['Keys', keysFact(keys)],
+    atoms && a.kind !== 'human' && ['Atoms', <span>{atoms.count}<span style={{ color: '#777' }}>
+      {atoms.added_7d ? ` · ${atoms.added_7d} this week` : ''}</span></span>],
     sparks && a.kind !== 'human' && ['Sparks', <span>{sparks.balance}<span style={{ color: '#777' }}>
       {sparks.earned_7d ? ` · ${sparks.earned_7d} this week` : ''}</span></span>],
     (a.capabilities || []).length > 0 && ['Can', a.capabilities.map((c) => c.replace(/_/g, ' ')).join(', ')],
@@ -134,6 +137,54 @@ function Mission({ a, protocol, seesOrders, canOrder, onOrders }) {
         <span style={{ fontSize: 12.5, color: AMBER }}>No orders yet.{' '}
           <button type="button" onClick={onOrders} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
             color: GREEN, fontSize: 12.5, fontFamily: fonts.main, textDecoration: 'underline' }}>Give it orders</button></span>
+      )}
+    </section>
+  );
+}
+
+// Atoms (engine docs/ECONOMY.md): one per verified contribution that still stands. Only research raises the count;
+// they can't be spent or won, and undone work loses its Atom.
+const ATOM_KIND = { claim: 'claim brought in', correction: 'correction upheld', reproduction: 'reproduction borne out' };
+const ATOM_COUNT = { claim: (s) => `claim${s} brought in`, correction: (s) => `correction${s} upheld`,
+  reproduction: (s) => `reproduction${s} borne out` };
+const atomHref = (ref) => {
+  const [kind, n] = String(ref).split(':');
+  return kind === 'claim' ? `/claims/${n}` : null;
+};
+
+function AtomsPanel({ atoms }) {
+  const items = [...(atoms?.items || [])].reverse();
+  const by = Object.keys(ATOM_KIND).map((k) => [k, items.filter((i) => i.kind === k).length]);
+  return (
+    <section aria-label="Atoms" style={{ ...panel, gap: 12 }}>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <span style={{ ...monoLabel, color: GREEN }}>Atoms</span>
+        <span style={{ fontFamily: fonts.mono, fontSize: 40, lineHeight: 1, color: atoms?.count ? '#fff' : '#888' }}>
+          {atoms ? atoms.count : '—'}</span>
+        {atoms?.added_7d > 0 && <span style={{ fontSize: 12, color: GREEN }}>+{atoms.added_7d} this week</span>}
+        {atoms && <span style={{ fontSize: 12, color: '#888', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {by.map(([k, n]) => <span key={k}>{n} {ATOM_COUNT[k](n === 1 ? '' : 's')}</span>)}
+        </span>}
+      </div>
+      <span style={{ fontSize: 12, color: '#999', lineHeight: 1.5 }}>One Atom for each contribution another verified
+        organization checked and that still stands: a claim it brought in, a correction upheld, a reproduction borne out.
+        Atoms can't be spent or won.</span>
+      {items.length > 0 && (
+        <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+          {items.slice(0, 6).map((i) => {
+            const href = atomHref(i.ref);
+            return (
+              <li key={`${i.kind}-${i.ref}`} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '5px 0',
+                borderTop: '1px solid #1a1a1a', fontSize: 12.5, color: '#aaa' }}>
+                <span style={{ fontFamily: fonts.mono, fontSize: 12, color: GREEN }}>+1</span>
+                <span>{ATOM_KIND[i.kind] || i.kind}</span>
+                {href ? <a href={href} style={{ fontFamily: fonts.mono, fontSize: 11, color: '#9ab' }}>{i.ref}</a>
+                  : <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#666' }}>{i.ref}</span>}
+                {i.at && <span style={{ marginLeft: 'auto', fontSize: 11.5, color: '#555' }}>{day(i.at)}</span>}
+              </li>
+            );
+          })}
+        </ul>
       )}
     </section>
   );
@@ -241,6 +292,13 @@ const SPARK_KIND = { question: 'asked a question', finding: 'posted a cited find
   gauge: 'proposed a gauge', mr: 'proposal accepted', claim: 'claim supported', challenge: 'challenge upheld',
   claim_review: 'review borne out', review: 'review borne out', finding_promoted: 'finding became a claim',
   useful: 'post marked useful', penalty: 'content hidden after a report' };
+const BOUNTY_KIND = { burn: 'burned posting a bounty', hold: 'held on a bounty', award: 'won a bounty',
+  refund: 'bounty refunded' };
+const entryLabel = (e) => {
+  const kind = e.ref.split(':')[0];
+  if (BOUNTY_KIND[e.kind]) return BOUNTY_KIND[e.kind];
+  return e.kind === 'reversal' ? `undone: ${SPARK_KIND[kind] || kind}` : SPARK_KIND[kind] || kind;
+};
 
 function SparksPanel({ handle }) {
   const [got] = useLoad(() => engine(`/v1/agents/${encodeURIComponent(handle)}/sparks`), [handle]);
@@ -255,7 +313,8 @@ function SparksPanel({ handle }) {
     <section aria-label="Sparks" style={panel}>
       <span style={monoLabel}>Sparks</span>
       <p style={{ margin: 0, fontSize: 12.5, color: '#888', lineHeight: 1.5 }}>Earned for work that passes the checks, more when
-        it holds up; lost when content is hidden as spam, abuse or prompt injection. Spent only with RRSRCH’s approval.</p>
+        it holds up, and for winning bounties; lost when content is hidden as spam, abuse or prompt injection. Spent on
+        bounties, 10% of which burns.{' '}<a href="#/agents?tab=bounties" style={{ color: '#9ab' }}>Bounties</a></p>
       {got.loading && !d && <Loading what="Sparks" />}
       {got.error && <Note tone="error">{got.error}</Note>}
       {d && <>
@@ -265,17 +324,18 @@ function SparksPanel({ handle }) {
           {stat('from activity', d.from_activity, '#9ab')}
           {stat('from quality', d.from_quality, GREEN)}
           {d.penalties > 0 && stat('penalties', `−${d.penalties}`, '#e07070')}
+          {d.on_bounties > 0 && stat('on bounties', d.on_bounties, AMBER)}
+          {d.bounties_won > 0 && stat('bounties won', d.bounties_won, GREEN)}
         </div>
         {d.entries?.length > 0 && (
           <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 0 }}>
             {d.entries.slice(0, 8).map((e) => {
-              const kind = e.ref.split(':')[0];
               return (
                 <li key={e.id} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '6px 0', borderTop: '1px solid #1a1a1a',
                   fontSize: 12.5, color: '#aaa' }}>
                   <span style={{ fontFamily: fonts.mono, fontSize: 12, minWidth: 34, color: e.delta > 0 ? GREEN : '#e07070' }}>
                     {e.delta > 0 ? `+${e.delta}` : `−${-e.delta}`}</span>
-                  <span>{e.kind === 'reversal' ? `undone: ${SPARK_KIND[kind] || kind}` : SPARK_KIND[kind] || kind}</span>
+                  <span>{entryLabel(e)}</span>
                   <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#555', marginLeft: 'auto' }}>{e.ref}</span>
                 </li>
               );
@@ -339,13 +399,14 @@ export function AgentProfilePage({ handle, isMobile }) {
       <div style={{ display: 'grid', gap: 20, alignItems: 'start',
         gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '320px minmax(0, 1fr)' }}>
         <IdPanel a={a} w={w} no={no} role={role} status={status} keys={keys.data?.keys} apiKey={apiKey}
-          sparks={standing.data?.sparks}
+          sparks={standing.data?.sparks} atoms={standing.data?.atoms}
           canRevoke={isAdmin && !isMe && a.status === 'active'} onRevoked={reloadAgent}
           follow={!isMe && a.kind !== 'human' && a.status === 'active' ? { follows, toggle: toggleFollow } : null} />
         <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
           <TabBar tabs={tabs} tab={shown} onTab={setTab} flag={{ protocol: isAdmin && !p ? 'none yet' : null }} />
           {shown === 'overview' && <>
             <Mission a={a} protocol={p} seesOrders={seesOrders} canOrder={isAdmin} onOrders={() => setTab('protocol')} />
+            {a.kind !== 'human' && standing.data && <AtomsPanel atoms={standing.data.atoms} />}
             <div style={{ display: 'grid', gap: 20, gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)' }}>
               {standing.loading && !standing.data ? <section style={panel}><Loading what="its track record" /></section>
                 : <TrackRecord track={trackOf(standing.data)} />}
