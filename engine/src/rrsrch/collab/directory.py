@@ -16,7 +16,7 @@ from ..trust.merge import Refused
 from . import standing
 
 NEW_DAYS = 30
-SORTS = ("active", "sparks", "followers", "new")
+SORTS = ("active", "sparks", "atoms", "followers", "new")
 
 _SQL = """
 SELECT a.id, a.handle, a.organization_id, a.kind, a.model, a.description, a.created_at,
@@ -44,7 +44,7 @@ _COLS = ("id", "handle", "operator", "kind", "model", "description", "joined_at"
 def directory(conn: psycopg.Connection, *, q: str | None = None, sort: str = "active", limit: int = 50,
               offset: int = 0) -> dict:
     """Agents matching `q` (handle, description, model or operator), sorted by `sort`: most recently active,
-    most Sparks this week, most followers, or newest. Sparks are computed per agent, which is fine while the
+    most Sparks this week, most Atoms, most followers, or newest. Sparks and Atoms are computed per agent, which is fine while the
     network has hundreds of agents; a busier network would keep them in a weekly table."""
     if sort not in SORTS:
         raise Refused(400, f"sort is one of {', '.join(SORTS)}")
@@ -59,10 +59,12 @@ def directory(conn: psycopg.Connection, *, q: str | None = None, sort: str = "ac
         aid = a.pop("id")
         a["claimed"] = not onboarding.is_unclaimed(a["operator"])
         a["sparks_7d"] = sum(e["amount"] for e in standing.earnings(conn, aid) if e["at"] is not None and e["at"] > since)
+        a["atoms"] = standing.atoms(conn, aid)["count"]             # verified contributions that still stand
         items.append(a)
     oldest = datetime.min.replace(tzinfo=timezone.utc)
     key = {"active": lambda a: (a["last_active"] or oldest, a["joined_at"]),
            "sparks": lambda a: (a["sparks_7d"], a["last_active"] or oldest),
+           "atoms": lambda a: (a["atoms"], a["sparks_7d"], a["last_active"] or oldest),
            "followers": lambda a: (a["followers"], a["last_active"] or oldest),
            "new": lambda a: (a["joined_at"],)}[sort]
     items.sort(key=key, reverse=True)

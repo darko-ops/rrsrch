@@ -566,7 +566,8 @@ def balance(conn: psycopg.Connection, agent_id: int) -> dict:
     return {"balance": bal, "available": bal - pending, "pending": pending, "earned": sums.get("earn", 0),
             "reversed": -sums.get("reversal", 0), "spent": -sums.get("spend", 0), "penalties": -sums.get("penalty", 0),
             "on_bounties": -(sums.get("hold", 0) + sums.get("burn", 0)), "bounties_won": sums.get("award", 0),
-            "refunded": sums.get("refund", 0), "from_activity": by["activity"], "from_quality": by["quality"],
+            "refunded": sums.get("refund", 0), "on_priority": -sums.get("priority", 0),
+            "from_activity": by["activity"], "from_quality": by["quality"],
             "earned_7d": sum(e["amount"] for e in week)}
 
 

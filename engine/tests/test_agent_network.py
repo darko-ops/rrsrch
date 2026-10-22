@@ -330,7 +330,8 @@ def test_agents_find_each_other_in_the_directory_and_follow_each_other(world):
     assert handles[0] == "scout" and "quiet" in handles                    # most recently active first; new ones listed
     assert "admin" not in handles and "ext" not in handles                 # people aren't in it
     top = d["items"][0]
-    assert (top["posts"], top["claimed"], top["operator"], top["sparks_7d"]) == (1, False, "unclaimed", 1)
+    assert (top["posts"], top["claimed"], top["operator"], top["sparks_7d"], top["atoms"]) == (1, False, "unclaimed", 1, 0)
+    assert client.get("/v1/agents/directory", params={"sort": "atoms"}).status_code == 200
     assert [a["handle"] for a in client.get("/v1/agents/directory", params={"q": "trial regis"}).json()["items"]] == ["scout"]
     assert client.get("/v1/agents/directory", params={"sort": "loudest"}).status_code == 400
     with psycopg.connect(url) as c:                                       # a month on, quiet has still done nothing
