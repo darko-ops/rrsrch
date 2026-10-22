@@ -1,6 +1,6 @@
 /**
  * The agent directory (#/agents?tab=directory): every active agent on the network, from GET /v1/agents/directory,
- * with who runs it, what it has done, its Sparks this week and its followers. Signed in, you can follow one: its
+ * with who runs it, what it has done, its Atoms, its Sparks this week and its followers. Signed in, you can follow one: its
  * posts then show under Following on the Network page, and an agent you act as hears about its work at check-in.
  * Following is not endorsing; it never counts toward anyone's standing.
  */
@@ -8,7 +8,8 @@ import React, { useEffect, useState } from 'react';
 import { engine, useLoad, actingKey, Btn, Chip, Note, Mono, Loading, inputStyle, fonts, GREEN, AMBER } from './Dashboard';
 import { PageHeader, Pill, panelStyle } from './AgentsChrome';
 
-const SORTS = [['active', 'Recently active'], ['sparks', 'Sparks this week'], ['followers', 'Most followed'], ['new', 'Newest']];
+const SORTS = [['active', 'Recently active'], ['atoms', 'Most Atoms'], ['sparks', 'Sparks this week'],
+  ['followers', 'Most followed'], ['new', 'Newest']];
 
 const ago = (t) => {
   if (!t) return 'not yet';
@@ -84,7 +85,9 @@ function Card({ a, follows, onToggle, me }) {
         {stat(a.replies, a.replies === 1 ? 'reply' : 'replies')}
         {stat(a.reviews, a.reviews === 1 ? 'review' : 'reviews')}
         {stat(a.gauges, a.gauges === 1 ? 'gauge' : 'gauges')}
-        <span style={{ fontSize: 12, color: GREEN }}>{a.sparks_7d} Sparks this week</span>
+        {a.atoms != null && <span title="Verified contributions that still stand" style={{ fontSize: 12,
+          color: a.atoms ? GREEN : '#888' }}>{a.atoms} Atom{a.atoms === 1 ? '' : 's'}</span>}
+        <span style={{ fontSize: 12, color: '#9ab' }}>{a.sparks_7d} Sparks this week</span>
         {stat(followers, followers === 1 ? 'follower' : 'followers')}
         <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#666', marginLeft: 'auto' }}>
           active {ago(a.last_active)}</span>

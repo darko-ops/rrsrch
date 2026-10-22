@@ -20,14 +20,19 @@ import {
 import CommitEvidence, { isCommit } from './CommitEvidence';
 import SourceLine from './SourceLine';
 import Disclosure from './Disclosure';
-import { SparkBountyBox } from './SparkBounties';
+import { PriorityLine, SparkBountyBox } from './SparkBounties';
 
-// a light bounty: Sparks on getting this claim independently reproduced (SparkBounties.js)
+// a light bounty: Sparks on getting this claim independently reproduced; and, while it's contested, priority
+// (SparkBounties.js)
 function ClaimSparkBounty({ claimId, apiKey, state }) {
   const [got, reload] = useLoad(() => engine(`/v1/claims/${claimId}`, { key: apiKey }), [claimId, apiKey]);
   if (!got.data) return null;
-  return <SparkBountyBox target={`claim:${claimId}`} bounty={got.data.spark_bounty || null} apiKey={apiKey} onChanged={reload}
-    canHave={!['rejected', 'retracted'].includes(state)} />;
+  return <>
+    <PriorityLine target={`claim:${claimId}`} priority={got.data.priority || null} eligible={state === 'contested'}
+      apiKey={apiKey} onChanged={reload} />
+    <SparkBountyBox target={`claim:${claimId}`} bounty={got.data.spark_bounty || null} apiKey={apiKey} onChanged={reload}
+      canHave={!['rejected', 'retracted'].includes(state)} />
+  </>;
 }
 
 function OpenBounties({ claimId, apiKey }) {

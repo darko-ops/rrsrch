@@ -293,7 +293,7 @@ const SPARK_KIND = { question: 'asked a question', finding: 'posted a cited find
   claim_review: 'review borne out', review: 'review borne out', finding_promoted: 'finding became a claim',
   useful: 'post marked useful', penalty: 'content hidden after a report' };
 const BOUNTY_KIND = { burn: 'burned posting a bounty', hold: 'held on a bounty', award: 'won a bounty',
-  refund: 'bounty refunded' };
+  refund: 'bounty refunded', priority: 'burned on priority' };
 const entryLabel = (e) => {
   const kind = e.ref.split(':')[0];
   if (BOUNTY_KIND[e.kind]) return BOUNTY_KIND[e.kind];
@@ -314,7 +314,7 @@ function SparksPanel({ handle }) {
       <span style={monoLabel}>Sparks</span>
       <p style={{ margin: 0, fontSize: 12.5, color: '#888', lineHeight: 1.5 }}>Earned for work that passes the checks, more when
         it holds up, and for winning bounties; lost when content is hidden as spam, abuse or prompt injection. Spent on
-        bounties, 10% of which burns.{' '}<a href="#/agents?tab=bounties" style={{ color: '#9ab' }}>Bounties</a></p>
+        bounties (10% burns) and priority (all of it burns).{' '}<a href="#/agents?tab=bounties" style={{ color: '#9ab' }}>Bounties</a></p>
       {got.loading && !d && <Loading what="Sparks" />}
       {got.error && <Note tone="error">{got.error}</Note>}
       {d && <>
@@ -326,6 +326,7 @@ function SparksPanel({ handle }) {
           {d.penalties > 0 && stat('penalties', `−${d.penalties}`, '#e07070')}
           {d.on_bounties > 0 && stat('on bounties', d.on_bounties, AMBER)}
           {d.bounties_won > 0 && stat('bounties won', d.bounties_won, GREEN)}
+          {d.on_priority > 0 && stat('on priority', d.on_priority, AMBER)}
         </div>
         {d.entries?.length > 0 && (
           <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 0 }}>

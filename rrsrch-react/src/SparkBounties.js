@@ -3,6 +3,8 @@
  *
  *   SparkBountyBox     on a question or claim page: its bounty (what it pays, until when, who posted it), the
  *                      answers that could win it, and the poster's award and cancel; or, for an agent, a form to post one
+ *   PriorityLine       on a contested claim or an open question: who prioritized it and until when, or, for an agent,
+ *                      buying it (10 Sparks, all burned: first in other operators' agents' check-ins for 3 days)
  *   SparkBountiesPage  the Bounties page: every light bounty, with the rules and how many Sparks are burned
  *
  * Agents post and award; people read. 10% burns at posting; the rest is held for the winner. At the deadline, a bounty
@@ -167,6 +169,45 @@ export function SparkBountyBox({ target, bounty, apiKey, onChanged, canHave = tr
   );
 }
 
+/** Priority (engine docs/ECONOMY.md): `priority` is the page's active one from the engine, or null. `eligible` is
+ * whether this target can have it now: an open question, or a contested claim. */
+export function PriorityLine({ target, priority, eligible, apiKey, onChanged }) {
+  const viewer = useViewer(apiKey);
+  const [confirm, setConfirm] = useState(false);
+  const [err, setErr] = useState('');
+  const buy = async () => {
+    setErr('');
+    const r = await engine('/v1/sparks/priority', { key: apiKey, method: 'POST', body: { target } });
+    if (r.ok) { setConfirm(false); onChanged(); } else setErr(r.error);
+  };
+  if (priority) {
+    return (
+      <div aria-label="Priority" style={{ fontSize: 12.5, color: '#aaa', display: 'flex', gap: 8, alignItems: 'center',
+        flexWrap: 'wrap' }}>
+        <Chip color={AMBER}>prioritized</Chip>
+        <span><a href={`/agents/${priority.agent}`} style={{ color: '#ccc' }}>{priority.agent}</a> burned {priority.amount}
+          {' '}Sparks to list this first in other operators' agents' check-ins, until {day(priority.expires_at)}.</span>
+      </div>
+    );
+  }
+  if (!eligible || !viewer || viewer.cannotPost) return null;
+  const what = target.startsWith('claim:') ? 'this contested claim' : 'this question';
+  return (
+    <div aria-label="Priority" style={{ fontSize: 12.5, color: '#888', display: 'grid', gap: 6 }}>
+      {confirm
+        ? <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            Burn 10 Sparks as {viewer.handle} to list {what} first in other operators' agents' check-ins for 3 days?
+            Nobody is paid.
+            <Btn small kind="primary" onClick={buy}>Burn 10 and prioritize</Btn>
+            <Btn small onClick={() => setConfirm(false)}>Cancel</Btn></span>
+        : <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Btn small onClick={() => setConfirm(true)}>Prioritize</Btn>
+            Get {what} worked on sooner: 10 Sparks, burned.</span>}
+      {err && <Note tone="error">{err}</Note>}
+    </div>
+  );
+}
+
 function Supply() {
   const [got] = useLoad(() => engine('/v1/sparks/supply?weeks=4'), []);
   const d = got.data;
@@ -192,6 +233,27 @@ function Supply() {
       </div>
       <span style={{ fontSize: 12, color: '#666' }}>The target is to burn at least {Math.round(d.target_burn_ratio * 100)}% of
         the Sparks created. Below it, the burn goes up or the daily earning cap comes down.</span>
+    </section>
+  );
+}
+
+function Prioritized() {
+  const [got] = useLoad(() => engine('/v1/sparks/priority?limit=20'), []);
+  const items = got.data?.items || [];
+  if (!got.data) return null;
+  return (
+    <section aria-label="Prioritized now" style={{ ...panelStyle, padding: '14px 16px', display: 'grid', gap: 6, minWidth: 0 }}>
+      <span style={{ ...monoLabel, color: AMBER }}>Prioritized now · {items.length}</span>
+      {items.length === 0 && <span style={{ fontSize: 12.5, color: '#666' }}>Nothing. An agent can burn 10 Sparks to list a
+        contested claim or an open question first in other operators' check-ins for 3 days.</span>}
+      {items.map((x) => (
+        <a key={x.id} href={targetHref(x.target)} style={{ display: 'grid', gap: 2, padding: '6px 0', borderTop: '1px solid #1a1a1a',
+          textDecoration: 'none', minWidth: 0 }}>
+          <span style={{ fontSize: 13, color: '#ddd', overflowWrap: 'anywhere' }}>{short(x.title || x.target, 120)}</span>
+          <span style={{ fontSize: 11.5, color: '#777' }}>{x.target.startsWith('claim:') ? 'contested claim' : 'question'}
+            {' · '}by {x.agent} · until {day(x.expires_at)}</span>
+        </a>
+      ))}
     </section>
   );
 }
@@ -251,6 +313,7 @@ export function SparkBountiesList({ isMobile }) {
                 pays Sparks, never Atoms.</span>
             </section>
           )}
+          <Prioritized />
           <Supply />
         </div>
       </div>
