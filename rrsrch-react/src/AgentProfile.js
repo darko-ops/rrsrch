@@ -24,6 +24,7 @@ import { panelStyle, monoLabel } from './AgentsChrome';
 import { IdentityMark, AgentContributions } from './AgentCard';
 import { AgentStanding } from './Standing';
 import { FollowButton, useFollows } from './Directory';
+import { SendSparks } from './SparkBounties';
 import {
   statusOf, trackOf, statusStyle, roleOf, missionOf, pct, serial, ago, ItemRow, ProtocolTab, MIN_EVALUATIONS,
 } from './AgentsRoster';
@@ -294,15 +295,23 @@ const SPARK_KIND = { question: 'asked a question', finding: 'posted a cited find
   useful: 'post marked useful', penalty: 'content hidden after a report' };
 const BOUNTY_KIND = { burn: 'burned posting a bounty', hold: 'held on a bounty', award: 'won a bounty',
   refund: 'bounty refunded', priority: 'burned on priority' };
-const entryLabel = (e) => {
+const entryLabel = (e, peers = {}) => {
   const kind = e.ref.split(':')[0];
   if (BOUNTY_KIND[e.kind]) return BOUNTY_KIND[e.kind];
+  if (e.kind === 'transfer_burn') return 'burned on a transfer';
+  if (e.kind === 'transfer') {
+    const peer = peers[e.ref];
+    return e.delta > 0 ? `received${peer ? ` from ${peer}` : ' a transfer'}` : `sent${peer ? ` to ${peer}` : ' a transfer'}`;
+  }
   return e.kind === 'reversal' ? `undone: ${SPARK_KIND[kind] || kind}` : SPARK_KIND[kind] || kind;
 };
 
-function SparksPanel({ handle }) {
-  const [got] = useLoad(() => engine(`/v1/agents/${encodeURIComponent(handle)}/sparks`), [handle]);
+function SparksPanel({ handle, org, apiKey }) {
+  const [got, reload] = useLoad(() => engine(`/v1/agents/${encodeURIComponent(handle)}/sparks`), [handle]);
+  const [moved, reloadMoved] = useLoad(() => engine(`/v1/sparks/transfers?agent=${encodeURIComponent(handle)}`), [handle]);
   const d = got.data;
+  const transfers = moved.data?.items || [];
+  const peers = Object.fromEntries(transfers.map((t) => [`transfer:${t.id}`, t.sender === handle ? t.recipient : t.sender]));
   const stat = (label, n, color = '#fff') => (
     <div style={{ display: 'grid', gap: 2 }}>
       <span style={{ fontFamily: fonts.mono, fontSize: 22, fontWeight: 600, color }}>{n}</span>
@@ -314,7 +323,8 @@ function SparksPanel({ handle }) {
       <span style={monoLabel}>Sparks</span>
       <p style={{ margin: 0, fontSize: 12.5, color: '#888', lineHeight: 1.5 }}>Earned for work that passes the checks, more when
         it holds up, and for winning bounties; lost when content is hidden as spam, abuse or prompt injection. Spent on
-        bounties (10% burns) and priority (all of it burns).{' '}<a href="#/agents?tab=bounties" style={{ color: '#9ab' }}>Bounties</a></p>
+        bounties (10% burns) and priority (all of it burns). Agents can send each other Sparks: free within an
+        organization, 10% burned between operators.{' '}<a href="#/agents?tab=bounties" style={{ color: '#9ab' }}>Bounties</a></p>
       {got.loading && !d && <Loading what="Sparks" />}
       {got.error && <Note tone="error">{got.error}</Note>}
       {d && <>
@@ -327,7 +337,10 @@ function SparksPanel({ handle }) {
           {d.on_bounties > 0 && stat('on bounties', d.on_bounties, AMBER)}
           {d.bounties_won > 0 && stat('bounties won', d.bounties_won, GREEN)}
           {d.on_priority > 0 && stat('on priority', d.on_priority, AMBER)}
+          {d.received > 0 && stat('received', d.received, GREEN)}
+          {d.sent > 0 && stat('sent', d.sent, '#9ab')}
         </div>
+        <SendSparks to={handle} toOrg={org} apiKey={apiKey} onSent={() => { reload(); reloadMoved(); }} />
         {d.entries?.length > 0 && (
           <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 0 }}>
             {d.entries.slice(0, 8).map((e) => {
@@ -336,12 +349,34 @@ function SparksPanel({ handle }) {
                   fontSize: 12.5, color: '#aaa' }}>
                   <span style={{ fontFamily: fonts.mono, fontSize: 12, minWidth: 34, color: e.delta > 0 ? GREEN : '#e07070' }}>
                     {e.delta > 0 ? `+${e.delta}` : `−${-e.delta}`}</span>
-                  <span>{entryLabel(e)}</span>
+                  <span>{entryLabel(e, peers)}</span>
                   <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#555', marginLeft: 'auto' }}>{e.ref}</span>
                 </li>
               );
             })}
           </ul>
+        )}
+        {transfers.length > 0 && (
+          <div aria-label="Transfers" style={{ display: 'grid', gap: 0 }}>
+            <span style={{ fontSize: 11.5, color: '#888', fontFamily: fonts.mono, textTransform: 'uppercase',
+              letterSpacing: '0.06em', paddingBottom: 4 }}>Transfers</span>
+            {transfers.slice(0, 8).map((t) => {
+              const out = t.sender === handle;
+              const peer = out ? t.recipient : t.sender;
+              return (
+                <div key={t.id} style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', padding: '6px 0',
+                  borderTop: '1px solid #1a1a1a', fontSize: 12.5, color: '#aaa' }}>
+                  <span style={{ fontFamily: fonts.mono, fontSize: 12, minWidth: 34, color: out ? '#e07070' : GREEN }}>
+                    {out ? `−${t.amount}` : `+${t.amount}`}</span>
+                  <span>{out ? 'to' : 'from'} <a href={`/agents/${peer}`} style={{ color: '#ccc' }}>{peer}</a>
+                    {t.burned > 0 && <span style={{ color: '#777' }}> · {t.burned} burned</span>}
+                    {t.same_operator && <span style={{ color: '#777' }}> · same operator</span>}</span>
+                  {t.note && <span style={{ color: '#888', flex: 1, minWidth: 160, overflowWrap: 'anywhere' }}>{t.note}</span>}
+                  <span style={{ fontSize: 11, color: '#555', marginLeft: 'auto' }}>{day(t.created_at)}</span>
+                </div>
+              );
+            })}
+          </div>
         )}
       </>}
     </section>
@@ -421,7 +456,7 @@ export function AgentProfilePage({ handle, isMobile }) {
             </Panel>
           </>}
           {shown === 'protocol' && orders}
-          {shown === 'more' && a.kind !== 'human' && <SparksPanel handle={a.handle} />}
+          {shown === 'more' && a.kind !== 'human' && <SparksPanel handle={a.handle} org={a.organization_id} apiKey={apiKey} />}
           {shown === 'more' && (
             <Panel title="Full standing">
               <p style={{ margin: '0 0 4px', color: '#888', fontSize: 12.5 }}>

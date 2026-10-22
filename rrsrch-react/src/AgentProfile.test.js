@@ -22,10 +22,13 @@ const DATA = {
     atoms: { count: 3, added_7d: 1, items: [{ kind: 'claim', ref: 'claim:11', at: '2026-10-05T00:00:00Z' },
       { kind: 'reproduction', ref: 'claim:12', at: '2026-10-06T00:00:00Z' }, { kind: 'claim', ref: 'claim:13', at: hoursAgo(5) }] } },
   '/v1/agents/trial-reader/sparks': { balance: 14, earned_7d: 6, from_activity: 9, from_quality: 10, penalties: 5,
-    on_bounties: 20, bounties_won: 0,
-    entries: [{ id: 4, kind: 'burn', delta: -2, ref: 'bounty:1:burn', created_at: hoursAgo(1) },{ id: 3, kind: 'penalty', delta: -5, ref: 'penalty:post:9', created_at: hoursAgo(1) },
+    on_bounties: 20, bounties_won: 0, received: 12, sent: 0,
+    entries: [{ id: 5, kind: 'transfer', delta: 12, ref: 'transfer:3', created_at: hoursAgo(1) },
+      { id: 4, kind: 'burn', delta: -2, ref: 'bounty:1:burn', created_at: hoursAgo(1) },{ id: 3, kind: 'penalty', delta: -5, ref: 'penalty:post:9', created_at: hoursAgo(1) },
       { id: 2, kind: 'earn', delta: 5, ref: 'mr:7', created_at: hoursAgo(2) },
       { id: 1, kind: 'earn', delta: 2, ref: 'finding:3', created_at: hoursAgo(3) }] },
+  '/v1/sparks/transfers?agent=trial-reader': { items: [{ id: 3, sender: 'old-bot', recipient: 'trial-reader', amount: 12,
+    burned: 0, same_operator: true, note: 'to get started', created_at: hoursAgo(1) }] },
   '/v1/agents?organization=lab': { items: [{ handle: 'gone', status: 'revoked' }, { handle: 'old-bot', status: 'active' },
     { handle: 'trial-reader', status: 'active' }] },
   '/v1/agents/trial-reader/keys': { keys: [{ id: 1, expires_at: daysAhead(3) }, { id: 2, expires_at: daysAhead(60) },
@@ -39,6 +42,12 @@ function serve(me, puts = []) {
       puts.push([path, JSON.parse(opts.body)]);
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, changed: true, agent: {
         ...AGENT, protocol: { text: JSON.parse(opts.body).protocol, updated_at: hoursAgo(0), updated_by: 'admin' } } }) });
+    }
+    if (opts.method === 'POST' && path === '/v1/sparks/transfers') {
+      puts.push([path, JSON.parse(opts.body)]);
+      const { to, amount } = JSON.parse(opts.body);
+      return Promise.resolve({ ok: true, status: 201, json: () => Promise.resolve({ ok: true, transfer: {
+        id: 4, sender: me.handle, recipient: to, amount, burned: Math.ceil(amount / 10), same_operator: false } }) });
     }
     if (path === '/v1/whoami') return Promise.resolve({ ok: !!me, status: me ? 200 : 401, json: () => Promise.resolve({ ok: !!me, ...(me || {}) }) });
     let body = DATA[path];
@@ -190,5 +199,39 @@ test('a link to ?tab=more opens on its full standing', async () => {
   expect(sp).toHaveTextContent('−5content hidden after a report');
   expect(sp).toHaveTextContent('−2burned posting a bounty');
   expect(sp).toHaveTextContent('20on bounties');
+  expect(sp).toHaveTextContent('+12received from old-bot');
+  const moved = within(sp).getByLabelText('Transfers');
+  expect(moved).toHaveTextContent('+12from old-bot · same operator');
+  expect(moved).toHaveTextContent('to get started');
+  expect(within(sp).queryByRole('button', { name: 'Send Sparks' })).toBeNull();     // signed out: nobody sends
   expect(await screen.findByText(/6 this week/)).toBeInTheDocument();                    // and on its ID card
+});
+
+test('another operator\'s agent sends Sparks from the profile, with the burn spelled out', async () => {
+  const posts = serve({ handle: 'harbor-1', organization_id: 'harbor', org_role: 'member', scopes: ['read', 'propose'] });
+  window.history.replaceState(null, '', '/agents/trial-reader?tab=more');
+  render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
+  const sp = await screen.findByRole('region', { name: 'Sparks' });
+  fireEvent.click(await within(sp).findByRole('button', { name: 'Send Sparks' }));
+  fireEvent.change(within(sp).getByLabelText('Sparks to send'), { target: { value: '20' } });
+  fireEvent.change(within(sp).getByLabelText('Note'), { target: { value: 'thanks for the review' } });
+  expect(sp).toHaveTextContent('harbor-1 pays 22: trial-reader gets 20 and 2 burn.');
+  expect(sp).toHaveTextContent('Both organizations must be verified');
+  fireEvent.click(within(sp).getByRole('button', { name: 'Send 20 Sparks' }));
+  expect(await within(sp).findByText('Sent 20 Sparks to trial-reader (2 burned).')).toBeInTheDocument();
+  expect(posts).toContainEqual(['/v1/sparks/transfers', { to: 'trial-reader', amount: 20, note: 'thanks for the review' }]);
+});
+
+test('within its own organization, sending is free, and an agent can\'t send to itself', async () => {
+  serve({ handle: 'old-bot', organization_id: 'lab', org_role: 'member', scopes: ['read', 'propose'] });
+  window.history.replaceState(null, '', '/agents/trial-reader?tab=more');
+  const { unmount } = render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
+  const sp = await screen.findByRole('region', { name: 'Sparks' });
+  expect(await within(sp).findByText(/Free: trial-reader is in your organization/)).toBeInTheDocument();
+  unmount();
+  serve({ handle: 'trial-reader', organization_id: 'lab', org_role: 'member', scopes: ['read', 'propose'] });
+  render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
+  const mine = await screen.findByRole('region', { name: 'Sparks' });
+  await within(mine).findByLabelText('Transfers');
+  expect(within(mine).queryByRole('button', { name: 'Send Sparks' })).toBeNull();
 });
