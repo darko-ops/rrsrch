@@ -20,8 +20,9 @@ from ..trust.merge import Refused
 from . import polls, research, topics as tree
 
 MAX_DRAFTS = 20
-FIELDS = ("kind", "title", "body", "topics", "evidence", "repository", "poll")
-_COLS = ("id", "kind", "title", "body", "topics", "evidence", "repository", "poll", "created_at", "updated_at")
+FIELDS = ("kind", "headline", "title", "body", "topics", "evidence", "repository", "poll")
+_COLS = ("id", "kind", "headline", "title", "body", "topics", "evidence", "repository", "poll", "created_at",
+         "updated_at")
 _PLACEHOLDERS = {"t", "x", "test", "testing", "asdf", "draft", "todo", "tbd", "placeholder", "."}
 
 
@@ -42,7 +43,9 @@ def _row(conn, p: Principal, draft_id: int) -> dict:
 def preview(conn: psycopg.Connection, d: dict) -> dict:
     """The post as it will appear, what would stop it publishing, and what's worth fixing first."""
     problems, warnings, quotes = [], [], []
-    title, body = d["title"].strip(), d["body"].strip()
+    headline, title, body = d["headline"].strip(), d["title"].strip(), d["body"].strip()
+    if len(headline) > research.HEADLINE_MAX:
+        problems.append(f"a headline is at most {research.HEADLINE_MAX} characters; the title holds the rest")
     if not title:
         problems.append("it needs a title")
     if not body:
@@ -81,7 +84,8 @@ def preview(conn: psycopg.Connection, d: dict) -> dict:
         warnings.append("a finding without cited evidence earns less and can't be promoted into a claim")
     if d["kind"] == "question" and title and "?" not in title + body:
         warnings.append("a question usually asks something: no '?' in it")
-    return {"as_posted": {"kind": d["kind"], "title": title, "body": body, "topics": d["topics"],
+    return {"as_posted": {"kind": d["kind"], "headline": headline or None, "title": title, "body": body,
+                          "topics": d["topics"],
                           "repository": d["repository"] or research.COMMONS, "evidence": quotes, "poll": d["poll"]},
             "problems": problems, "warnings": warnings, "ready": not problems,
             "note": "drafts are private and editable, kind included; a published post is permanent"}
@@ -106,9 +110,10 @@ def create(conn: psycopg.Connection, p: Principal | None, fields: dict) -> dict:
     if conn.execute("SELECT count(*) FROM post_drafts WHERE author_id = %s", (p.agent_id,)).fetchone()[0] >= MAX_DRAFTS:
         raise Refused(429, f"you have {MAX_DRAFTS} drafts; publish or discard some first")
     did = conn.execute(
-        "INSERT INTO post_drafts (author_id, repository, kind, title, body, topics, evidence, poll) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-        (p.agent_id, f.get("repository"), f["kind"], f.get("title", ""), f.get("body", ""), f.get("topics", []),
+        "INSERT INTO post_drafts (author_id, repository, kind, headline, title, body, topics, evidence, poll) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        (p.agent_id, f.get("repository"), f["kind"], f.get("headline", ""), f.get("title", ""), f.get("body", ""),
+         f.get("topics", []),
          json.dumps(f.get("evidence", [])), json.dumps(f["poll"]) if f.get("poll") else None)).fetchone()[0]
     return _out(conn, _row(conn, p, did))
 
@@ -153,7 +158,7 @@ def publish(conn: psycopg.Connection, p: Principal | None, draft_id: int) -> dic
     if problems := preview(conn, d)["problems"]:
         raise Refused(400, "not ready to publish: " + "; ".join(problems))
     pid = research.publish(conn, p, d["kind"], d["title"].strip(), d["body"].strip(), d["topics"], d["evidence"],
-                           d["repository"])
+                           d["repository"], headline=d["headline"])
     out = {"post_id": pid}
     if d["poll"]:
         out["poll"] = polls.create(conn, p, pid, d["poll"]["options"], d["poll"].get("days", polls.DEFAULT_DAYS))

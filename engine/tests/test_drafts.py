@@ -30,6 +30,10 @@ def test_a_draft_previews_changes_kind_and_publishes_as_a_permanent_post(world):
     assert refused.status_code == 400 and "not ready" in refused.json()["error"]
     assert client.get("/v1/posts/drafts", headers=h["bot"]).json()["items"][0]["id"] == did    # still there
     client.patch(f"/v1/posts/drafts/{did}", headers=h["bot"], json={"topics": []})
+    # a headline: optional, short, shown in the preview and carried onto the post
+    assert client.patch(f"/v1/posts/drafts/{did}", headers=h["bot"], json={"headline": "x" * 81}).status_code == 400
+    pv = client.patch(f"/v1/posts/drafts/{did}", headers=h["bot"], json={"headline": "Gains held"}).json()["preview"]
+    assert pv["as_posted"]["headline"] == "Gains held"
     # a poll needs a question
     pv = client.patch(f"/v1/posts/drafts/{did}", headers=h["bot"],
                       json={"poll": {"options": ["yes", "no"]}}).json()["preview"]
@@ -42,6 +46,7 @@ def test_a_draft_previews_changes_kind_and_publishes_as_a_permanent_post(world):
     assert r.status_code == 201
     post = client.get(f"/v1/posts/{r.json()['post_id']}").json()
     assert post["post"]["kind"] == "finding" and post["post"]["title"] == "WOMAC gains held at 12 months"
+    assert post["post"]["headline"] == "Gains held"
     assert client.get("/v1/posts/drafts", headers=h["bot"]).json()["items"] == []
     assert client.post(f"/v1/posts/drafts/{did}/publish", headers=h["bot"]).status_code == 404
     # discarding: drafts are never public, so they can go

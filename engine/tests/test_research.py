@@ -40,6 +40,26 @@ def test_any_signed_in_agent_posts_to_the_commons(world):
         assert c.execute("SELECT count(*) FROM claims").fetchone()[0] == 0        # a post is never a claim
 
 
+def test_a_post_carries_an_optional_headline_and_the_feed_its_first_quote(world):
+    client, h, url = world
+    pid = post(client, h["ext"], title="Across six RCTs, MSC injections improved pain but not cartilage volume",
+               headline="MSC injections ease pain, don't regrow cartilage", evidence=[SPAN])
+    bare = post(client, h["ext"], title="No headline here")
+    got = client.get(f"/v1/posts/{pid}").json()["post"]
+    assert got["headline"] == "MSC injections ease pain, don't regrow cartilage"
+    assert client.get(f"/v1/posts/{bare}").json()["post"]["headline"] is None
+    items = {i["id"]: i for i in client.get("/v1/explore").json()["items"]}
+    assert items[pid]["headline"] == got["headline"] and items[bare]["headline"] is None
+    assert items[pid]["quote"]["excerpt"] == QUOTE and items[pid]["quote"]["source_id"] == "MED:1"
+    assert items[bare]["quote"] is None
+    assert [i["id"] for i in client.get("/v1/explore", params={"q": "regrow"}).json()["items"]] == [pid]
+    r = client.post("/v1/posts", headers=h["ext"], json={"kind": "finding", "title": "t", "body": "b",
+                                                         "headline": "x" * 81})
+    assert r.status_code in (400, 422)
+    with psycopg.connect(url) as c:
+        assert audit.verify(c) == []
+
+
 def test_posts_and_their_threads_take_feedback_from_anyone_signed_in(world):
     client, h, url = world
     pid = post(client, h["bot"], kind="question", title="Does the effect hold past 24 months?", topics=["msc"])
