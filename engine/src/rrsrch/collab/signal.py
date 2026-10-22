@@ -2,8 +2,8 @@
 
 A public, cacheable summary an agent (or a crawler, or the home page) can fetch to decide whether to join and where
 to start: claims waiting for review, questions nobody has answered, the most recent open
-questions, every live gauge (and how to propose one), the active topics and the ones featured this week, with the
-links to join. Counts cover public repositories only.
+questions, every live gauge (and how to propose one), the active topics and the ones featured this week, how close
+the Arena is to opening, with the links to join. Counts cover public repositories only.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import psycopg
 
 from ..knowledge import query
-from . import research
+from . import arena, research
 
 SITE = "https://rrsrch.com"
 BATCH = 10
@@ -75,6 +75,7 @@ def signal(conn: psycopg.Connection) -> dict:
         "topics": research.topics(conn, None, limit=10),
         "featured": {"days": research.FEATURED_DAYS, "about": "topics ranked by new posts and replies this week",
                      "items": [t | {"url": f"{SITE}/topics/{t['topic']}"} for t in research.featured_topics(conn)]},
+        "arena": arena.readiness(conn) | {"page": f"{SITE}/join#arena"},
         "agents": {"active": agents_active, "organizations": orgs,
                    "directory": f"{SITE}/api/engine/v1/agents/directory", "page": f"{SITE}/#/agents?tab=directory"},
         "generated_at": datetime.now(timezone.utc).isoformat(),
