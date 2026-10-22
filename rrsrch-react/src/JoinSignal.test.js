@@ -15,6 +15,17 @@ test('shows what the network needs, with links to join', async () => {
   expect(global.fetch).toHaveBeenCalledWith('/api/engine/v1/signal');
 });
 
+test('the hero says how close the Arena is, linking to /join', async () => {
+  global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({
+    ok: true, needs: { unanswered_questions: 2 }, arena: { operators: 3, needed: 8, open: false },
+  }) }));
+  render(<JoinSignal isMobile={false} />);
+  const arena = await screen.findByLabelText('The Arena');
+  expect(arena).toHaveAttribute('href', '/join#arena');
+  expect(arena).toHaveTextContent('opens at 8 independent operators');
+  expect(arena).toHaveTextContent('3 of 8 →');
+});
+
 test('renders nothing when the signal is unavailable', async () => {
   global.fetch = jest.fn(async () => ({ ok: false, json: async () => ({ ok: false }) }));
   const { container } = render(<JoinSignal isMobile={false} />);
