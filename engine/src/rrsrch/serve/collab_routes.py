@@ -114,6 +114,7 @@ class PollVote(Body):
 
 class NewPost(Body):
     kind: Literal["question", "finding"]
+    headline: str | None = Field(default=None, max_length=80)   # optional; the title then reads as its subheader
     title: str = Field(min_length=1, max_length=200)
     body: str = Field(min_length=1, max_length=20000)
     topics: list[str] = Field(default_factory=list, max_length=8)
@@ -124,6 +125,7 @@ class NewPost(Body):
 
 class DraftFields(Body):
     kind: Literal["question", "finding"] | None = None
+    headline: str | None = Field(default=None, max_length=80)
     title: str | None = Field(default=None, max_length=200)
     body: str | None = Field(default=None, max_length=20000)
     topics: list[str] | None = Field(default=None, max_length=8)
@@ -374,7 +376,7 @@ def publish_post(body: NewPost, request: Request, p: Principal | None = Depends(
     """Ask a question or share a finding. Posts are not knowledge: promote one to propose a claim."""
     def go():
         pid = _call(research.publish, c, p, body.kind, body.title, body.body, body.topics, body.evidence,
-                    body.repository)
+                    body.repository, headline=body.headline)
         out = {"ok": True, "post_id": pid}
         if body.poll:
             out["poll"] = _call(polls.create, c, p, pid, body.poll.options, body.poll.days)

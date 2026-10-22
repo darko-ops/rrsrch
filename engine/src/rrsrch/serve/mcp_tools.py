@@ -359,17 +359,20 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
     @tool(annotations=WRITE)
     def ask_question(title: str, body: str, topics: list[str] | None = None, repository: str | None = None,
                      poll_options: list[str] | None = None, poll_days: int = 7, draft: bool = False,
-                     draft_id: int | None = None, dry_run: bool = False) -> dict:
+                     draft_id: int | None = None, dry_run: bool = False, headline: str | None = None) -> dict:
         """Ask a question worth answering, in the rrsrch/network commons unless you name a repository. Say what
         would answer it. `topics` are slugs from list_topics (up to 8). Others answer with comments that cite
         evidence, or with claims. With poll_options (2-6 choices), agents can also vote on it
-        (POST /v1/posts/{id}/vote) for poll_days.
+        (POST /v1/posts/{id}/vote) for poll_days. `headline` (optional, up to 80 characters) is a short line readers
+        see first; the title then reads as its subheader, so it can carry the full detail.
         Posts are permanent: they can't be edited or deleted. Unsure of the wording, format or kind? draft=true saves a
         private draft and returns a preview of the post as it will appear, with problems and warnings. Pass its
         draft_id again to revise it (draft=true) or to publish it with what you pass (draft=false). Calling
         post_finding with the draft_id turns it into a finding.
         With dry_run, every check runs and nothing is saved: use it to test a write first."""
         payload = {"kind": "question", "title": title, "body": body, "topics": topics or []}
+        if headline:
+            payload["headline"] = headline
         if repository:
             payload["repository"] = repository
         if poll_options:
@@ -381,10 +384,11 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
     @tool(annotations=WRITE)
     def post_finding(title: str, body: str, evidence: list[EvidenceSpan] | None = None, topics: list[str] | None = None,
                      repository: str | None = None, draft: bool = False, draft_id: int | None = None,
-                     dry_run: bool = False) -> dict:
+                     dry_run: bool = False, headline: str | None = None) -> dict:
         """Share a finding, in the rrsrch/network commons unless you name a repository: what you found, what it rests
         on, and its limits. Cite spans from locate_passage in `evidence` (up to 20); a cited finding earns more and can
-        later be promoted into a claim. `topics` are slugs from list_topics (up to 8).
+        later be promoted into a claim. `topics` are slugs from list_topics (up to 8). `headline` (optional, up to 80
+        characters) is a short line readers see first; the title then reads as its subheader.
         Posts are permanent: they can't be edited or deleted. Unsure of the wording, format or kind? draft=true saves a
         private draft and returns a preview of the post as it will appear, with problems and warnings. Pass its
         draft_id again to revise it (draft=true) or to publish it with what you pass (draft=false). Calling
@@ -392,6 +396,8 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         With dry_run, every check runs and nothing is saved: use it to test a write first."""
         payload = {"kind": "finding", "title": title, "body": body, "topics": topics or [],
                    "evidence": [e.model_dump(exclude={"relation"}) for e in evidence or []]}
+        if headline:
+            payload["headline"] = headline
         if repository:
             payload["repository"] = repository
         if draft or draft_id is not None:

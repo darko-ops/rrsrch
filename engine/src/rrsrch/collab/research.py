@@ -31,10 +31,11 @@ KINDS = ("question", "finding")
 TOPIC = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 POSTS_PER_HOUR = 10
 POSTS_PER_HOUR_UNCLAIMED = 3
-COLS = ("id", "repository", "author", "author_kind", "kind", "title", "body", "topics", "evidence", "status",
-        "promoted_mr_id", "content_hash", "created_at", "updated_at", "moderation")
-_SELECT = ("SELECT p.id, r.slug, a.handle, a.kind, p.kind, p.title, p.body, p.topics, p.evidence, p.status, "
-           "p.promoted_mr_id, p.content_hash, p.created_at, p.updated_at, p.moderation FROM research_posts p "
+HEADLINE_MAX = 80
+COLS = ("id", "repository", "author", "author_kind", "kind", "headline", "title", "body", "topics", "evidence",
+        "status", "promoted_mr_id", "content_hash", "created_at", "updated_at", "moderation")
+_SELECT = ("SELECT p.id, r.slug, a.handle, a.kind, p.kind, p.headline, p.title, p.body, p.topics, p.evidence, "
+           "p.status, p.promoted_mr_id, p.content_hash, p.created_at, p.updated_at, p.moderation FROM research_posts p "
            "JOIN repositories r ON r.id = p.repository_id JOIN agents a ON a.id = p.author_id")
 
 
@@ -62,9 +63,10 @@ def _evidence(conn, spans: list[dict]) -> list[dict]:
 
 def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str, body: str,
             topics: list[str] | None = None, evidence: list[dict] | None = None, repository: str | None = None,
-            *, rate_limited: bool = True) -> int:
-    """Publish a post. `rate_limited=False` is for a question asked by opening a bounty, which the bounty limit
-    already bounds."""
+            *, headline: str | None = None, rate_limited: bool = True) -> int:
+    """Publish a post. `headline` is an optional short line above the title (up to HEADLINE_MAX characters); with
+    one, the title reads as its subheader. `rate_limited=False` is for a question asked by opening a bounty, which
+    the bounty limit already bounds."""
     repo = ids.get_repo(conn, repository or COMMONS)
     if repo is None:
         raise Refused(404, "not found")
@@ -76,15 +78,18 @@ def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str
                          "AND created_at > now() - interval '1 hour'", (p.agent_id,),
                    POSTS_PER_HOUR_UNCLAIMED if onboarding.is_unvetted(p.organization_id) else POSTS_PER_HOUR,
                    "posts in the last hour")
+    headline = (headline or "").strip() or None
+    if headline and len(headline) > HEADLINE_MAX:
+        raise Refused(400, f"a headline is at most {HEADLINE_MAX} characters; the title holds the rest")
     tops, spans = _topics(topics or []), _evidence(conn, evidence or [])
     if missing := tree.known(conn, tops):
         raise Refused(400, f"not in the topic tree: {', '.join(missing)}. Posts are filed under existing topics: "
                            "GET /v1/topics to find one, or ask an organization admin to add a sub-topic")
-    digest = canonical.digest({"author": p.handle, "kind": kind, "title": title, "body": body, "topics": tops,
-                               "evidence": spans})
-    pid = conn.execute("INSERT INTO research_posts (repository_id, author_id, kind, title, body, topics, evidence, "
-                       "content_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                       (repo.id, p.agent_id, kind, title, body, tops, json.dumps(spans), digest)).fetchone()[0]
+    hashed = {"author": p.handle, "kind": kind, "title": title, "body": body, "topics": tops, "evidence": spans}
+    digest = canonical.digest(hashed | ({"headline": headline} if headline else {}))   # older hashes stay valid
+    pid = conn.execute("INSERT INTO research_posts (repository_id, author_id, kind, headline, title, body, topics, "
+                       "evidence, content_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                       (repo.id, p.agent_id, kind, headline, title, body, tops, json.dumps(spans), digest)).fetchone()[0]
     conn.execute("INSERT INTO subscriptions (agent_id, target) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                  (p.agent_id, f"post:{pid}"))                 # authors follow their own posts
     notify = sorted({h for _, h in discussions.mentioned(conn, body)} - {p.handle})
@@ -111,7 +116,7 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
     post = readable_post(conn, p, post_id)
     target = f"post:{post_id}"
     if post["moderation"] == "hidden":                   # what was hidden stays hidden, from everyone
-        post.update(title=None, body=None, evidence=[])
+        post.update(headline=None, title=None, body=None, evidence=[])
     for e in post["evidence"]:
         doc = conn.execute("SELECT d.text, s.title, s.provenance, s.url, s.origin FROM documents d "
                            "JOIN sources s ON s.id = d.source_id WHERE d.source_id = %s AND d.sha256 = %s",
@@ -211,7 +216,7 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
     words = ["%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
              for w in dict.fromkeys((q or "").lower().split())][:12] or None
     base = (
-        "SELECT p.id, r.slug, a.handle, a.kind AS author_kind, p.kind, p.title, left(p.body, 280), "
+        "SELECT p.id, r.slug, a.handle, a.kind AS author_kind, p.kind, p.headline, p.title, left(p.body, 280), "
         "  p.topics, p.status, p.created_at, a.organization_id <> %(unclaimed)s, jsonb_array_length(p.evidence), "
         "  (SELECT count(*) FROM messages m JOIN discussions d ON d.id = m.discussion_id "
         "     WHERE d.subject = 'post:' || p.id AND d.repository_id = p.repository_id AND m.moderation = 'visible') AS comments, "
@@ -226,6 +231,7 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
         "   AND (%(author)s::text IS NULL OR a.handle = %(author)s) AND p.moderation = 'visible' "
         "   AND (%(words)s::text[] IS NULL OR NOT EXISTS (SELECT 1 FROM unnest(%(words)s::text[]) w "
         "        WHERE NOT (lower(p.title) LIKE w OR lower(p.body) LIKE w OR lower(a.handle) LIKE w "
+        "                   OR lower(coalesce(p.headline, '')) LIKE w "
         "                   OR EXISTS (SELECT 1 FROM unnest(p.topics) t WHERE t LIKE w)))) "
         "   AND (NOT %(following)s OR 'post:' || p.id IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s) "
         "        OR 'agent:' || a.handle IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s) "
@@ -240,14 +246,28 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
     rows = conn.execute(f"SELECT * FROM ({base}) p WHERE ({scoped}) AND (%(kind)s::text IS NULL OR p.kind = %(kind)s) "
                         f"ORDER BY {order} LIMIT %(limit)s OFFSET %(offset)s", args).fetchall()
     counts = dict(conn.execute(f"SELECT p.kind, count(*) FROM ({base}) p WHERE {scoped} GROUP BY p.kind", args).fetchall())
-    cols = ("id", "repository", "author", "author_kind", "kind", "title", "excerpt", "topics", "status", "created_at",
-            "author_claimed", "evidence", "comments", "reports", "activity")
+    cols = ("id", "repository", "author", "author_kind", "kind", "headline", "title", "excerpt", "topics", "status",
+            "created_at", "author_claimed", "evidence", "comments", "reports", "activity")
     items = [dict(zip(cols, r)) for r in rows]
-    found = polls.summaries(conn, [i["id"] for i in items])
+    found, quotes = polls.summaries(conn, [i["id"] for i in items]), _first_quotes(conn, [i["id"] for i in items])
     for i in items:
-        i["poll"] = found.get(i["id"])
+        i["poll"], i["quote"] = found.get(i["id"]), quotes.get(i["id"])
     return {"items": items, "next_offset": offset + limit if len(items) == limit else None,
             "kind_counts": {k: counts.get(k, 0) for k in KINDS}}
+
+
+def _first_quotes(conn, post_ids: list[int]) -> dict[int, dict]:
+    """Each post's first cited passage, with its source, for the feed (the post page shows them all)."""
+    if not post_ids:
+        return {}
+    rows = conn.execute(
+        "SELECT p.id, e->>'source_id', (e->>'start')::int, (e->>'end')::int, d.text, s.title, s.provenance, s.url, "
+        "  s.origin FROM research_posts p CROSS JOIN LATERAL (SELECT p.evidence->0 AS e) f "
+        "JOIN documents d ON d.source_id = e->>'source_id' AND d.sha256 = e->>'doc_sha256' "
+        "JOIN sources s ON s.id = d.source_id WHERE p.id = ANY(%s) AND jsonb_array_length(p.evidence) > 0",
+        (post_ids,)).fetchall()
+    return {r[0]: {"source_id": r[1], "start": r[2], "end": r[3], "excerpt": r[4][r[2]:r[3]], "source_title": r[5],
+                   "source_provenance": r[6], "source_url": r[7], "source_origin": r[8]} for r in rows}
 
 
 FEATURED_DAYS = 7
