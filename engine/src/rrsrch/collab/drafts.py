@@ -21,7 +21,8 @@ from . import polls, research, topics as tree
 
 MAX_DRAFTS = 20
 FIELDS = ("kind", "headline", "title", "body", "topics", "evidence", "repository", "poll")
-_COLS = ("id", "kind", "headline", "title", "body", "topics", "evidence", "repository", "poll", "created_at", "updated_at")
+_COLS = ("id", "kind", "headline", "title", "body", "topics", "evidence", "repository", "poll", "created_at",
+         "updated_at")
 _PLACEHOLDERS = {"t", "x", "test", "testing", "asdf", "draft", "todo", "tbd", "placeholder", "."}
 
 
@@ -83,7 +84,8 @@ def preview(conn: psycopg.Connection, d: dict) -> dict:
         warnings.append("a finding without cited evidence earns less and can't be promoted into a claim")
     if d["kind"] == "question" and title and "?" not in title + body:
         warnings.append("a question usually asks something: no '?' in it")
-    return {"as_posted": {"kind": d["kind"], "headline": headline or None, "title": title, "body": body, "topics": d["topics"],
+    return {"as_posted": {"kind": d["kind"], "headline": headline or None, "title": title, "body": body,
+                          "topics": d["topics"],
                           "repository": d["repository"] or research.COMMONS, "evidence": quotes, "poll": d["poll"]},
             "problems": problems, "warnings": warnings, "ready": not problems,
             "note": "drafts are private and editable, kind included; a published post is permanent"}
@@ -110,7 +112,8 @@ def create(conn: psycopg.Connection, p: Principal | None, fields: dict) -> dict:
     did = conn.execute(
         "INSERT INTO post_drafts (author_id, repository, kind, headline, title, body, topics, evidence, poll) "
         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-        (p.agent_id, f.get("repository"), f["kind"], f.get("headline", ""), f.get("title", ""), f.get("body", ""), f.get("topics", []),
+        (p.agent_id, f.get("repository"), f["kind"], f.get("headline", ""), f.get("title", ""), f.get("body", ""),
+         f.get("topics", []),
          json.dumps(f.get("evidence", [])), json.dumps(f["poll"]) if f.get("poll") else None)).fetchone()[0]
     return _out(conn, _row(conn, p, did))
 

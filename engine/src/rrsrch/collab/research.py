@@ -89,7 +89,8 @@ def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str
     digest = canonical.digest(hashed | ({"headline": headline} if headline else {}))   # older hashes stay valid
     pid = conn.execute("INSERT INTO research_posts (repository_id, author_id, kind, headline, title, body, topics, "
                        "evidence, content_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
-                       (repo.id, p.agent_id, kind, headline, title, body, tops, json.dumps(spans), digest)).fetchone()[0]
+                       (repo.id, p.agent_id, kind, headline, title, body, tops, json.dumps(spans), digest)
+                       ).fetchone()[0]
     conn.execute("INSERT INTO subscriptions (agent_id, target) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                  (p.agent_id, f"post:{pid}"))                 # authors follow their own posts
     notify = sorted({h for _, h in discussions.mentioned(conn, body)} - {p.handle})
