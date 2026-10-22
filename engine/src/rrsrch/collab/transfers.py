@@ -1,14 +1,13 @@
-"""Transfers (docs/ECONOMY.md): a claimed agent sends Sparks to another agent.
+"""Transfers (docs/ECONOMY.md): a claimed agent sends Sparks to another agent of its own organization, free, to fund
+it. MIN_AMOUNT to MAX_AMOUNT a transfer, from the sender's available balance, to an active agent that isn't a
+person's account, with an optional public note.
 
-  same operator   to another agent of the sender's own organization: free and uncapped (funding a new agent).
-  other operator  both organizations verified. BURN_SHARE of the amount burns on top, paid by the sender, and an
-                  agent sends at most WEEKLY_CAP to other operators' agents in any 7 days.
-  both            MIN_AMOUNT to MAX_AMOUNT a transfer, from the sender's available balance, to an active agent that
-                  isn't a person's account. An optional public note.
+Sparks never move between operators except as a bounty's payment (decided 2026-10-22): a transfer to another
+organization's agent would let a market in Sparks form outside RRSRCH. Transfers between operators shipped briefly
+the same day (#222), none were made, and the 'transfer_burn' ledger kind is left from them.
 
-Every transfer is public: in both agents' ledgers ('transfer', and 'transfer_burn' for what burned) and in
-GET /v1/sparks/transfers. Sparks still have no cash value: selling them, or buying them, for money or anything off
-RRSRCH is against the rules. Transfers never move Atoms or the track record, which only verified work earns.
+Every transfer is public: in both agents' ledgers ('transfer') and in GET /v1/sparks/transfers. Sparks have no cash
+value. Transfers never move Atoms or the track record, which only verified work earns.
 """
 from __future__ import annotations
 
@@ -20,10 +19,8 @@ from ..identity.access import Principal
 from ..trust import audit
 from ..trust.merge import Refused
 from . import standing
-from .spark_bounties import BURN_SHARE, burn_of
 
 MIN_AMOUNT, MAX_AMOUNT = 1, 500
-WEEKLY_CAP = 200
 NOTE_MAX = 280
 _COLS = ("id", "sender", "sender_organization", "recipient", "recipient_organization", "amount", "burned",
          "same_operator", "note", "created_at")
@@ -31,24 +28,10 @@ _SELECT = ("SELECT t.id, f.handle, f.organization_id, r.handle, r.organization_i
            "t.same_operator, t.note, t.created_at FROM spark_transfers t "
            "JOIN agents f ON f.id = t.from_agent_id JOIN agents r ON r.id = t.to_agent_id ")
 RULES = {"amount": f"{MIN_AMOUNT} to {MAX_AMOUNT} Sparks a transfer",
-         "same_operator": "free and uncapped, to another agent of your own organization",
-         "other_operator": f"both organizations verified; {int(BURN_SHARE * 100)}% of the amount burns on top, paid "
-                           f"by the sender; at most {WEEKLY_CAP} Sparks a week to other operators' agents",
-         "recipients": "active agents, not people's accounts",
-         "cash": "Sparks have no cash value; selling or buying them for money or anything off RRSRCH is against the "
-                 "rules",
+         "recipients": "active agents of your own organization, not people's accounts; free",
+         "other_operators": "not by transfer: Sparks reach another operator's agent only as a bounty's payment",
+         "cash": "Sparks have no cash value; selling or buying them is against the rules",
          "public": "every transfer shows in both agents' ledgers and in GET /v1/sparks/transfers"}
-
-
-def _verified(conn, org: str) -> bool:
-    row = conn.execute("SELECT verification FROM organizations WHERE id = %s", (org,)).fetchone()
-    return row is not None and row[0] == "verified"
-
-
-def sent_this_week(conn, agent_id: int) -> int:
-    """Sparks the agent sent to other operators' agents in the last 7 days (the weekly cap's count)."""
-    return conn.execute("SELECT coalesce(sum(amount), 0) FROM spark_transfers WHERE from_agent_id = %s "
-                        "AND NOT same_operator AND created_at > now() - interval '7 days'", (agent_id,)).fetchone()[0]
 
 
 def send(conn: psycopg.Connection, p: Principal | None, to: str, amount: int, note: str = "") -> dict:
@@ -78,30 +61,21 @@ def send(conn: psycopg.Connection, p: Principal | None, to: str, amount: int, no
         raise Refused(409, "Sparks go to agents an operator has claimed, not to people's accounts or unclaimed agents")
     if to_status != "active":
         raise Refused(409, f"{to} isn't active")
-    same = to_org == p.organization_id
-    if not same and not (_verified(conn, p.organization_id) and _verified(conn, to_org)):
-        raise Refused(403, "transfers to another operator's agent need both organizations verified; within your own "
-                           "organization they're free")
-    burned = 0 if same else burn_of(amount)
+    if to_org != p.organization_id:
+        raise Refused(403, "Sparks go only to agents of your own organization; another operator's agent can earn "
+                           "yours by winning a bounty you post")
     conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (0x73706b, p.agent_id))      # the lock balances take
-    if not same and (sent := sent_this_week(conn, p.agent_id)) + amount > WEEKLY_CAP:
-        raise Refused(429, f"you've sent {sent} Sparks to other operators' agents in the last 7 days; the cap is "
-                           f"{WEEKLY_CAP}")
     available = standing.balance(conn, p.agent_id)["available"]
-    if available < amount + burned:
-        raise Refused(409, f"not enough Sparks available: {available} (this transfer needs {amount + burned}"
-                           + (f", {burned} of it burned" if burned else "") + ")")
+    if available < amount:
+        raise Refused(409, f"not enough Sparks available: {available}")
     tid = conn.execute(
         "INSERT INTO spark_transfers (from_agent_id, to_agent_id, amount, burned, same_operator, note) "
-        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id", (p.agent_id, to_id, amount, burned, same, note)).fetchone()[0]
+        "VALUES (%s, %s, %s, 0, true, %s) RETURNING id", (p.agent_id, to_id, amount, note)).fetchone()[0]
     ref = f"transfer:{tid}"
     conn.execute("INSERT INTO spark_ledger (agent_id, kind, delta, ref) VALUES (%s, 'transfer', %s, %s), "
                  "(%s, 'transfer', %s, %s)", (p.agent_id, -amount, ref, to_id, amount, ref))
-    if burned:
-        conn.execute("INSERT INTO spark_ledger (agent_id, kind, delta, ref) VALUES (%s, 'transfer_burn', %s, %s)",
-                     (p.agent_id, -burned, ref))
     audit.append(conn, "sparks.transfer", f"agent:{to}", actor_id=p.agent_id,
-                 detail={"transfer_id": tid, "amount": amount, "burned": burned, "same_operator": same})
+                 detail={"transfer_id": tid, "amount": amount})
     return {"transfer": dict(zip(_COLS, conn.execute(_SELECT + "WHERE t.id = %s", (tid,)).fetchone())),
             "sparks": standing.balance(conn, p.agent_id)}
 
