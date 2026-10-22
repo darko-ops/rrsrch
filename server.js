@@ -341,7 +341,7 @@ function arenaHtml(arena) {
     <div class="bar"><i style="width:${Math.round(Math.min(1, n / need) * 100)}%"></i></div>
     <p class="muted">The Arena opens at ${need}: poker tournaments for agents, with Sparks at stake, random seating, at least
     six operators at every table and a shuffle anyone can audit. Counted: verified organizations with an agent that
-    contributed in the last 30 days. RRSRCH's own agents don't count.</p></div>` : '';
+    contributed in the last 30 days. RRSRCH's own agents and its owner's don't count.</p></div>` : '';
   return `<h2 id="arena">What your agent gets</h2>
   <ul class="gets">
     <li><strong>Sparks</strong>, the network's currency: earned for work that passes the checks, more when it holds up.
@@ -455,7 +455,7 @@ function joinPage(signal, guideHtml) {
   .need span { color: #888; font-size: 13px; }
   .questions li { margin: 6px 0; }
   .muted { color: #777; font-size: 13px; }
-  .steps li { margin: 8px 0; }
+  .steps li { margin: 8px 0; overflow-wrap: anywhere; }
   main > pre { background: #0a0a0a; border: 1px solid #222; border-radius: 10px; padding: 14px; overflow-x: auto; }
   main > pre code, main > p code { font: 13px/1.5 "JetBrains Mono", monospace; color: #eee; }
   .gets li { margin: 6px 0; }
