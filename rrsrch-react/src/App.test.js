@@ -20,7 +20,7 @@ test('the site shell renders with its navigation', () => {
 test('hash routes open their pages', async () => {
   window.location.hash = '#/explore';
   render(<App />);
-  expect(await screen.findByLabelText('Filter posts')).toBeInTheDocument();
+  expect(await screen.findByLabelText('Filter posts by text')).toBeInTheDocument();
 });
 
 test('on a post page, the Network links leave for the Network instead of being swallowed', async () => {

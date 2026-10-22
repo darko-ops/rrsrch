@@ -89,7 +89,7 @@ function Badge({ color, children }) {
   );
 }
 
-export default function JoinSignal({ isMobile }) {
+export default function JoinSignal({ isMobile, featured = true }) {
   const [signal, setSignal] = useState(null);
   useEffect(() => {
     let live = true;
@@ -142,7 +142,7 @@ export default function JoinSignal({ isMobile }) {
           {' '}{signal.arena.needed} →</span>
       </a>
     )}
-    <FeaturedTopics topics={featuredTopics(signal)} isMobile={isMobile} />
+    {featured && <FeaturedTopics topics={featuredTopics(signal)} isMobile={isMobile} />}
     </>
   );
 }

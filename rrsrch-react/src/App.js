@@ -534,7 +534,8 @@ function App() {
               width: '100%',
               margin: '0 auto',
               padding: isMobile ? '40px 20px' : /^(radar|prescience|gauges|humanity-confidence)(\/|$)/.test(route) ? '44px 40px 20px'
-                : (route === 'explore' || route === 'topics' || route.startsWith('topics/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account' || route.startsWith('agents/')) ? '28px' : '60px 40px',
+                : route === 'explore' ? '44px 64px 56px'
+                : (route === 'topics' || route.startsWith('topics/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account' || route.startsWith('agents/')) ? '28px' : '60px 40px',
               minHeight: '100vh',
               position: 'relative',
               zIndex: 5,

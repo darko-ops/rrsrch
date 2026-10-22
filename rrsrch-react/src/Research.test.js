@@ -68,46 +68,72 @@ test('explore lists posts in the engine order, with kinds, evidence, unclaimed a
   resetTopics();
   const calls = mock({ '/v1/explore': FEED, '/v1/subscriptions': { ok: true, subscriptions: [] }, '/v1/topics': TREE });
   render(<ExplorePage isMobile={false} />);
-  const titles = await screen.findAllByText(/WOMAC gains|Does the effect/);
+  const titles = await screen.findAllByRole('heading', { level: 2 });
   expect(titles.map((t) => t.textContent)).toEqual(['Does the effect hold past 24 months?', 'WOMAC gains at 12 months']);
   expect(screen.getByText('unclaimed')).toBeInTheDocument();
-  expect(screen.getByText('· needs an answer')).toBeInTheDocument();
+  expect(screen.getByText('needs an answer')).toBeInTheDocument();
   expect(screen.getByText('cites 2 passages')).toBeInTheDocument();
   expect(screen.getByText('no citations')).toBeInTheDocument();
   expect(screen.queryByTitle('Useful')).not.toBeInTheDocument();                 // no reactions (docs/SIMPLIFY.md)
-  expect(screen.getByText('2 posts, newest first.')).toBeInTheDocument();
-  expect(screen.getByText(/not reviewed knowledge/)).toBeInTheDocument();
+  expect(screen.getByText('2 posts')).toBeInTheDocument();
+  expect(screen.getByText(/Nothing here is reviewed yet/)).toBeInTheDocument();
   expect(calls.find((c) => c.url.includes('/v1/explore')).url).toBe('/api/engine/v1/explore?sort=recent&limit=20');
 
-  fireEvent.click(screen.getAllByRole('button', { name: /^questions/ })[1]);         // the legend; [0] is the bar
-  expect(await screen.findByText('Showing questions, newest first. Click it again to clear.')).toBeInTheDocument();
-  fireEvent.click(screen.getByText('recently active'));
-  // the topics run in a row; picking one opens its sub-topics
-  const row = await screen.findByRole('region', { name: 'Topics' });
-  expect(within(row).getAllByRole('button')).toHaveLength(2);                       // the top level only, until one is picked
-  fireEvent.click(within(row).getByRole('button', { name: /^Medicine/ }));
-  expect(within(row).getByRole('button', { name: /^Medicine/ })).toHaveAttribute('aria-pressed', 'true');
-  fireEvent.click(within(row).getByRole('button', { name: /^Mesenchymal stromal cells/ }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Questions' }));
+  expect(screen.getByRole('tab', { name: 'Questions' })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.click(screen.getByRole('button', { name: /^Newest/ }));
+  // the topic tree opens from the pill: a top-level topic, then one of its sub-topics
+  fireEvent.click(screen.getByRole('button', { name: 'Topic: all ▾' }));
+  const menu = await screen.findByRole('menu', { name: 'Topics' });
+  expect(within(menu).getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['All topics', 'Medicine2 ›', 'Energy0 ›']);
+  fireEvent.click(within(menu).getByRole('menuitem', { name: /^Medicine/ }));
+  fireEvent.click(within(menu).getByRole('menuitem', { name: /^Mesenchymal stromal cells/ }));
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Topic: Mesenchymal stromal cells ▾' })).toBeInTheDocument();
   fireEvent.click(await screen.findByRole('button', { name: 'Follow' }));
   await new Promise((r) => setTimeout(r, 0));
   expect(calls.some((c) => c.url === '/api/engine/v1/explore?sort=active&limit=20&kind=question&topic=msc')).toBe(true);
   const sub = calls.find((c) => c.url === '/api/engine/v1/subscriptions' && c.opts.method === 'POST');
   expect(JSON.parse(sub.opts.body)).toEqual({ target: 'topic:msc' });
 
-  fireEvent.click(screen.getByText('Unanswered'));
-  fireEvent.click(screen.getByText('Following'));
+  fireEvent.click(screen.getByRole('tab', { name: 'Unanswered' }));
   await new Promise((r) => setTimeout(r, 0));
-  expect(calls.some((c) => c.url.includes('unanswered=true'))).toBe(true);
+  expect(calls.some((c) => c.url.includes('unanswered=true') && !c.url.includes('kind='))).toBe(true);
+  fireEvent.click(screen.getByRole('tab', { name: 'Following' }));
+  await new Promise((r) => setTimeout(r, 0));
   expect(calls.some((c) => c.url.includes('following=true'))).toBe(true);
 });
 
+test('a post in the feed leads with its headline, its title as the subheader, and its first quote', async () => {
+  const quoted = { ...FEED.items[1], id: 3, headline: 'Gains held at a year', excerpt: 'First part.\n\nSecond part.',
+    quote: { source_id: 'MED:1', start: 0, end: 12, excerpt: 'At 12 months', source_title: 'BM-MSC trial' } };
+  mock({ '/v1/explore': { ...FEED, items: [quoted, FEED.items[0]] }, '/v1/subscriptions': { ok: true, subscriptions: [] } });
+  render(<ExplorePage isMobile={false} />);
+  const post = await screen.findByRole('article', { name: 'Gains held at a year' });
+  expect(within(post).getByRole('heading', { level: 2 })).toHaveTextContent('Gains held at a year');
+  expect(within(post).getByText('WOMAC gains at 12 months')).toBeInTheDocument();       // the title, as subheader
+  expect(within(post).getByText('First part.')).toBeInTheDocument();
+  expect(within(post).getByText('Second part.')).toBeInTheDocument();
+  expect(within(post).getByText('“At 12 months”', { exact: false })).toBeInTheDocument();
+  expect(within(post).getByText(/BM-MSC trial \(MED:1\)/)).toBeInTheDocument();
+  // without a headline, the title is the headline and there's no subheader
+  const plain = screen.getByRole('article', { name: 'Does the effect hold past 24 months?' });
+  expect(within(plain).getAllByText('Does the effect hold past 24 months?')).toHaveLength(1);
+  fireEvent.click(within(post).getByText('Second part.'));
+  expect(window.location.pathname).toBe('/posts/3');
+});
+
 test('the filter field sends q after a pause', async () => {
-  jest.useFakeTimers();
   const calls = mock({ '/v1/explore': FEED, '/v1/subscriptions': { ok: true, subscriptions: [] } });
   render(<ExplorePage isMobile={false} />);
-  fireEvent.change(screen.getByLabelText('Filter posts'), { target: { value: 'womac' } });
-  await act(async () => { jest.advanceTimersByTime(300); });
-  jest.useRealTimers();
+  fireEvent.click(screen.getByRole('button', { name: 'Filter posts by text' }));
+  jest.useFakeTimers();
+  try {
+    fireEvent.change(screen.getByLabelText('Filter posts'), { target: { value: 'womac' } });
+    await act(async () => { jest.advanceTimersByTime(300); });
+  } finally {
+    jest.useRealTimers();
+  }
   await waitFor(() => expect(calls.some((c) => c.url.includes('q=womac'))).toBe(true));
 });
 
@@ -128,7 +154,9 @@ test('publishing a post sends kind, title, body and topics chosen from the tree'
   render(<ExplorePage isMobile={false} />);
   fireEvent.click(await screen.findByText('New post'));
   fireEvent.click(screen.getByRole('button', { name: 'finding' }));            // the composer's tab
-  fireEvent.change(screen.getByPlaceholderText('Title'), { target: { value: 'Dose matters' } });
+  fireEvent.change(screen.getByLabelText('Headline'), { target: { value: 'Dose matters' } });
+  fireEvent.change(screen.getByPlaceholderText('Subheader: the full title'),
+    { target: { value: 'Higher MSC doses did better across three trials' } });
   fireEvent.change(screen.getByPlaceholderText(/What did you find/), { target: { value: 'Higher doses did better.' } });
   fireEvent.change(screen.getByLabelText('Add a topic'), { target: { value: 'mesench' } });
   fireEvent.mouseDown(await screen.findByRole('option', { name: /Mesenchymal stromal cells/ }));
@@ -141,8 +169,8 @@ test('publishing a post sends kind, title, body and topics chosen from the tree'
   fireEvent.click(screen.getByText('Publish'));
   await new Promise((r) => setTimeout(r, 0));
   const pub = calls.find((c) => c.url === '/api/engine/v1/posts');
-  expect(JSON.parse(pub.opts.body)).toEqual({ kind: 'finding', title: 'Dose matters', body: 'Higher doses did better.',
-    topics: ['msc', 'knee-oa'] });
+  expect(JSON.parse(pub.opts.body)).toEqual({ kind: 'finding', headline: 'Dose matters',
+    title: 'Higher MSC doses did better across three trials', body: 'Higher doses did better.', topics: ['msc', 'knee-oa'] });
   expect(window.location.pathname).toBe('/posts/9');
 });
 

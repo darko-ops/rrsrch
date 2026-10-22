@@ -7,6 +7,7 @@ import { Search, Loader2, ExternalLink, X, Bot, CircleUser, Radar } from 'lucide
 import { Molecule } from './icons';
 import { readSearchHistory, pushSearchHistory } from './searchHistory';
 import JoinSignal from './JoinSignal';
+import { GaugeStrip, HomeFeed } from './HomeFeed';
 import NetworkResults from './NetworkSearch';
 
 const fonts = {
@@ -346,14 +347,16 @@ function SearchBox({
   );
 }
 
-function Landing({ isMobile, query, onQueryChange, onSearch, searching, history, onPickHistory, placeholder }) {
+// `compact`: the home page's hero (design handoff "2a"), short enough that the core gauges and the first post show
+// above the fold, without the featured topics (the feed below covers them).
+function Landing({ isMobile, query, onQueryChange, onSearch, searching, history, onPickHistory, placeholder, compact }) {
   const recent = (history || []).slice(0, 6);
   return (
     <div style={{
-      minHeight: '100vh',
+      minHeight: compact ? 440 : '100vh',
       maxWidth: 1040,
       margin: '0 auto',
-      padding: isMobile ? '100px 20px 80px' : '110px 40px 130px',
+      padding: compact ? (isMobile ? '96px 16px 28px' : '110px 40px 32px') : isMobile ? '100px 20px 80px' : '110px 40px 130px',
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
@@ -420,7 +423,7 @@ function Landing({ isMobile, query, onQueryChange, onSearch, searching, history,
         </div>
       )}
 
-      <JoinSignal isMobile={isMobile} />
+      <JoinSignal isMobile={isMobile} featured={!compact} />
     </div>
   );
 }
@@ -2514,6 +2517,22 @@ function readUserProfile() {
 }
 
 const SEARCH_PLACEHOLDER = 'Search claims and questions, or ask the network';
+const HERO_SCROLL = 340;
+
+// Whether the home page has scrolled past its hero, when the top bar takes its compact search. It re-renders only
+// when that flips, not on every scroll event.
+function usePastHero(scrollContainerRef, active) {
+  const [past, setPast] = useState(false);
+  useEffect(() => {
+    const el = scrollContainerRef?.current;
+    if (!el || !active) { setPast(false); return undefined; }
+    const on = () => setPast(el.scrollTop > HERO_SCROLL);
+    on();
+    el.addEventListener('scroll', on, { passive: true });
+    return () => el.removeEventListener('scroll', on);
+  }, [scrollContainerRef, active]);
+  return past;
+}
 
 // The home page: a search over what the network holds (NetworkSearch.js), and asking it when nothing does.
 export default function SearchExperience({
@@ -2522,6 +2541,7 @@ export default function SearchExperience({
   const [query, setQuery] = useState('');
   const [submitted, setSubmitted] = useState('');
   const [history, setHistory] = useState(() => readSearchHistory());
+  const pastHero = usePastHero(scrollContainerRef, !submitted);
 
   const goHome = () => {
     setSubmitted('');
@@ -2547,14 +2567,18 @@ export default function SearchExperience({
 
   return (
     <>
-      <TopBar isMobile={isMobile} showSearch={!!submitted} query={query} onQueryChange={setQuery} onSearch={runSearch}
-        searching={false} onHome={goHome} onAgents={onAgents} onAccount={onAccount} />
+      <TopBar isMobile={isMobile} showSearch={!!submitted || pastHero} query={query} onQueryChange={setQuery}
+        onSearch={runSearch} searching={false} onHome={goHome} onAgents={onAgents} onAccount={onAccount} />
       {submitted
         ? <div style={{ background: 'rgba(0,0,0,0.55)', minHeight: '100vh' }}>
             <NetworkResults key={submitted} query={submitted} isMobile={isMobile} />
           </div>
-        : <Landing isMobile={isMobile} query={query} onQueryChange={setQuery} onSearch={runSearch} searching={false}
-            history={history} onPickHistory={runSearch} placeholder={SEARCH_PLACEHOLDER} />}
+        : <>
+            <Landing isMobile={isMobile} query={query} onQueryChange={setQuery} onSearch={runSearch} searching={false}
+              history={history} onPickHistory={runSearch} placeholder={SEARCH_PLACEHOLDER} compact />
+            <GaugeStrip isMobile={isMobile} />
+            <HomeFeed isMobile={isMobile} stickyTop={isMobile ? 65 : 93} faded={pastHero} />
+          </>}
     </>
   );
 }
