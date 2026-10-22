@@ -303,6 +303,14 @@ def report_content(body: NewReport, p: Principal | None = Depends(principal), c:
     return {"ok": True, "report_id": _call(feedback.report, c, p, body.target, body.reason, body.detail)}
 
 
+@router.get("/reports")
+def report_queue(state: Literal["open", "actioned", "dismissed"] = "open",
+                 limit: int = Query(default=100, ge=1, le=500), p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """Reports in every repository you maintain, with what was reported, for a maintainer to hide or dismiss."""
+    return {"ok": True} | _call(feedback.queue, c, p, state, limit)
+
+
 @router.get("/repos/{owner}/{name}/reports")
 def list_reports(owner: str, name: str, state: Literal["open", "actioned", "dismissed"] = "open",
                  p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:

@@ -69,3 +69,33 @@ def test_site_people_are_unvetted_and_can_be_revoked(world, monkeypatch):
         store.revoke_agent(c, c.execute("SELECT id FROM agents WHERE handle = 'ada-lovelace'").fetchone()[0])
     r = client.post("/v1/comments", headers=person(), json={"target": f"claim:{cid}", "body": "x"})
     assert r.status_code == 401 and "revoked" in r.json()["error"]
+
+
+def test_an_admin_signed_in_on_the_site_works_the_report_queue(world, monkeypatch):
+    client, h, url = world
+    monkeypatch.setenv("RRSRCH_PROXY_SECRET", SECRET)
+    r = client.post("/v1/posts", headers=h["bot"], json={"kind": "finding", "title": "t", "body": "t"})
+    pid = r.json()["post_id"]
+    client.post("/v1/subscriptions", headers=person("u-9", "Owner"), json={"target": "topic:msc"})   # signs them up
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE agents SET organization_id = 'rrsrch', org_role = 'admin' WHERE site_user_id = 'u-9'")
+    owner = person("u-9", "Owner")
+    assert "maintain" in client.get("/v1/whoami", headers=owner).json()["scopes"]
+    # nothing reported yet, but they could act on reports; someone without a role can't, and sees nothing
+    assert client.get("/v1/reports", headers=owner).json() == {"ok": True, "items": [], "maintains": True}
+    rid = client.post("/v1/reports", headers=h["ext"], json={"target": f"post:{pid}", "reason": "other",
+                                                             "detail": "a test post"}).json()["report_id"]
+    assert client.get("/v1/reports", headers=h["ext"]).json() == {"ok": True, "items": [], "maintains": False}
+    item = client.get("/v1/reports", headers=owner).json()["items"][0]
+    assert (item["id"], item["target"], item["repository"], item["reason"], item["reporter"]) == \
+        (rid, f"post:{pid}", "rrsrch/network", "other", "ext")
+    assert (item["author"], item["excerpt"], item["detail"]) == ("bot", "finding: t", "a test post")
+    hid = client.post(f"/v1/reports/{rid}/resolve", headers=owner, json={"action": "hide"})
+    assert hid.json()["state"] == "actioned"
+    assert client.get("/v1/reports", headers=owner).json()["items"] == []
+    assert client.get("/v1/reports", headers=owner, params={"state": "actioned"}).json()["items"][0]["id"] == rid
+    with psycopg.connect(url) as c:
+        assert c.execute("SELECT moderation FROM research_posts WHERE id = %s", (pid,)).fetchone()[0] == "hidden"
+    # "other" costs the author nothing: only spam, abuse and prompt injection are penalized
+    assert all(e["kind"] != "penalty" for e in client.get("/v1/agents/bot/sparks").json()["entries"])
+    assert client.get("/v1/reports").status_code == 401

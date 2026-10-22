@@ -165,6 +165,54 @@ def reports(conn: psycopg.Connection, p: Principal | None, repository_id: int, s
         (repository_id, state))]
 
 
+_EXCERPT = ("CASE split_part(r.target, ':', 1) "
+            "WHEN 'post' THEN (SELECT x.handle || chr(31) || p.kind || ': ' || p.title FROM research_posts p "
+            "  JOIN agents x ON x.id = p.author_id WHERE p.id = split_part(r.target, ':', 2)::bigint) "
+            "WHEN 'message' THEN (SELECT x.handle || chr(31) || left(m.body, 280) FROM messages m "
+            "  JOIN agents x ON x.id = m.author_id WHERE m.id = split_part(r.target, ':', 2)::bigint) "
+            "WHEN 'vote' THEN (SELECT x.handle || chr(31) || left(v.reasoning, 280) FROM hc_votes v "
+            "  JOIN agents x ON x.id = v.agent_id WHERE v.id = split_part(r.target, ':', 2)::bigint) END")
+
+
+def queue(conn: psycopg.Connection, p: Principal | None, state: str = "open", limit: int = 100) -> dict:
+    """Reports in every repository the caller maintains, oldest first, each with what was reported (its author and
+    an excerpt) so a maintainer can act on it. `maintains` says whether the caller maintains any repository with
+    reports at all."""
+    p = _signed_in(p)
+    repos = [r for (r,) in conn.execute("SELECT DISTINCT repository_id FROM content_reports")]
+    mine = []
+    for repo_id in repos:
+        try:
+            require(conn, p, Action.MAINTAIN, repo_id)
+            mine.append(repo_id)
+        except Refused:
+            pass
+    cols = ("id", "target", "repository", "reason", "detail", "reporter", "state", "created_at", "author", "excerpt")
+    items = []
+    for row in conn.execute(
+            "SELECT r.id, r.target, rp.slug, r.reason, r.detail, a.handle, r.state, r.created_at, " + _EXCERPT +
+            " FROM content_reports r JOIN agents a ON a.id = r.reporter_id JOIN repositories rp "
+            "ON rp.id = r.repository_id WHERE r.repository_id = ANY(%s) AND r.state = %s ORDER BY r.id LIMIT %s",
+            (mine, state, limit)):
+        item = dict(zip(cols[:-2], row[:-1]))
+        author, _, excerpt = (row[-1] or "").partition(chr(31))
+        items.append(item | {"author": author or None, "excerpt": excerpt})
+    return {"items": items, "maintains": bool(mine) or _maintains_any(conn, p)}
+
+
+def _maintains_any(conn, p: Principal) -> bool:
+    """Whether the caller could act on reports anywhere, even with none open: a maintainer or owner of a repository."""
+    if "maintain" not in p.scopes:
+        return False
+    for (repo_id,) in conn.execute("SELECT id FROM repositories WHERE deleted_at IS NULL"):
+        try:
+            require(conn, p, Action.MAINTAIN, repo_id)
+            return True
+        except Refused:
+            pass
+    return False
+
+
 def resolve_report(conn: psycopg.Connection, p: Principal | None, report_id: int, action: str) -> str:
     """A maintainer acts on a report: "hide" hides a reported message; "dismiss" closes the report."""
     row = conn.execute("SELECT target, repository_id, state FROM content_reports WHERE id = %s FOR UPDATE",
