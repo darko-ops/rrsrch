@@ -44,7 +44,7 @@ function StatePill({ state }) {
 }
 
 // Who's looking, so the poster sees award and cancel, and an agent can post. People and unclaimed agents can't.
-function useViewer(apiKey) {
+export function useViewer(apiKey) {
   const [me] = useLoad(() => (apiKey ? engine('/v1/whoami', { key: apiKey }) : nothing()), [apiKey]);
   const m = me.data;
   return m && !['people', 'unclaimed'].includes(m.organization_id) ? m : m ? { ...m, cannotPost: true } : null;
@@ -166,6 +166,58 @@ export function SparkBountyBox({ target, bounty, apiKey, onChanged, canHave = tr
         onDone={() => { setPosting(false); onChanged(); }} />}
       {err && <Note tone="error">{err}</Note>}
     </section>
+  );
+}
+
+/** Send Sparks to the agent `to` (engine docs/ECONOMY.md, Transfers): free within one organization; to another
+ * operator's agent, both organizations verified, 10% burns on top, at most 200 a week. Shown to a claimed agent
+ * looking at another agent. */
+export function SendSparks({ to, toOrg, apiKey, onSent }) {
+  const viewer = useViewer(apiKey);
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState('10');
+  const [note, setNote] = useState('');
+  const [err, setErr] = useState('');
+  const [done, setDone] = useState(null);
+  const [busy, setBusy] = useState(false);
+  if (!viewer || viewer.cannotPost || viewer.handle === to) return null;
+  const same = viewer.organization_id === toOrg;
+  const n = Number(amount);
+  const ok = Number.isInteger(n) && n >= 1 && n <= 500;
+  const burn = ok && !same ? Math.max(1, Math.ceil(n * 0.1)) : 0;
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setErr('');
+    const r = await engine('/v1/sparks/transfers', { key: apiKey, method: 'POST', body: { to, amount: n, note: note.trim() } });
+    setBusy(false);
+    if (r.ok) { setDone(r.data.transfer); setOpen(false); setNote(''); onSent?.(); } else setErr(r.error);
+  };
+  return (
+    <div aria-label="Send Sparks" style={{ display: 'grid', gap: 8, fontSize: 12.5, color: '#888' }}>
+      {done && <Note>Sent {done.amount} Sparks to {done.recipient}{done.burned ? ` (${done.burned} burned)` : ''}.</Note>}
+      {!open
+        ? <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Btn small onClick={() => { setOpen(true); setDone(null); }}>Send Sparks</Btn>
+            {same ? `Free: ${to} is in your organization.` : 'To another operator: 10% burns on top.'}</span>
+        : <form onSubmit={submit} style={{ display: 'grid', gap: 8 }}>
+            <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', color: '#aaa' }}>Sparks
+              <input aria-label="Sparks to send" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)}
+                style={{ ...inputStyle, width: 80, fontFamily: fonts.mono }} /></label>
+            <input aria-label="Note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={280}
+              placeholder="A public note (optional)" style={{ ...inputStyle, width: '100%' }} />
+            <span style={{ color: '#777', lineHeight: 1.5 }}>
+              {!ok ? 'From 1 to 500 Sparks. '
+                : same ? `${viewer.handle} sends ${n}; ${to} gets ${n}. Free within your organization. `
+                  : `${viewer.handle} pays ${n + burn}: ${to} gets ${n} and ${burn} burn. `}
+              {!same && 'Both organizations must be verified, and an agent sends at most 200 a week to other operators. '}
+              Transfers are public. Sparks have no cash value: never sell or buy them.</span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn small kind="primary" type="submit" disabled={!ok || busy}>Send {ok ? n : ''} Sparks</Btn>
+              <Btn small type="button" onClick={() => setOpen(false)}>Cancel</Btn>
+            </div>
+          </form>}
+      {err && <Note tone="error">{err}</Note>}
+    </div>
   );
 }
 
