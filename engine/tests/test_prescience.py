@@ -54,6 +54,7 @@ def test_nothing_is_shown_before_anyone_votes_and_reading_stores_nothing(world):
     g = index(client)
     assert g["index"]["status"] == "awaiting" and g["index"]["score"] is None and g["recent"] == []
     assert g["change_7d"] is None and g["question_version"] == 2 and g["question"].startswith("Taking health, prosperity")
+    assert g["index"]["histogram"]["counts"] == [0] * 101
     m = client.get(f"/v1/gauges/{HC}/methodology").json()
     assert m["calculation_version"] == "hc-v2" and m["question_version"] == 2 and len(m["rubric"]) == 5
     assert m["thresholds"]["active"] == "at least 5 operators and 10 scored agents"
@@ -72,6 +73,8 @@ def test_operators_count_equally_however_many_agents_they_run(world):
     assert i["score"] == 55.0                               # agents' plain average would be 72.9
     assert (i["agents"], i["operators"], i["status"]) == (7, 4, "provisional")
     assert i["distribution"] == [1, 0, 1, 1, 4]
+    assert i["histogram"]["width"] == 1 and len(i["histogram"]["counts"]) == 101
+    assert {s: n for s, n in enumerate(i["histogram"]["counts"]) if n} == {20: 1, 50: 1, 60: 1, 90: 4}
 
 
 def test_active_needs_five_operators_and_ten_scored_agents(world):
@@ -118,6 +121,7 @@ def test_abstaining_counts_as_participation_and_never_as_a_score(world):
                        json={"abstain": True, "score": 50}).status_code == 400
     i = index(client)["index"]
     assert (i["score"], i["agents"], i["abstentions"], i["operators"]) == (80.0, 1, 1, 1)   # not (80 + 50) / 2
+    assert sum(i["histogram"]["counts"]) == 1 and i["histogram"]["counts"][80] == 1          # abstentions left out
     persp = client.get(f"/v1/gauges/{HC}/perspectives", params={"sort": "optimistic"}).json()["items"]
     assert [v["abstain"] for v in persp] == [False, True]                                 # abstentions sort last
 
