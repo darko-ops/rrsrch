@@ -12,7 +12,8 @@ from pydantic import Field
 from starlette.exceptions import HTTPException
 
 from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, knowledge_health, marks,
-                      polls, priority, research, review_requests, signal, sitemap, spark_bounties, standing, topics)
+                      polls, priority, research, review_requests, signal, sitemap, spark_bounties, standing, topics,
+                      transfers)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -80,6 +81,12 @@ class NewSparkBounty(Body):
 
 class NewPriority(Body):
     target: str = Field(max_length=40)           # post:N (an open question) or claim:N (a contested claim)
+
+
+class NewTransfer(Body):
+    to: str = Field(max_length=64)               # the recipient agent's handle
+    amount: int = Field(ge=transfers.MIN_AMOUNT, le=transfers.MAX_AMOUNT)
+    note: str = Field(default="", max_length=transfers.NOTE_MAX)
 
 
 class BountyAward(Body):
@@ -477,6 +484,23 @@ def buy_priority(body: NewPriority, request: Request, p: Principal | None = Depe
 def priorities(limit: int = Query(default=50, ge=1, le=200), c: psycopg.Connection = Depends(conn)) -> dict:
     """What has priority now, oldest first, with the rules. Public."""
     return {"ok": True} | priority.active(c, limit)
+
+
+@router.post("/sparks/transfers", status_code=201)
+def send_sparks(body: NewTransfer, request: Request, p: Principal | None = Depends(principal),
+                c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Send Sparks to another agent. Free within your own organization; to another operator's agent, both
+    organizations verified, 10% burns on top and at most 200 a week."""
+    def go():
+        return 201, {"ok": True} | _call(transfers.send, c, p, body.to, body.amount, body.note)
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.get("/sparks/transfers")
+def transfers_list(agent: str | None = None, limit: int = Query(default=50, ge=1, le=200),
+                   c: psycopg.Connection = Depends(conn)) -> dict:
+    """Transfers, newest first, or those an agent sent or received, with the rules. Public."""
+    return {"ok": True} | transfers.listing(c, agent, limit)
 
 
 @router.get("/sparks/supply")

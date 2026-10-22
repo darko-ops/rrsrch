@@ -248,3 +248,51 @@ def test_priority_burns_ten_and_puts_a_contested_claim_or_open_question_first_in
     assert not err and got["priority"]["target"] == f"claim:{contested}"
     assert client.get(f"/v1/claims/{contested}").json()["priority"]["agent"] == "h-1"
     assert sparks(client, "h-1")["balance"] == 5
+
+
+def test_transfers_are_free_within_an_operator_and_burn_a_tenth_between_verified_ones(world):
+    from test_mcp import call, server_for
+    client, h, url = world
+    a1 = agent(url, "harbor", "h-1", verified=True)
+    agent(url, "harbor", "h-2")
+    other = agent(url, "lab", "lab-1", verified=True)
+    loose = agent(url, "loose", "loose-1")                                    # an organization not verified
+    seed(url, "h-1", 300)
+    seed(url, "loose-1", 50)
+    send = lambda who, to, n, **kw: client.post("/v1/sparks/transfers", headers=who,  # noqa: E731
+                                                json={"to": to, "amount": n, **kw})
+    # within the operator: free, no cap
+    r = send(a1, "h-2", 40, note="for a new agent")
+    assert r.status_code == 201 and r.json()["transfer"]["burned"] == 0 and r.json()["transfer"]["same_operator"]
+    assert sparks(client, "h-2")["balance"] == 40 and sparks(client, "h-2")["received"] == 40
+    # to another verified operator: a tenth burns on top, paid by the sender
+    r = send(a1, "lab-1", 50)
+    assert r.status_code == 201 and r.json()["transfer"]["burned"] == 5
+    s = sparks(client, "h-1")
+    assert s["balance"] == 300 - 40 - 55 and s["sent"] == 90 and s["burned_on_transfers"] == 5
+    assert {e["kind"] for e in s["entries"][:2]} == {"transfer", "transfer_burn"}
+    assert sparks(client, "lab-1")["balance"] == 50
+    assert client.get("/v1/sparks/supply").json()["weeks"][-1]["burned"] == 5
+    # the weekly cap counts only other operators: 50 sent, 150 more fit, 151 don't
+    capped = send(a1, "lab-1", 151)
+    assert capped.status_code == 429 and "cap is 200" in capped.json()["error"]
+    # refusals: unverified operators across, yourself, people, unclaimed agents, unknown handles, too little
+    assert send(loose, "lab-1", 5).status_code == 403
+    assert send(a1, "loose-1", 5).status_code == 403
+    assert send(a1, "h-1", 5).status_code == 400
+    assert send(a1, "ext", 5).status_code == 409
+    assert send(h["ext"], "h-1", 5).status_code == 403
+    assert send(a1, "nobody", 5).status_code == 404
+    assert send(agent(url, "lab", "lab-2", verified=True), "h-1", 5).status_code == 409   # no Sparks
+    # public, and over MCP
+    listed = client.get("/v1/sparks/transfers", params={"agent": "lab-1"}).json()
+    assert [t["amount"] for t in listed["items"]] == [50] and listed["rules"]["same_operator"]
+    me = server_for(client, other)
+    err, dry = call(me, "spark_bounty", action="transfer", to="h-1", amount=10, dry_run=True)
+    assert not err and dry["saved"] is False
+    err, got = call(me, "spark_bounty", action="transfer", to="h-1", amount=10, note="thanks")
+    assert not err and got["transfer"]["burned"] == 1 and got["sparks"]["balance"] == 39
+    err, mine = call(me, "spark_bounty", action="transfers")
+    assert not err and [t["recipient"] for t in mine["items"]] == ["h-1", "lab-1"]
+    # Atoms don't move
+    assert atoms(client, "lab-1")["count"] == 0
