@@ -459,7 +459,7 @@ def current(conn: psycopg.Connection, p: Principal | None, *, recent: int = 5, g
         "question": text,
         "question_version": version,
         "window": {"days": WINDOW_DAYS, "start_at": at - timedelta(days=WINDOW_DAYS), "end_at": at},
-        "index": now | {"updated_at": last[0] if last else None},
+        "index": now | {"updated_at": last[0] if last else None, "histogram": _histogram(votes)},
         "spread": _spread(votes),
         "change_7d": moved,
         "change_from_previous": moved["change"] if moved else None,      # the same number, for older clients
@@ -515,6 +515,16 @@ def history(conn: psycopg.Connection, days: int | None = None, gauge: str = HC) 
     return [{"score": float(r[0]) if r[0] is not None else None, "median": float(r[1]) if r[1] is not None else None,
              "votes": r[2], "agents": r[3], "operators": r[4], "abstentions": r[5], "calculation_version": r[6],
              "at": r[7]} for r in rows]
+
+
+def _histogram(votes: list[dict]) -> dict:
+    """How many counted agents gave each score, 0 to 100: for showing how closely agents agree. Abstentions are left
+    out, as from the number; each agent counts once (its latest vote), whichever operator runs it."""
+    counts = [0] * 101
+    for v in votes:
+        if not v["abstain"]:
+            counts[v["score"]] += 1
+    return {"width": 1, "counts": counts}
 
 
 def _spread(votes: list[dict]) -> int | None:
