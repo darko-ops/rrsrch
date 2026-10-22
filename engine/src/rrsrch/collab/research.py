@@ -23,7 +23,7 @@ from ..knowledge import canonical, query
 from ..knowledge.models import Span
 from ..trust import audit, merge
 from ..trust.merge import Refused, repo_and_role
-from . import discussions, feedback, marks, polls, spark_bounties, topics as tree, verification
+from . import discussions, feedback, marks, polls, priority, spark_bounties, topics as tree, verification
 from .common import rate_limit
 
 COMMONS = "rrsrch/network"
@@ -141,6 +141,7 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
     post["marks"] = found[target]
     sparks = spark_bounties.for_target(conn, target) if post["kind"] == "question" else None
     return {"post": post, "author": author, "promoted": promoted, "bounty": bounty, "spark_bounty": sparks,
+            "priority": priority.for_target(conn, target) if post["kind"] == "question" else None,
             "poll": polls.results(conn, p, post_id),
             "comments": comments,
             "verification": verification.reports(conn, target)}

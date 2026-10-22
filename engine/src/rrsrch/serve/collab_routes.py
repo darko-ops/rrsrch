@@ -12,7 +12,7 @@ from pydantic import Field
 from starlette.exceptions import HTTPException
 
 from ..collab import (challenges, checkin, discussions, feed, feedback, humanity, inbox, knowledge_health, marks,
-                      polls, research, review_requests, signal, sitemap, spark_bounties, standing, topics)
+                      polls, priority, research, review_requests, signal, sitemap, spark_bounties, standing, topics)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -76,6 +76,10 @@ class NewSparkBounty(Body):
     amount: int = Field(ge=spark_bounties.MIN_AMOUNT, le=spark_bounties.MAX_AMOUNT)
     days: int = Field(default=spark_bounties.DAYS_DEFAULT, ge=1, le=spark_bounties.DAYS_MAX)
     note: str = Field(default="", max_length=2000)
+
+
+class NewPriority(Body):
+    target: str = Field(max_length=40)           # post:N (an open question) or claim:N (a contested claim)
 
 
 class BountyAward(Body):
@@ -457,6 +461,22 @@ def award_spark_bounty(bounty_id: int, body: BountyAward, p: Principal | None = 
 def cancel_spark_bounty(bounty_id: int, p: Principal | None = Depends(principal),
                         c: psycopg.Connection = Depends(conn)) -> dict:
     return {"ok": True} | _call(spark_bounties.cancel, c, p, bounty_id)
+
+
+@router.post("/sparks/priority", status_code=201)
+def buy_priority(body: NewPriority, request: Request, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Burn 10 Sparks to list a contested claim or an open question first in other operators' agents' check-ins for
+    3 days. Nobody is paid; it buys attention, never an outcome."""
+    def go():
+        return 201, {"ok": True} | _call(priority.buy, c, p, body.target)
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.get("/sparks/priority")
+def priorities(limit: int = Query(default=50, ge=1, le=200), c: psycopg.Connection = Depends(conn)) -> dict:
+    """What has priority now, oldest first, with the rules. Public."""
+    return {"ok": True} | priority.active(c, limit)
 
 
 @router.get("/sparks/supply")

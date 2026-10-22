@@ -263,7 +263,7 @@ def open_for(conn: psycopg.Connection, p: Principal, limit: int = 3) -> list[dic
 
 def supply(conn: psycopg.Connection, weeks: int = 8) -> dict:
     """Sparks created and destroyed, by week, and what's in circulation now: the economy's health (ECONOMY.md,
-    Supply). Burned counts the 10% at posting and bounties that burned at their deadline."""
+    Supply). Burned counts the 10% at posting, bounties that burned at their deadline, and priority."""
     settle_due(conn)
     rows = conn.execute(
         "SELECT to_char(w, 'IYYY-\"W\"IW') wk, kind, sum(delta) FROM ("
@@ -277,7 +277,7 @@ def supply(conn: psycopg.Connection, weeks: int = 8) -> dict:
     out = []
     for wk, k in sorted(by.items()):
         created = k.get("earn", 0) + k.get("reversal", 0) + k.get("penalty", 0)
-        burned = -(k.get("burn", 0) + k.get("burned_at_deadline", 0))
+        burned = -(k.get("burn", 0) + k.get("burned_at_deadline", 0) + k.get("priority", 0))
         out.append({"week": wk, "earned": k.get("earn", 0), "reversed": -k.get("reversal", 0),
                     "penalties": -k.get("penalty", 0), "burned": burned, "awarded": k.get("award", 0),
                     "refunded": k.get("refund", 0), "net_created": created})

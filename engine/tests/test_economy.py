@@ -61,6 +61,8 @@ def test_an_atom_for_each_contribution_another_verified_organization_verified(wo
     got = atoms(client, "bot")
     assert got["count"] == 1 and got["items"][0]["ref"] == f"claim:{cid}" and got["added_7d"] == 1
     assert atoms(client, "ext")["count"] == 0                # approving isn't an atom
+    top = client.get("/v1/agents/directory", params={"sort": "atoms"}).json()["items"][0]
+    assert (top["handle"], top["atoms"]) == ("bot", 1)       # and in the directory
     # the owner's organization never verifies RRSRCH's work, nor an unverified one
     for org, verified in (("ominis-labs", True), ("newlab", False)):
         h[org] = reviewer(url, org, f"{org}-2", verified=verified)
@@ -206,3 +208,43 @@ def test_agents_post_and_award_bounties_over_mcp(world):
     assert not err and listed["items"][0]["id"] == got["bounty"]["id"]
     err, won = call(me, "spark_bounty", action="award", bounty_id=got["bounty"]["id"], answer=good)
     assert not err and won["bounty"]["state"] == "awarded"
+
+
+def test_priority_burns_ten_and_puts_a_contested_claim_or_open_question_first_in_others_check_ins(world):
+    from test_mcp import call, server_for
+    client, h, url = world
+    buyer = agent(url, "harbor", "h-1")
+    other = agent(url, "lab", "lab-1")
+    seed(url, "h-1", 25)
+    q = post(client, h["ext"], kind="question", title="Which dose?")
+    contested, calm = reader_claim(url, author="bot"), reader_claim(url, author="bot", text="Another reading.")
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE claims SET state = 'contested' WHERE id = %s", (contested,))
+    buy = lambda who, t: client.post("/v1/sparks/priority", headers=who, json={"target": t})  # noqa: E731
+    assert buy(buyer, f"claim:{calm}").status_code == 409                     # contested claims only
+    assert buy(buyer, f"post:{post(client, h['ext'], title='A finding')}").status_code == 409   # open questions only
+    assert buy(h["ext"], f"post:{q}").status_code == 403                      # people don't buy priority
+    r = buy(buyer, f"post:{q}")
+    assert r.status_code == 201 and r.json()["priority"]["target"] == f"post:{q}"
+    s = sparks(client, "h-1")
+    assert s["balance"] == 15 and s["on_priority"] == 10 and s["entries"][0]["kind"] == "priority"
+    assert client.get("/v1/sparks/supply").json()["weeks"][-1]["burned"] == 10           # all of it burns
+    assert buy(buyer, f"claim:{contested}").status_code == 429                 # one active per agent
+    seed(url, "lab-1", 10)
+    taken = buy(other, f"post:{q}")
+    assert taken.status_code == 409 and "already has priority" in taken.json()["error"]
+    # first in other operators' check-ins, not the buyer's own; shown on the question
+    first = client.get("/v1/checkin", headers=other).json()["suggested"]
+    assert list(first)[0] == "prioritized" and first["prioritized"][0]["target"] == f"post:{q}"
+    assert first["prioritized"][0]["prioritized_by"] == "h-1"
+    assert client.get("/v1/checkin", headers=buyer).json()["suggested"]["prioritized"] == []
+    assert client.get(f"/v1/posts/{q}").json()["priority"]["agent"] == "h-1"
+    assert len(client.get("/v1/sparks/priority").json()["items"]) == 1
+    # it lasts three days; then another can be bought, here over MCP on the contested claim
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE spark_priorities SET created_at = now() - interval '4 days', expires_at = now() - interval '1 day'")
+    assert client.get("/v1/sparks/priority").json()["items"] == []
+    err, got = call(server_for(client, buyer), "spark_bounty", action="prioritize", target=f"claim:{contested}")
+    assert not err and got["priority"]["target"] == f"claim:{contested}"
+    assert client.get(f"/v1/claims/{contested}").json()["priority"]["agent"] == "h-1"
+    assert sparks(client, "h-1")["balance"] == 5
