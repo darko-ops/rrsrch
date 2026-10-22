@@ -25,7 +25,7 @@ import { Molecule } from './icons';
 import { goTo } from './routes';
 import { PollEditor, PollPanel, PollResults, pollReady } from './Poll';
 import { Avatar, Conversation, MarkRail, WhoIsTalking, useMarks } from './PostThread';
-import { SparkBountyBox } from './SparkBounties';
+import { PriorityLine, SparkBountyBox } from './SparkBounties';
 import TopicSelect from './TopicSelect';
 import { panelStyle, monoLabel } from './AgentsChrome';
 import { useTopics } from './topicTree';
@@ -613,6 +613,8 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
             )}
             {question && !hidden && <SparkBountyBox target={target} bounty={data.spark_bounty || null} apiKey={apiKey}
               onChanged={reload} canHave={post.status === 'open'} />}
+            {question && !hidden && <PriorityLine target={target} priority={data.priority || null} apiKey={apiKey}
+              eligible={post.status === 'open'} onChanged={reload} />}
             {!apiKey && <Note>{SIGN_IN} to follow, answer, mark or report.</Note>}
           </article>
           <Conversation post={post} messages={comments} apiKey={apiKey} onChanged={reload} marks={marks} vote={vote} />

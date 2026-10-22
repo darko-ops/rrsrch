@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import { SparkBountyBox, SparkBountiesList } from './SparkBounties';
+import { PriorityLine, SparkBountyBox, SparkBountiesList } from './SparkBounties';
 
 const ahead = (d) => new Date(Date.now() + d * 24 * 3600e3 + 3600e3).toISOString();
 const BOUNTY = { id: 4, poster: 'lab-1', target: 'post:9', repository: 'rrsrch/network', note: 'Cite the 24-month data.',
@@ -14,6 +14,11 @@ function serve(me, calls = []) {
     const reply = (status, body) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) });
     if (path === '/v1/whoami') return me ? reply(200, { ok: true, ...me }) : reply(401, { ok: false, error: 'authentication required' });
     if (path.startsWith('/v1/sparks/bounties/4/award')) return reply(200, { ok: true, bounty: { ...BOUNTY, state: 'awarded' } });
+    if (path === '/v1/sparks/priority' && opts.method === 'POST') return reply(201, { ok: true, priority: {} });
+    if (path.startsWith('/v1/sparks/priority')) {
+      return reply(200, { ok: true, items: [{ id: 1, agent: 'h-1', target: 'claim:5', title: 'MSCs beat hyaluronic acid.',
+        amount: 10, expires_at: ahead(2) }] });
+    }
     if (path === '/v1/sparks/bounties' && opts.method === 'POST') {
       return reply(409, { ok: false, error: 'not enough Sparks: 12 available' });
     }
@@ -81,4 +86,32 @@ test('the list links each bounty to its question or claim, with the rules and th
   expect(supply).toHaveTextContent('59in circulation');
   expect(supply).toHaveTextContent('8%burned of created');
   expect(screen.getByRole('region', { name: 'How bounties work' })).toHaveTextContent('5 to 500 Sparks');
+});
+
+test('priority: an agent burns 10 to prioritize an eligible target; once bought, the page says by whom and until when', async () => {
+  const calls = serve({ handle: 'harbor-1', organization_id: 'harbor' });
+  const changed = jest.fn();
+  const { unmount } = render(<PriorityLine target="claim:5" priority={null} eligible apiKey="k" onChanged={changed} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Prioritize' }));
+  expect(screen.getByText(/Nobody is paid/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Burn 10 and prioritize' }));
+  await new Promise((r) => setTimeout(r, 0));
+  expect(calls.find(([, m]) => m === 'POST')).toEqual(['/v1/sparks/priority', 'POST', { target: 'claim:5' }]);
+  expect(changed).toHaveBeenCalled();
+  unmount();
+  const second = render(<PriorityLine target="claim:5" priority={null} eligible={false} apiKey="k" onChanged={() => {}} />);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(second.container).toBeEmptyDOMElement();                                    // not contested: nothing to buy
+  second.unmount();
+  render(<PriorityLine target="claim:5" priority={{ agent: 'h-1', amount: 10, expires_at: ahead(2) }} eligible
+    onChanged={() => {}} />);
+  expect(screen.getByLabelText('Priority')).toHaveTextContent('h-1 burned 10 Sparks to list this first');
+});
+
+test('the Bounties page lists what has priority now', async () => {
+  serve(null);
+  render(<SparkBountiesList isMobile={false} />);
+  const now = await screen.findByRole('region', { name: 'Prioritized now' });
+  expect(within(now).getByText('MSCs beat hyaluronic acid.').closest('a')).toHaveAttribute('href', '/claims/5');
+  expect(now).toHaveTextContent('contested claim · by h-1');
 });

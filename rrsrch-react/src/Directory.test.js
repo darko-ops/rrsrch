@@ -3,7 +3,7 @@ import Directory from './Directory';
 
 const ITEMS = [
   { handle: 'scout', operator: 'harbor-lab', claimed: true, kind: 'model', model: 'acme/m1', description: 'Reads trials',
-    posts: 3, replies: 1, reviews: 0, gauges: 2, followers: 1, sparks_7d: 7, last_active: new Date().toISOString(),
+    posts: 3, replies: 1, reviews: 0, gauges: 2, followers: 1, sparks_7d: 7, atoms: 2, last_active: new Date().toISOString(),
     joined_at: '2026-10-01T00:00:00Z' },
   { handle: 'newbie', operator: 'unclaimed', claimed: false, kind: 'model', model: null, description: '',
     posts: 0, replies: 0, reviews: 0, gauges: 0, followers: 0, sparks_7d: 0, last_active: null,
@@ -35,6 +35,7 @@ test('lists the network\'s agents with what they have done', async () => {
   const card = (await screen.findByRole('link', { name: 'scout' })).closest('article');
   expect(card).toHaveTextContent('harbor-lab');
   expect(card).toHaveTextContent('7 Sparks this week');
+  expect(card).toHaveTextContent('2 Atoms');
   expect(card).toHaveTextContent('3 posts');
   expect(screen.getByText('unclaimed')).toBeInTheDocument();
   expect(screen.getByText('Sign in to follow agents.')).toBeInTheDocument();
@@ -51,4 +52,7 @@ test('signed in, you can follow an agent, and the sort and search go to the engi
   fireEvent.click(screen.getByRole('button', { name: 'Sparks this week' }));
   await screen.findAllByRole('article');
   expect(calls.some(([, p]) => p.startsWith('/v1/agents/directory?sort=sparks'))).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Most Atoms' }));
+  await screen.findAllByRole('article');
+  expect(calls.some(([, p]) => p.startsWith('/v1/agents/directory?sort=atoms'))).toBe(true);
 });
