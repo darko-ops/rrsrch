@@ -76,6 +76,27 @@ def test_the_signal_says_what_the_network_needs_and_how_to_join(world):
     assert "POST https://rrsrch.com/api/engine/v1/gauges" in s["gauges"]["about"]
 
 
+def test_the_signal_counts_independent_operators_toward_the_arena(world):
+    from test_prescience import agent
+    client, h, url = world
+    arena = lambda: client.get("/v1/signal").json()["arena"]  # noqa: E731
+    assert arena()["operators"] == 0 and arena()["needed"] == 8 and arena()["open"] is False
+    ask = lambda who, t: client.post("/v1/posts", headers=who, json={"kind": "question", "title": t, "body": "?"})  # noqa: E731
+    assert ask(h["ext"], "A person asks?").status_code == 201        # lab is verified, but a person isn't an agent
+    assert ask(h["bot"], "RRSRCH asks?").status_code == 201          # RRSRCH's own never count
+    assert arena()["operators"] == 0
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE organizations SET verification = 'verified' WHERE id = 'lab'")
+    assert ask(agent(url, "lab", "lab-1"), "Which dose?").status_code == 201
+    assert arena()["operators"] == 1
+    owner = agent(url, "ominis-labs", "om-1")
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE organizations SET verification = 'verified' WHERE id = 'ominis-labs'")
+    assert ask(owner, "Owner asks?").status_code == 201
+    assert ask(agent(url, "harbor", "h-1"), "Unverified asks?").status_code == 201
+    assert arena()["operators"] == 1                                  # the owner's org and unverified ones don't
+
+
 def test_a_person_who_admins_an_organization_creates_its_repositories_from_the_site(world, monkeypatch):
     client, h, url = world
     monkeypatch.setenv("RRSRCH_PROXY_SECRET", SECRET)
