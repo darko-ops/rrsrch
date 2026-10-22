@@ -3,7 +3,7 @@
  * Landing keeps the parent's 3D planet behind it. Results use a solid black column.
  */
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { Search, Loader2, ExternalLink, X, Bot, CircleUser, Radar } from 'lucide-react';
+import { Search, Loader2, ExternalLink, X, Bot, CircleUser, Radar, Trophy } from 'lucide-react';
 import { Molecule } from './icons';
 import { readSearchHistory, pushSearchHistory } from './searchHistory';
 import JoinSignal from './JoinSignal';
@@ -2420,7 +2420,7 @@ export function TopBar({
         style={{
           marginLeft: showSearch ? 0 : 'auto', flexShrink: 0, textDecoration: 'none',
           background: active === 'explore' ? 'rgba(255,255,255,0.08)' : 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
-          color: '#aaa', padding: isMobile ? '10px 14px' : '10px 20px',
+          color: '#aaa', padding: isMobile ? '10px 11px' : '10px 20px',
           fontFamily: fonts.main, fontSize: 12, textTransform: 'uppercase', letterSpacing: '1px',
           display: 'flex', alignItems: 'center', gap: 8,
         }}
@@ -2435,7 +2435,7 @@ export function TopBar({
         style={{
           flexShrink: 0, textDecoration: 'none',
           background: active === 'radar' ? 'rgba(255,255,255,0.08)' : 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
-          color: '#aaa', padding: isMobile ? '10px 14px' : '10px 20px',
+          color: '#aaa', padding: isMobile ? '10px 11px' : '10px 20px',
           fontFamily: fonts.main, fontSize: 12, textTransform: 'uppercase', letterSpacing: '1px',
           display: 'flex', alignItems: 'center', gap: 8,
         }}
@@ -2445,6 +2445,21 @@ export function TopBar({
         {isMobile ? null : 'Radar'}
       </a>
 
+      <a
+        href="#/leaderboard"
+        style={{
+          flexShrink: 0, textDecoration: 'none',
+          background: active === 'leaderboard' ? 'rgba(255,255,255,0.08)' : 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
+          color: '#aaa', padding: isMobile ? '10px 11px' : '10px 20px',
+          fontFamily: fonts.main, fontSize: 12, textTransform: 'uppercase', letterSpacing: '1px',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}
+        aria-label="Leaderboard"
+      >
+        <Trophy size={14} />
+        {isMobile ? null : 'Leaderboard'}
+      </a>
+
       <button
         type="button"
         onClick={onAgents}
@@ -2452,7 +2467,7 @@ export function TopBar({
         style={{
           flexShrink: 0,
           background: active === 'agents' ? 'rgba(255,255,255,0.08)' : 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
-          color: '#aaa', padding: isMobile ? '10px 14px' : '10px 20px', cursor: 'pointer',
+          color: '#aaa', padding: isMobile ? '10px 11px' : '10px 20px', cursor: 'pointer',
           fontFamily: fonts.main, fontSize: 12, textTransform: 'uppercase', letterSpacing: '1px',
           display: 'flex', alignItems: 'center', gap: 8,
         }}
@@ -2474,7 +2489,7 @@ export function TopBar({
           flexShrink: 0,
           background: active === 'account' ? 'rgba(255,255,255,0.08)' : 'transparent',
           border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24,
-          color: '#aaa', padding: isMobile ? '10px 14px' : '10px 20px', cursor: 'pointer',
+          color: '#aaa', padding: isMobile ? '10px 11px' : '10px 20px', cursor: 'pointer',
           fontFamily: fonts.main, fontSize: 12, textTransform: 'uppercase', letterSpacing: '1px',
           display: 'flex', alignItems: 'center', gap: 8,
         }}
