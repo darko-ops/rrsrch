@@ -13,8 +13,9 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Bot, CircleSlash2, CircleUser, Search } from 'lucide-react';
+import AgreementPanel from './Agreement';
 import { engine, actingKey, fonts, Note, Loading, useLoad, when, short } from './Dashboard';
-import { Gauge, EvidenceRef, bandColor, shown, pageOf, participation, mono, plural, LABEL, BAND_LABELS, useReducedMotion }
+import { EvidenceRef, bandColor, shown, pageOf, participation, mono, plural, LABEL, BAND_LABELS, useReducedMotion }
   from './HumanityConfidence';
 
 // the design's red, in place of the site green on these pages
@@ -343,13 +344,12 @@ export function PrescienceIndex({ isMobile }) {
 // One gauge
 // =====================================================================================================================
 
-// The gauge page's header: back to the Radar, then which gauge this is, and nothing about the others.
+// The gauge page's breadcrumb: back to the Radar, then what kind of gauge this is (its title is the page's h1).
 function DetailHead({ data }) {
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
       <a href="#/radar" style={{ color: '#aaa', fontSize: 13, textDecoration: 'none' }}>← Radar</a>
       <span style={{ color: '#333' }}>/</span>
-      <span style={{ color: '#fff', fontSize: 14, fontWeight: 600 }}>{data.title}</span>
       {data.core ? <TopicTag label="Core gauge" /> : <>
         {data.topic_label && <TopicTag label={data.topic_label} />}
         <span style={{ fontSize: 12.5, color: '#888' }}>Proposed by <a href={`/agents/${data.proposed_by}`}
@@ -359,29 +359,40 @@ function DetailHead({ data }) {
   );
 }
 
+// Design handoff "5a": the gauge's title as the headline and its question under it; the Radar's knob dial with the
+// score, band and 7-day change beside them. Below, how much agents agree (Agreement.js).
 function Hero({ data, isMobile }) {
   const i = data.index;
   const s = shown(data);
-  const facts = [participation(i), i.model_families > 0 && plural(i.model_families, 'model family', 'model families'),
+  const facts = [i.model_families > 0 && plural(i.model_families, 'model family', 'model families'),
     i.verified_operators > 0 && plural(i.verified_operators, 'verified operator'), i.median != null && `median ${i.median.toFixed(1)}`,
-    i.updated_at && `updated ${day(i.updated_at)}`];
+    i.abstentions > 0 && `${i.abstentions} abstained`, i.updated_at && `updated ${day(i.updated_at)}`].filter(Boolean);
   return (
-    <section style={{ display: 'grid', gap: isMobile ? 20 : 48, alignItems: 'center', padding: '18px 4px 26px',
-      gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 300px' }}>
-      <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-        <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 24 : 32, fontWeight: 600, lineHeight: 1.25,
-          letterSpacing: '-0.02em', textWrap: 'balance' }}>{data.question}</h1>
-        <span style={{ fontSize: 13, color: '#888', lineHeight: 1.6 }}>{facts.filter(Boolean).join(' · ')}</span>
-        <span style={{ fontSize: 12, color: '#666', lineHeight: 1.5 }}>{LABEL}</span>
+    <section style={{ display: 'grid', gap: isMobile ? 20 : 40, alignItems: 'end', padding: '14px 4px 6px',
+      gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) auto' }}>
+      <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+        <h1 style={{ margin: 0, fontFamily: fonts.main, color: '#fff', fontSize: isMobile ? 34 : 52, fontWeight: 700,
+          lineHeight: 1.02, letterSpacing: '-0.035em', overflowWrap: 'anywhere' }}>{data.title}</h1>
+        <p style={{ margin: 0, fontSize: isMobile ? 15 : 18, lineHeight: 1.5, color: '#a3a3a3', maxWidth: 640,
+          textWrap: 'pretty' }}>{data.question}</p>
+        {facts.length > 0 && <span style={{ fontSize: 12.5, color: '#777' }}>{facts.join(' · ')}</span>}
       </div>
-      <div style={{ display: 'grid', justifyItems: 'center', gap: 6 }}>
-        <Gauge score={s ? s.score : null} width={280} dim={!s} label={data.title} />
-        {s ? <>
-          <span><span style={{ ...mono(38, 600), color: '#fff' }}>{s.score.toFixed(1)}</span>
-            <span style={{ ...mono(13), color: '#666' }}> / 100</span></span>
-          <span style={{ fontSize: 14, color: bandColor(s.score) }}>{s.label}</span>
-          {s.status === 'provisional' && <span style={{ fontSize: 12, color: PROVISIONAL }}>Provisional · {plural(s.operators, 'operator')}</span>}
-        </> : <span style={{ fontSize: 14, color: '#888' }}>Awaiting agent perspectives.</span>}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+        <span style={{ width: 150, flex: '0 0 auto' }}>
+          <KnobGauge score={s ? s.score : null} width={150} stroke={16} knob={10} knobStroke={4} label={data.title} />
+        </span>
+        <span style={{ display: 'grid', gap: 4 }}>
+          {s ? <>
+            <span style={{ ...mono(44, 600), lineHeight: 1, color: '#fff', letterSpacing: '-0.03em' }}>{s.score.toFixed(1)}</span>
+            <span style={{ fontSize: 14, color: bandColor(s.score) }}>{s.label}</span>
+            <ChangeText c={data.change_7d} size={12} />
+            {s.status === 'provisional' && <span style={{ fontSize: 12, color: PROVISIONAL }}
+              title="Provisional until 5 operators and 10 agents">Provisional</span>}
+          </> : <>
+            <span style={{ ...mono(44, 600), lineHeight: 1, color: '#333' }}>—</span>
+            <span style={{ fontSize: 14, color: '#888' }}>Awaiting agent perspectives.</span>
+          </>}
+        </span>
       </div>
     </section>
   );
@@ -789,6 +800,8 @@ export default function PresciencePage({ gauge, isMobile }) {
       {got.error && <Note tone="error">{got.error === 'not found' ? `No gauge ${gauge}.` : got.error}</Note>}
       {data && <>
         <Hero data={data} isMobile={isMobile} />
+        {shown(data) && data.index.histogram ? <AgreementPanel index={data.index} isMobile={isMobile} disclaimer={LABEL} />
+          : <span style={{ fontSize: 12, color: '#666', lineHeight: 1.5 }}>{LABEL}</span>}
         <UnderlineTabs items={VIEWS} value={view} onChange={setView} label="Views" />
         {view === 'overview' && <Overview data={data} gauge={gauge} isMobile={isMobile} onView={setView} />}
         {view === 'perspectives' && <Perspectives gauge={gauge} />}

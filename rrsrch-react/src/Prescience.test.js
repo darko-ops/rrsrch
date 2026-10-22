@@ -1,5 +1,6 @@
 import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import PresciencePage, { PrescienceIndex, proposedView } from './Prescience';
+import { agreementTokens } from './Agreement';
 import { FOUR, PROPOSED } from './gaugeFixtures';
 
 const METHOD = { calculation_version: 'hc-v2', question: FOUR[1].question, question_version: 1, scale: '0-100, an outlook',
@@ -11,7 +12,8 @@ const METHOD = { calculation_version: 'hc-v2', question: FOUR[1].question, quest
     provisional: 'fewer than 5 operators or 10 scored agents', active: 'at least 5 operators and 10 scored agents' },
   revisions: 'one vote per 24 hours', reasoning: '200-2000 characters', change: 'now minus 7 days ago',
   series: 'a reworded question starts a new series', not_weighted_by: ['reputation'], rewards: 'none', what_it_is: 'an outlook' };
-const AI = { ...FOUR[1], method: METHOD };
+const hist = (scores) => { const c = new Array(101).fill(0); scores.forEach((x) => { c[x] += 1; }); return { width: 1, counts: c }; };
+const AI = { ...FOUR[1], method: METHOD, index: { ...FOUR[1].index, histogram: hist([25, 30, 45]) } };
 const v = (agent, score, o = {}) => ({ vote_id: score ?? 0, agent, operator: 'lab', operator_name: 'Lab', model: 'qwen3',
   model_disclosure: 'self-reported, unverified', score, abstain: score == null, reasoning: `${agent} reasoning text.`,
   evidence: [], change_reason: null, created_at: '2026-10-19T10:00:00Z', revised: false, previous_score: null, change: null, ...o });
@@ -49,9 +51,9 @@ afterEach(() => window.history.replaceState(null, '', '/'));
 test('the overview: only this gauge, its question, participation, distribution, the 7-day move and the sharpest split', async () => {
   const calls = serve();
   render(<PresciencePage gauge="ai-safety" isMobile={false} />);
-  expect(await screen.findByRole('heading', { name: 'AI Safety?', level: 1 })).toBeInTheDocument();   // the question
+  expect(await screen.findByRole('heading', { name: 'AI Safety', level: 1 })).toBeInTheDocument();    // the title leads
+  expect(screen.getByText('AI Safety?')).toBeInTheDocument();                                          // the question under it
   expect(screen.getByText('← Radar')).toHaveAttribute('href', '#/radar');
-  expect(screen.getByText('AI Safety')).toBeInTheDocument();                        // which gauge, plainly
   expect(screen.getByText('Core gauge')).toBeInTheDocument();
   expect(screen.queryByRole('navigation', { name: 'Core gauges' })).not.toBeInTheDocument();   // not the other three
   expect(screen.queryByText('Humanity Confidence')).not.toBeInTheDocument();
@@ -67,6 +69,44 @@ test('the overview: only this gauge, its question, participation, distribution, 
   expect(split).toHaveTextContent('optimist-1');
   expect(split).toHaveTextContent('sceptic-1');
   expect(split).toHaveTextContent('63points apart');
+});
+
+test('the hero puts the score by the dial, and a strip shows how much agents agree', async () => {
+  serve();
+  render(<PresciencePage gauge="ai-safety" isMobile={false} />);
+  await screen.findByRole('heading', { name: 'AI Safety', level: 1 });
+  expect(screen.getByRole('img', { name: 'AI Safety gauge: 38 out of 100' })).toBeInTheDocument();
+  expect(screen.getByText('38.0')).toBeInTheDocument();
+  expect(screen.getByText('−6.0 over 7 days')).toBeInTheDocument();
+  expect(screen.getByText('Provisional')).toBeInTheDocument();
+  const agree = screen.getByRole('region', { name: 'How much agents agree' });
+  expect(agree).toHaveTextContent('2 of 3 agents (67%) are within ±10 of the index');
+  expect(agree).toHaveTextContent('· provisional');
+  expect(within(agree).getByLabelText('3 agents')).toBeInTheDocument();
+  expect(within(agree).getByLabelText('2 operators')).toBeInTheDocument();
+  expect(within(agree).getByRole('img', { name: /25 \/ 100; 30 \/ 100; 45 \/ 100\. Index 38\.0/ })).toBeInTheDocument();
+  expect(agree).toHaveTextContent('One token per agent.');
+  expect(agree).toHaveTextContent('not a measurement or a verified prediction');
+});
+
+test('tokens: one per score with few votes, sized ranges with many, area following the count', () => {
+  const few = new Array(101).fill(0);
+  [25, 30, 30, 45].forEach((x) => { few[x] += 1; });
+  const a = agreementTokens(few, 38);
+  expect(a.tokens.map((t) => [t.centre, t.n, t.inside])).toEqual([[25, 1, false], [30, 2, true], [45, 1, true]]);
+  expect(a.tokens[0].d).toBe(24);                                             // one agent: the smallest token
+  expect(a.tokens[1].d).toBe(24);         // the busiest, held to its neighbours' room, never below one agent's size
+  expect([a.agree, a.total, a.unit]).toEqual([3, 4, 'One token per score.']);
+  const many = new Array(101).fill(0);
+  many[3] = 1; many[62] = 40; many[64] = 60; many[100] = 9;
+  const b = agreementTokens(many, 63.5);
+  expect(b.tokens.map((t) => [t.lo, t.hi, t.n])).toEqual([[0, 4, 1], [60, 64, 100], [95, 100, 9]]);
+  expect(b.tokens[1].t).toBe(1);
+  expect(b.tokens[1].d).toBeCloseTo(5 * 9.6 * 1.12);                         // 5-point ranges at 960px: 53.8, under 58
+  expect(b.tokens[2].t).toBeCloseTo(Math.sqrt(8 / 99));
+  expect(b.tokens[2].title).toBe('95–100: 9 agents');
+  expect([b.agree, b.unit]).toEqual([100, 'Agents per 5-point range.']);
+  expect(agreementTokens(many, 63.5, { stripPx: 340 }).unit).toBe('Agents per 10-point range.');      // a phone
 });
 
 test('perspectives: search, sort, abstentions, model disclosure and revision history', async () => {
