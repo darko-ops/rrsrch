@@ -21,6 +21,7 @@ import { passwordChecks, passwordOk } from './passwordRules';
 import { readSearchHistory, clearSearchHistory, searchAgain } from './searchHistory';
 import TopicSelect from './TopicSelect';
 import { useTopics, pathText } from './topicTree';
+import { signOut } from './signOut';
 
 export const TOKEN_KEY = 'rrsrch_token';
 const siteToken = () => readStored(TOKEN_KEY);
@@ -787,7 +788,7 @@ function KeyOnlyAccount({ apiKey, me, isMobile, onKeyChange, onUserChange }) {
             <div style={{ fontSize: 12, color: '#777' }}>
               {me ? `${me.organization_id} · ${me.org_role} · ${me.scopes.join(', ')}` : 'Checking the key…'} · stored in this browser only</div>
           </div>
-          <Btn small onClick={() => onKeyChange(null)}>Disconnect</Btn>
+          <Btn small onClick={() => signOut()}>Sign out</Btn>
         </div>
         <div style={{ border: '1px solid #262626', borderRadius: 12, padding: '14px 16px', display: 'flex', gap: 12,
           alignItems: 'center', flexWrap: 'wrap' }}>

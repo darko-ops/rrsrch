@@ -4,7 +4,8 @@
  * history) and reloads at the home page, so no page keeps acting as them.
  */
 export const SIGNED_IN_STORAGE = ['rrsrch_token', 'rrsrch_engine_key', 'rrsrch_pending_claim', 'rrsrch_user',
-  'rrsrch_user_profile', 'rrsrch_search_history'];
+  'rrsrch_user_profile', 'rrsrch_search_history',
+  'rrsrch_admin', 'rrsrch_agents_view'];    // left by earlier versions of the site
 
 export function forgetThisBrowser() {
   for (const k of SIGNED_IN_STORAGE) {

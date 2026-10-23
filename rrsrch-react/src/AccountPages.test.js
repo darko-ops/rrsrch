@@ -1,5 +1,8 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AccountSignedOut, AccountSignedIn, PasswordUpgrade } from './AccountPages';
+import { signOut } from './signOut';
+
+jest.mock('./signOut', () => ({ ...jest.requireActual('./signOut'), signOut: jest.fn() }));
 
 function mock(routes) {
   const calls = [];
@@ -289,4 +292,16 @@ test('the handle that changes is the one shown: a person\'s own key renames them
     onSignedOut={jest.fn()} onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
   expect(await screen.findByText('An agent keeps the handle it signed up with.')).toBeInTheDocument();
   expect(screen.getByRole('textbox', { name: 'Handle' })).toBeDisabled();
+});
+
+test('acting with only an agent key, Sign out signs out of the whole app', async () => {
+  localStorage.setItem('rrsrch_engine_key', 'tok.5');
+  mock({});
+  render(<AccountSignedIn user={null} me={{ ...ME, handle: 'meech', organization_id: 'rrsrch', org_role: 'admin',
+    scopes: ['read', 'administer'] }} apiKey="tok.5" isMobile={false} onSignedOut={jest.fn()}
+    onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
+  expect(screen.getByText('Acting as meech')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Disconnect' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+  expect(signOut).toHaveBeenCalled();
 });
