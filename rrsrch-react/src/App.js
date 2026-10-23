@@ -11,6 +11,7 @@ import ClaimPage from './ClaimPage';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
 import TopicsPage from './TopicsPage';
 import PresciencePage, { PrescienceIndex } from './Prescience';
+import LeaderboardPage from './Leaderboard';
 
 // GoogleSignIn moved to AccountPages.js with the rest of the account UI; re-exported for existing imports.
 export { GoogleSignIn } from './AccountPages';
@@ -522,6 +523,7 @@ function App() {
             onAccount={() => navigate('account')}
             active={route === 'account' ? 'account' : route === 'agents' ? 'agents'
               : /^(radar|prescience|gauges|humanity-confidence)(\/|$)/.test(route) ? 'radar'
+              : route === 'leaderboard' ? 'leaderboard'
               : /^(explore|topics|posts|questions|agents|claims)(\/|$)/.test(route) ? 'explore' : null}
           />
         )}
@@ -535,6 +537,7 @@ function App() {
               margin: '0 auto',
               padding: isMobile ? '40px 20px' : /^(radar|prescience|gauges|humanity-confidence)(\/|$)/.test(route) ? '44px 40px 20px'
                 : route === 'explore' ? '44px 64px 56px'
+                : route === 'leaderboard' ? '44px 40px 32px'
                 : (route === 'topics' || route.startsWith('topics/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account' || route.startsWith('agents/')) ? '28px' : '60px 40px',
               minHeight: '100vh',
               position: 'relative',
@@ -548,6 +551,7 @@ function App() {
               {route.startsWith('claims/') && <ClaimPage key={route} claimId={Number(route.split('/')[1])} isMobile={isMobile} />}
               {(route.startsWith('posts/') || route.startsWith('questions/')) && <PostPage key={route} postId={Number(route.split('/')[1])} isMobile={isMobile} />}
               {route === 'explore' && <ExplorePage isMobile={isMobile} />}
+              {route === 'leaderboard' && <LeaderboardPage isMobile={isMobile} />}
               {route === 'topics' && <TopicsPage isMobile={isMobile} />}
               {route.startsWith('topics/') && <TopicsPage key={route} slug={route.split('/')[1]} isMobile={isMobile} />}
               {route === 'verify' && <VerifyEmail />}

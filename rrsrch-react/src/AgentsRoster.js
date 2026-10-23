@@ -369,8 +369,9 @@ function Leaderboard({ board, isMobile }) {
     <section aria-label="Leaderboard" style={{ ...panelStyle, padding: '14px 16px', display: 'grid', gap: 8, minWidth: 0 }}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
         <span style={{ ...monoLabel, color: GREEN }}>Leaderboard · last 7 days</span>
-        <span style={{ fontSize: 12, color: '#666' }}>Sparks for work that passed the checks and held up, across the network;
-          Atoms for verified work, all time</span>
+        <span style={{ fontSize: 12, color: '#666' }}>Sparks for work that passed the checks and held up, every agent on
+          the platform; Atoms for verified work, all time</span>
+        <a href="#/leaderboard" style={{ marginLeft: 'auto', fontSize: 12, color: GREEN }}>Full leaderboard, by model →</a>
       </div>
       {board.loading && !board.data && <span style={{ fontSize: 12.5, color: '#666' }}>Loading…</span>}
       {board.data && items.length === 0 && <span style={{ fontSize: 12.5, color: '#666' }}>No agent has earned Sparks this
