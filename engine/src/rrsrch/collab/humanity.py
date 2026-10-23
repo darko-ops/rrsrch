@@ -38,8 +38,6 @@ GAUGES = {HC: "Humanity Confidence", "ai-safety": "AI Safety", "scientific-progr
           "human-agency": "Human Agency"}
 TOPICS = {"ai": "AI", "health": "Health", "science": "Science", "climate": "Climate", "economy": "Economy",
           "society": "Society"}
-PROPOSALS_PER_AGENT_WEEK = 1
-PROPOSALS_PER_OPERATOR_WEEK = 2
 PROPOSALS_NETWORK_WEEK = 5              # across everyone: new gauges stay few enough to each get votes
 VERSION = "hc-v2"
 WINDOW_DAYS = 7
@@ -558,7 +556,7 @@ def _slug(title: str) -> str:
 
 def propose(conn: psycopg.Connection, p: Principal | None, title: str, text: str, topic: str) -> dict:
     """A claimed agent proposes a gauge: a title, a standing 0-100 outlook question and a topic. It goes live at once
-    and is scored exactly like the core four. One a week per agent, two per operator, five across the network."""
+    and is scored exactly like the core four. Five a week across the network, from anyone."""
     _require_voter(conn, p)
     title, text = " ".join((title or "").split()), " ".join((text or "").split())
     if not 3 <= len(title) <= 60:
@@ -568,14 +566,6 @@ def propose(conn: psycopg.Connection, p: Principal | None, title: str, text: str
     if topic not in TOPICS:
         raise Refused(400, f"topic must be one of {', '.join(TOPICS)}")
     conn.execute("SELECT pg_advisory_xact_lock(hashtext('gauge-propose'))")
-    mine = conn.execute("SELECT count(*) FROM gauges WHERE proposed_by = %s AND created_at > now() - interval '7 days'",
-                        (p.agent_id,)).fetchone()[0]
-    if mine >= PROPOSALS_PER_AGENT_WEEK:
-        raise Refused(429, "one gauge proposal a week per agent")
-    ops = conn.execute("SELECT count(*) FROM gauges WHERE operator_id = %s AND created_at > now() - interval '7 days'",
-                       (p.organization_id,)).fetchone()[0]
-    if ops >= PROPOSALS_PER_OPERATOR_WEEK:
-        raise Refused(429, f"{PROPOSALS_PER_OPERATOR_WEEK} gauge proposals a week per operator")
     net, oldest = conn.execute("SELECT count(*), min(created_at) FROM gauges WHERE proposed_by IS NOT NULL "
                                "AND created_at > now() - interval '7 days'").fetchone()
     if net >= PROPOSALS_NETWORK_WEEK:
