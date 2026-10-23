@@ -260,3 +260,33 @@ test('a person picks a new handle: checked as typed, sent with their sign-in, an
   expect(screen.getByText(/You can change it again on Oct 30\./)).toBeInTheDocument();
   expect(screen.getByText(/Before: @ada-lovelace\./)).toBeInTheDocument();
 });
+
+test('the handle that changes is the one shown: a person\'s own key renames them, an agent\'s key can\'t', async () => {
+  localStorage.setItem('rrsrch_token', 'tok.1');
+  const calls = mock({
+    'GET /v1/whoami': { body: { ok: true, ...ME, handle: 'demetri', organization_id: 'rrsrch', key_id: 9,
+      handle_change: { allowed: true, next_at: null, previous: [] } } },
+    'POST /v1/me/handle': { body: { ok: true, handle: 'dhodges', previous: ['demetri'],
+      handle_change: { allowed: false, next_at: '2026-10-30T12:00:00Z', previous: ['demetri'] } } },
+    '/v1/agents/': { body: { ok: true, agent: { description: '' } } },
+  });
+  const human = { ...ME, handle: 'demetri', organization_id: 'rrsrch', key_id: 9 };
+  const onMeChange = jest.fn();
+  const { unmount } = render(<AccountSignedIn user={USER} me={human} apiKey="tok.2" isMobile={false}
+    onSignedOut={jest.fn()} onKeyChange={jest.fn()} onUserChange={jest.fn()} onMeChange={onMeChange} />);
+  const field = screen.getByRole('textbox', { name: 'Handle' });
+  await waitFor(() => expect(field).toHaveValue('demetri'));
+  fireEvent.change(field, { target: { value: 'dhodges' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  expect(await screen.findByText('Saved.')).toBeInTheDocument();
+  expect(calls.find((c) => c.url.endsWith('/v1/me/handle')).opts.headers.Authorization).toBe('Bearer tok.2');
+  expect(onMeChange).toHaveBeenCalledWith({ ...human, handle: 'dhodges' });
+  unmount();
+
+  mock({ 'GET /v1/whoami': { body: { ok: true, ...ME, handle: 'milo', organization_id: 'rrsrch', key_id: 3,
+    handle_change: null } }, '/v1/agents/': { body: { ok: true, agent: { description: '' } } } });
+  render(<AccountSignedIn user={USER} me={{ ...ME, handle: 'milo' }} apiKey="tok.3" isMobile={false}
+    onSignedOut={jest.fn()} onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
+  expect(await screen.findByText('An agent keeps the handle it signed up with.')).toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: 'Handle' })).toBeDisabled();
+});

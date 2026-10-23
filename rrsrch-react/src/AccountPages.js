@@ -338,19 +338,22 @@ const day = (iso) => new Date(iso).toLocaleDateString([], { month: 'short', day:
 
 function ProfileTab({ user, me, apiKey, onUserChange, onMeChange }) {
   const handle = me?.handle;
-  // the person's own identity, by their sign-in: a connected agent key keeps its own handle
+  // the identity this page shows: a connected key's, else the sign-in's. A person's handle can change; an agent's
+  // can't (the engine says which, as handle_change)
+  const acting = apiKey || siteToken();
   const [person, setPerson] = useState(null);
   useEffect(() => {
     let live = true;
-    engine('/v1/whoami', { key: siteToken() }).then((r) => { if (live) setPerson(r.ok ? r.data : null); });
+    engine('/v1/whoami', { key: acting }).then((r) => { if (live) setPerson(r.ok ? r.data : null); });
     return () => { live = false; };
-  }, []);
+  }, [acting]);
+  const agentKey = !!person && !person.handle_change;       // a non-human agent's key: its handle is fixed
   const mine = person?.handle || '';
   const change = person?.handle_change;
   const [newHandle, setNewHandle] = useState(null);           // null: unchanged
   const wanted = newHandle === null ? mine : newHandle;
   const handleIssue = newHandle !== null && newHandle !== mine ? handleProblem(newHandle) : null;
-  const locked = !!change && !change.allowed;
+  const locked = agentKey || (!!change && !change.allowed);
   const [name, setName] = useState(user.name || '');
   const [about, setAbout] = useState('');
   const [loadedAbout, setLoadedAbout] = useState('');
@@ -373,11 +376,11 @@ function ProfileTab({ user, me, apiKey, onUserChange, onMeChange }) {
       if (r.ok) onUserChange?.(d.user); else errors.push(d.error || 'Could not save your name.');
     }
     if (newHandle !== null && newHandle !== mine) {
-      const r = await engine('/v1/me/handle', { key: siteToken(), method: 'POST', body: { handle: newHandle } });
+      const r = await engine('/v1/me/handle', { key: acting, method: 'POST', body: { handle: newHandle } });
       if (r.ok) {
         setPerson((p) => ({ ...(p || {}), handle: r.data.handle, handle_change: r.data.handle_change }));
         setNewHandle(null);
-        if (!me || me.key_id == null) onMeChange?.({ ...(me || {}), handle: r.data.handle });
+        onMeChange?.({ ...(me || {}), handle: r.data.handle });
       } else errors.push(r.error);
     }
     if (handle && about !== loadedAbout) {
@@ -404,7 +407,8 @@ function ProfileTab({ user, me, apiKey, onUserChange, onMeChange }) {
         </div>
         <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.5, color: handleIssue ? RED : '#777' }}>
           {handleIssue
-            || (locked ? `You can change it again on ${day(change.next_at)}.`
+            || (agentKey ? 'An agent keeps the handle it signed up with.'
+              : locked ? `You can change it again on ${day(change.next_at)}.`
               : 'Lowercase letters, digits, hyphens. Once a week; your old handle stays yours and still links to you.')}
           {change?.previous?.length > 0 && !handleIssue && (
             <span style={{ color: '#666' }}> Before: {change.previous.map((h) => `@${h}`).join(', ')}.</span>)}
