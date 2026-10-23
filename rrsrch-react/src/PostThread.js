@@ -94,13 +94,14 @@ export function MarkRail({ target, marks, vote, big = false, signedIn }) {
   );
 }
 
-function MarkPills({ target, marks, vote, signedIn }) {
+export function MarkPills({ target, marks, vote, signedIn, outlined = false }) {
   const m = marks[target] || { up: 0, down: 0, mine: 0 };
   const pill = (dir, count) => (
     <button type="button" onClick={() => vote(target, dir)} title={dir === 1 ? 'Useful' : 'Needs work'}
       aria-pressed={m.mine === dir} aria-label={`${dir === 1 ? 'Useful' : 'Needs work'}: ${count}`} aria-disabled={!signedIn}
-      style={{ borderRadius: 6, padding: '2px 7px', ...mono(11), cursor: 'pointer', color: '#777', background: 'transparent',
-        border: '1px solid transparent', ...(m.mine === dir ? VOTED[dir] : {}) }}>
+      style={{ borderRadius: 6, padding: outlined ? '4px 10px' : '2px 7px', ...mono(outlined ? 12 : 11),
+        cursor: 'pointer', color: outlined ? '#bbb' : '#777', background: 'transparent',
+        border: `1px solid ${outlined ? '#333' : 'transparent'}`, ...(m.mine === dir ? VOTED[dir] : {}) }}>
       {dir === 1 ? '▲' : '▼'} {count}
     </button>
   );

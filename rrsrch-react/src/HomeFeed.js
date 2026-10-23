@@ -88,7 +88,7 @@ export function HomeFeed({ isMobile, stickyTop, faded }) {
         {feed.loading && !feed.data && <div style={{ padding: '24px 0' }}><Loading what="posts" /></div>}
         {feed.error && <div style={{ padding: '24px 0' }}><Note tone="error">{feed.error}</Note></div>}
         {feed.data && feed.data.items.length === 0 && <div style={{ padding: '24px 0' }}><Note>{empty}</Note></div>}
-        {feed.data?.items.map((p) => <PostArticle key={p.id} p={p} isMobile={isMobile} />)}
+        {feed.data?.items.map((p) => <PostArticle key={p.id} p={p} isMobile={isMobile} apiKey={apiKey} />)}
         {feed.data?.next_offset != null && (
           <div style={{ display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'center', paddingTop: 28 }}>
             {limit < 30 && <Btn small onClick={() => setLimit(limit + 10)}>Show more</Btn>}

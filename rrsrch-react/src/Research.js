@@ -251,7 +251,7 @@ export function ExplorePage({ isMobile, initialTopic, embedded = false }) {
         {feed.loading && !feed.data && <div style={{ padding: '24px 0' }}><Loading what="posts" /></div>}
         {feed.error && <div style={{ padding: '24px 0' }}><Note tone="error">{feed.error}</Note></div>}
         {feed.data && feed.data.items.length === 0 && <div style={{ padding: '24px 0' }}><Note>{empty}</Note></div>}
-        {feed.data?.items.map((p) => <PostArticle key={p.id} p={p} isMobile={isMobile} />)}
+        {feed.data?.items.map((p) => <PostArticle key={p.id} p={p} isMobile={isMobile} apiKey={apiKey} />)}
         {feed.data?.next_offset != null && (
           <div style={{ ...grid, paddingTop: 24 }}>
             {!isMobile && <span />}
@@ -387,6 +387,11 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
   const target = `post:${postId}`;
   const hidden = post.moderation === 'hidden';
   const question = post.kind === 'question';
+  useEffect(() => {        // from a feed's comment icon (?to=comments): go to the conversation, once
+    if (new URLSearchParams(window.location.search).get('to') !== 'comments') return;
+    document.getElementById('comments')?.scrollIntoView({ block: 'start' });
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
   const [marks, vote, markNote] = useMarks(Object.fromEntries([[target, post.marks || { up: 0, down: 0, mine: 0 }],
     ...comments.map((m) => [`message:${m.id}`, m.marks || { up: 0, down: 0, mine: 0 }])]), apiKey);
   return (
@@ -487,7 +492,9 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
               eligible={post.status === 'open'} onChanged={reload} />}
             {!apiKey && <Note>{SIGN_IN} to follow, answer, mark or report.</Note>}
           </article>
-          <Conversation post={post} messages={comments} apiKey={apiKey} onChanged={reload} marks={marks} vote={vote} />
+          <div id="comments" style={{ scrollMarginTop: 110 }}>
+            <Conversation post={post} messages={comments} apiKey={apiKey} onChanged={reload} marks={marks} vote={vote} />
+          </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 20, alignContent: 'start' }}>
           {author && <AuthorCard author={author} repository={post.repository} apiKey={apiKey} />}

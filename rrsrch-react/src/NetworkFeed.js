@@ -10,6 +10,7 @@ import { Author } from './ClaimPage';
 import SourceLine from './SourceLine';
 import { PollResults } from './Poll';
 import { goTo } from './routes';
+import { MarkPills, useMarks } from './PostThread';
 import { useTopics } from './topicTree';
 
 export const KIND_COLOR = { finding: GREEN, question: BLUE, observation: '#c9a0ff', proposal: AMBER };
@@ -86,18 +87,31 @@ export function EvidenceMeter({ n, kind }) {
 export const postHref = (p) => `/${p.kind === 'question' ? 'questions' : 'posts'}/${p.id}`;
 
 // One post in the feed. The whole row opens the post; links inside it (the author, the source) go where they point.
-export function PostArticle({ p, isMobile }) {
+// A speech bubble, for the link to a post's conversation.
+function CommentIcon() {
+  return (
+    <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z" />
+    </svg>
+  );
+}
+
+export function PostArticle({ p, isMobile, apiKey }) {
+  const target = `post:${p.id}`;
+  const [marks, vote, markNote] = useMarks({ [target]: p.marks || { up: 0, down: 0, mine: 0 } }, apiKey);
   const color = KIND_COLOR[p.kind] || '#888';
   const unanswered = p.kind === 'question' && p.status === 'open' && p.comments === 0;
   const replies = p.kind === 'question' ? plural(p.comments, 'answer') : plural(p.comments, 'comment');
   const open = () => goTo(postHref(p));
+  const talk = `${postHref(p)}?to=comments`;
   const headline = p.headline || p.title;
   const long = !p.headline && headline.length > 90;          // an older post's full title standing in as headline
   const body = paragraphs(p.excerpt);
   const q = p.quote;
   return (
     // the headline is the link for keyboards and screen readers; a click anywhere else on the row opens it too
-    <article aria-label={headline} onClick={(e) => { if (!e.target.closest('a')) open(); }}
+    <article aria-label={headline} onClick={(e) => { if (!e.target.closest('a, button')) open(); }}
       style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : GUTTER, gap: isMobile ? 12 : 32,
         padding: isMobile ? '28px 0' : '40px 0', borderBottom: '1px solid #1f1f1f', cursor: 'pointer' }}>
       <div style={{ display: isMobile ? 'flex' : 'grid', gap: isMobile ? 12 : 6, alignContent: 'start', flexWrap: 'wrap',
@@ -142,12 +156,18 @@ export function PostArticle({ p, isMobile }) {
         )}
         <div style={{ marginTop: 20, display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap', fontSize: 12,
           color: '#888' }}>
+          <MarkPills target={target} marks={marks} vote={vote} signedIn={!!apiKey} outlined />
+          <a href={talk} onClick={(e) => { e.preventDefault(); goTo(talk); }} title="See the conversation"
+            aria-label={`${replies}: see the conversation`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#bbb', textDecoration: 'none',
+              padding: '4px 10px', borderRadius: 6, border: '1px solid #333' }}>
+            <CommentIcon /><span style={mono(12)}>{p.comments}</span></a>
           <EvidenceMeter n={p.evidence || 0} kind={p.kind} />
           {p.reports > 0 && <span style={{ color: '#ccc' }}>{plural(p.reports, 'reproduction or use report')}</span>}
-          <span>{replies}</span>
           {(p.topics || []).slice(0, 3).map((t) => <span key={t} style={{ color: '#9ab' }}>#{t}</span>)}
           <span style={{ marginLeft: 'auto', color: GREEN }}>Read →</span>
         </div>
+        {markNote && <div style={{ marginTop: 10, fontSize: 12, color: AMBER }}>{markNote}</div>}
       </div>
     </article>
   );
