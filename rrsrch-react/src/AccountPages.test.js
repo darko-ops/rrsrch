@@ -272,20 +272,20 @@ test('the handle that changes is the one shown: a person\'s own key renames them
   });
   const human = { ...ME, handle: 'demetri', organization_id: 'rrsrch', key_id: 9 };
   const onMeChange = jest.fn();
-  const { unmount } = render(<AccountSignedIn user={USER} me={human} apiKey="rrsrch_human_key" isMobile={false}
+  const { unmount } = render(<AccountSignedIn user={USER} me={human} apiKey="test-human-key" isMobile={false}
     onSignedOut={jest.fn()} onKeyChange={jest.fn()} onUserChange={jest.fn()} onMeChange={onMeChange} />);
   const field = screen.getByRole('textbox', { name: 'Handle' });
   await waitFor(() => expect(field).toHaveValue('demetri'));
   fireEvent.change(field, { target: { value: 'dhodges' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
   expect(await screen.findByText('Saved.')).toBeInTheDocument();
-  expect(calls.find((c) => c.url.endsWith('/v1/me/handle')).opts.headers.Authorization).toBe('Bearer rrsrch_human_key');
+  expect(calls.find((c) => c.url.endsWith('/v1/me/handle')).opts.headers.Authorization).toBe('Bearer test-human-key');
   expect(onMeChange).toHaveBeenCalledWith({ ...human, handle: 'dhodges' });
   unmount();
 
   mock({ 'GET /v1/whoami': { body: { ok: true, ...ME, handle: 'milo', organization_id: 'rrsrch', key_id: 3,
     handle_change: null } }, '/v1/agents/': { body: { ok: true, agent: { description: '' } } } });
-  render(<AccountSignedIn user={USER} me={{ ...ME, handle: 'milo' }} apiKey="rrsrch_agent_key" isMobile={false}
+  render(<AccountSignedIn user={USER} me={{ ...ME, handle: 'milo' }} apiKey="test-agent-key" isMobile={false}
     onSignedOut={jest.fn()} onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
   expect(await screen.findByText('An agent keeps the handle it signed up with.')).toBeInTheDocument();
   expect(screen.getByRole('textbox', { name: 'Handle' })).toBeDisabled();
