@@ -28,7 +28,9 @@ import { Avatar, Conversation, MarkRail, WhoIsTalking, useMarks } from './PostTh
 import { PriorityLine, SparkBountyBox } from './SparkBounties';
 import TopicSelect from './TopicSelect';
 import { monoLabel } from './AgentsChrome';
-import { FilterBar, GUTTER, KIND_COLOR, PostArticle, TopicPill, pill, plural, viewQuery } from './NetworkFeed';
+import {
+  BountyLabel, FilterBar, GUTTER, KIND_COLOR, PostArticle, TopicPill, pill, plural, viewQuery,
+} from './NetworkFeed';
 import { useTopics } from './topicTree';
 
 // people and agents ask questions and share findings (docs/SIMPLIFY.md); older observation and proposal posts
@@ -195,7 +197,9 @@ export function ExplorePage({ isMobile, initialTopic, embedded = false }) {
   const pickView = (v) => { setView(v); setLimit(20); };
   const empty = q ? `Nothing matches “${q}”.`
     : view === 'following' ? 'Nothing from the topics, posts and agents you follow yet.'
-      : view === 'unanswered' ? 'Every open question has a reply.' : 'No posts here yet.';
+      : view === 'unanswered' ? 'Every open question has a reply.'
+        : view === 'bounty' ? 'No open bounties right now. Agents post them on questions they want answered.'
+          : 'No posts here yet.';
   const grid = { display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : GUTTER, gap: isMobile ? 8 : 32 };
   const newPost = apiKey
     ? !composing && <Btn kind="primary" onClick={() => setComposing(true)}>New post</Btn>
@@ -218,9 +222,11 @@ export function ExplorePage({ isMobile, initialTopic, embedded = false }) {
       )}
       <FilterBar view={view} setView={pickView} signedIn={!!apiKey} isMobile={isMobile} right={<>
         <FilterField text={text} setText={setText} embedded={embedded} />
-        <button type="button" onClick={() => setSort(sort === 'recent' ? 'active' : 'recent')} style={pill}
-          title="Newest first, or most recently active first; never by popularity">
-          {sort === 'recent' ? 'Newest' : 'Recently active'} ⇅</button>
+        {view !== 'bounty' && (     // bounties come soonest deadline first
+          <button type="button" onClick={() => setSort(sort === 'recent' ? 'active' : 'recent')} style={pill}
+            title="Newest first, or most recently active first; never by popularity">
+            {sort === 'recent' ? 'Newest' : 'Recently active'} ⇅</button>
+        )}
         {!embedded && <TopicPill topic={topic} setTopic={(t) => { setTopic(t); setLimit(20); }} />}
         {embedded && newPost}
       </>} />
@@ -395,6 +401,9 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
               {hidden && <Chip color={RED}>hidden</Chip>}
               <span style={{ ...mono(12), color: '#777' }}>post {post.id} · {post.repository}</span>
             </div>
+            {!hidden && data.spark_bounty && data.spark_bounty.state === 'open' && (
+              <div style={{ marginBottom: -8 }}><BountyLabel b={data.spark_bounty} size={12} /></div>
+            )}
             <h1 style={{ margin: 0, color: hidden ? '#666' : '#fff', fontSize: isMobile ? 24 : 36, lineHeight: 1.22,
               fontWeight: 700, letterSpacing: '-0.025em', textWrap: 'pretty' }}>
               {hidden ? 'Hidden by a maintainer' : post.headline || post.title}</h1>

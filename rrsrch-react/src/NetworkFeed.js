@@ -19,6 +19,27 @@ export const mono = (size, weight = 500) => ({ fontFamily: fonts.mono, fontSize:
 export const GUTTER = '140px minmax(0, 1fr)';
 const BODY_CHARS = 240;
 
+// A Spark bounty's time left, from its deadline.
+export function bountyLeft(deadline, now = Date.now()) {
+  const ms = new Date(deadline) - now;
+  if (ms <= 0) return 'closing';
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor(ms / 3600000);
+  return d >= 1 ? `${d} day${d === 1 ? '' : 's'} left` : `${Math.max(1, h)} hour${h === 1 ? '' : 's'} left`;
+}
+
+// Above a post's headline when it has an open Spark bounty: what the winner gets, and how long is left.
+export function BountyLabel({ b, size = 11 }) {
+  return (
+    <div title={`${b.held} Sparks to the answer the poster awards (${b.amount} posted; 10% burned at posting)`}
+      style={{ ...mono(size, 600), color: AMBER, textTransform: 'uppercase', letterSpacing: '0.1em',
+        display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <span>Bounty</span><span aria-hidden="true">·</span><span>{plural(b.held, 'Spark')}</span>
+      <span aria-hidden="true">·</span><span>{bountyLeft(b.deadline)}</span>
+    </div>
+  );
+}
+
 // "2h", "3d", "5w"; older than a year: the date
 export function ago(iso, now = Date.now()) {
   const s = Math.max(0, (now - new Date(iso).getTime()) / 1000);
@@ -89,6 +110,7 @@ export function PostArticle({ p, isMobile }) {
         {p.status !== 'open' && <span style={{ color: STATUS_COLOR[p.status] || '#888' }}>{p.status}</span>}
       </div>
       <div style={{ maxWidth: 640, minWidth: 0 }}>
+        {p.bounty && <div style={{ marginBottom: 12 }}><BountyLabel b={p.bounty} /></div>}
         <h2 style={{ margin: 0, color: '#fff', fontSize: isMobile ? (long ? 20 : 24) : long ? 24 : 30, fontWeight: 700,
           lineHeight: long ? 1.25 : 1.18,
           letterSpacing: '-0.028em', textWrap: 'balance', overflowWrap: 'anywhere' }}>
@@ -131,12 +153,13 @@ export function PostArticle({ p, isMobile }) {
   );
 }
 
-// Everything · Questions · Findings · Unanswered (· Following, signed in): one value for scope and kind together.
+// Everything · Questions · Findings · Unanswered · Bounties (· Following, signed in): scope and kind in one value.
 export const VIEWS = [['all', 'Everything'], ['question', 'Questions'], ['finding', 'Findings'],
-  ['unanswered', 'Unanswered'], ['following', 'Following']];
+  ['unanswered', 'Unanswered'], ['bounty', 'Bounties'], ['following', 'Following']];
 export function viewQuery(view) {
   if (view === 'question' || view === 'finding') return { kind: view };
   if (view === 'unanswered') return { unanswered: 'true' };
+  if (view === 'bounty') return { bounty: 'true' };            // soonest deadline first
   if (view === 'following') return { following: 'true' };
   return {};
 }
