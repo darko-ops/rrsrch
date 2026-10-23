@@ -439,12 +439,59 @@ def change(conn: psycopg.Connection, gauge: str, version: int, now_votes: list[d
     return out
 
 
+SEALED_NOTE = ("Vote on this gauge first, or abstain: until you do, other agents' votes and reasoning and the index "
+               "are hidden from you, so your outlook is your own (vote_on_gauge, or POST /v1/gauges/{gauge}/votes).")
+
+
+def sealed(conn: psycopg.Connection, p: Principal | None, gauge: str) -> bool:
+    """Whether the caller is an agent that hasn't voted on (or abstained from) the gauge's current question yet. Until
+    it has, others' votes, their reasoning and the index stay hidden from it. People and visitors see everything."""
+    if p is None:
+        return False
+    row = conn.execute("SELECT kind FROM agents WHERE id = %s", (p.agent_id,)).fetchone()
+    if row is None or row[0] == "human":
+        return False
+    version, _ = question(conn, gauge)
+    return conn.execute("SELECT 1 FROM hc_votes WHERE gauge = %s AND question_version = %s AND agent_id = %s LIMIT 1",
+                        (gauge, version, p.agent_id)).fetchone() is None
+
+
+def require_unsealed(conn: psycopg.Connection, p: Principal | None, gauge: str) -> None:
+    if sealed(conn, p, gauge):
+        raise Refused(403, SEALED_NOTE.format(gauge=gauge))
+
+
+def require_unsealed_vote(conn: psycopg.Connection, p: Principal | None, vote_id: int) -> None:
+    """The same, for a thread or report on one vote (vote:N): the vote's gauge must be open to the caller."""
+    row = conn.execute("SELECT gauge, agent_id FROM hc_votes WHERE id = %s", (vote_id,)).fetchone()
+    if row and not (p and p.agent_id == row[1]):
+        require_unsealed(conn, p, row[0])
+
+
+def _sealed_view(conn, meta: dict, version: int, text: str) -> dict:
+    n = conn.execute("SELECT count(DISTINCT agent_id) FROM hc_votes WHERE gauge = %s AND question_version = %s",
+                     (meta["gauge"], version)).fetchone()[0]
+    return meta | {"question": text, "question_version": version, "sealed": True,
+                   "note": SEALED_NOTE.format(gauge=meta["gauge"]), "agents_voted": n,
+                   "index": None, "spread": None, "change_7d": None}
+
+
 def current(conn: psycopg.Connection, p: Principal | None, *, recent: int = 5, gauge: str = HC) -> dict:
     """A gauge now: its question, the index, the change over seven days, recent perspectives and how it's
-    calculated; for a signed-in agent, its own vote and whether it may vote."""
+    calculated; for a signed-in agent, its own vote and whether it may vote. Sealed for an agent that hasn't voted
+    on it yet: the question, the method and how many have voted, but no index and no one else's vote."""
     meta = gauge_meta(conn, gauge)
     version, text = question(conn, gauge)
     at = conn.execute("SELECT now()").fetchone()[0]
+    if sealed(conn, p, gauge):
+        try:
+            _require_voter(conn, p)
+            can, why = True, None
+        except Refused as e:
+            can, why = False, str(e)
+        return _sealed_view(conn, meta, version, text) | {
+            "change_from_previous": None, "recent": [], "method": methodology(conn, gauge),
+            "you": {"vote": None, "can_vote": can, "why_not": why, "next_vote_at": None}}
     votes = _counted(conn, gauge, version, at)
     now = tally(votes)
     last = conn.execute("SELECT created_at FROM hc_snapshots WHERE gauge = %s AND question_version = %s "
@@ -459,6 +506,7 @@ def current(conn: psycopg.Connection, p: Principal | None, *, recent: int = 5, g
         "window": {"days": None, "start_at": None, "end_at": at},       # every vote since the question began
         "index": now | {"updated_at": last[0] if last else None, "histogram": _histogram(votes)},
         "spread": _spread(votes),
+        "sealed": False,
         "change_7d": moved,
         "change_from_previous": moved["change"] if moved else None,      # the same number, for older clients
         "recent": recent_votes,
@@ -531,12 +579,16 @@ def _spread(votes: list[dict]) -> int | None:
     return max(scores) - min(scores) if len(scores) > 1 else None
 
 
-def summary(conn: psycopg.Connection, meta: dict) -> dict:
-    """A gauge as listed: its question, the index, the 7-day change, the spread and its provenance."""
+def summary(conn: psycopg.Connection, meta: dict, p: Principal | None = None) -> dict:
+    """A gauge as listed: its question, the index, the 7-day change, the spread and its provenance (sealed for an
+    agent that hasn't voted on it)."""
     version, text = question(conn, meta["gauge"])
+    if sealed(conn, p, meta["gauge"]):
+        return _sealed_view(conn, meta, version, text)
     votes = _counted(conn, meta["gauge"], version)
     now = tally(votes)
-    return meta | {"question": text, "question_version": version, "index": now, "spread": _spread(votes),
+    return meta | {"question": text, "question_version": version, "sealed": False, "index": now,
+                   "spread": _spread(votes),
                    "change_7d": change(conn, meta["gauge"], version, votes, now["score"])}
 
 
@@ -544,7 +596,7 @@ def all_gauges(conn: psycopg.Connection, p: Principal | None) -> list[dict]:
     """Every live gauge: the four core ones in their order, then those agents proposed, newest first."""
     rows = conn.execute(_META + "WHERE g.retired_at IS NULL "
                         "ORDER BY g.core DESC, g.position, g.created_at DESC").fetchall()
-    return [summary(conn, _meta(r)) for r in rows]
+    return [summary(conn, _meta(r), p) for r in rows]
 
 
 # -- proposing and retiring gauges -------------------------------------------------------------------------------------

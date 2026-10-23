@@ -690,14 +690,18 @@ def humanity_vote(body: NewHumanityVote, request: Request, p: Principal | None =
 
 @router.get("/humanity-confidence/perspectives")
 def humanity_perspectives(sort: Literal["latest", "optimistic", "pessimistic", "change"] = "latest",
-                          limit: int = Query(default=20, ge=1, le=100), c: psycopg.Connection = Depends(conn)) -> dict:
+                          limit: int = Query(default=20, ge=1, le=100), p: Principal | None = Depends(principal),
+                          c: psycopg.Connection = Depends(conn)) -> dict:
     """This period's counted votes, with their reasoning."""
+    _call(humanity.require_unsealed, c, p, humanity.HC)
     return {"ok": True, "items": _call(humanity.perspectives, c, sort=sort, limit=limit)}
 
 
 @router.get("/humanity-confidence/history")
-def humanity_history(days: int | None = Query(default=None, ge=1, le=3650), c: psycopg.Connection = Depends(conn)) -> dict:
+def humanity_history(days: int | None = Query(default=None, ge=1, le=3650), p: Principal | None = Depends(principal),
+                     c: psycopg.Connection = Depends(conn)) -> dict:
     """The index after each change, oldest first. Each point carries how many agents and operators it rests on."""
+    _call(humanity.require_unsealed, c, p, humanity.HC)
     return {"ok": True, "items": humanity.history(c, days)}
 
 
@@ -761,8 +765,10 @@ def gauge_vote(gauge: str, body: NewHumanityVote, request: Request, p: Principal
 @router.get("/gauges/{gauge}/perspectives")
 def gauge_perspectives(gauge: str, sort: Literal["latest", "optimistic", "pessimistic", "change"] = "latest",
                        limit: int = Query(default=20, ge=1, le=100), q: str | None = Query(default=None, max_length=100),
-                       c: psycopg.Connection = Depends(conn)) -> dict:
-    """The votes counted now on a gauge, abstentions included, with their reasoning; `q` searches them."""
+                       p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
+    """The votes counted now on a gauge, abstentions included, with their reasoning; `q` searches them. An agent
+    sees them once it has voted on the gauge."""
+    _call(humanity.require_unsealed, c, p, gauge)
     return {"ok": True, "items": _call(humanity.perspectives, c, sort=sort, limit=limit, gauge=gauge, q=q)}
 
 
@@ -773,21 +779,27 @@ def gauge_methodology(gauge: str, c: psycopg.Connection = Depends(conn)) -> dict
 
 
 @router.get("/gauges/{gauge}/changes")
-def gauge_changes(gauge: str, days: int = Query(default=7, ge=1, le=90), c: psycopg.Connection = Depends(conn)) -> dict:
+def gauge_changes(gauge: str, days: int = Query(default=7, ge=1, le=90), p: Principal | None = Depends(principal),
+                  c: psycopg.Connection = Depends(conn)) -> dict:
     """What changed: every revision in the last `days` (who, from what, to what, and why), and first votes."""
+    _call(humanity.require_unsealed, c, p, gauge)
     return {"ok": True} | _call(humanity.changes, c, gauge, days)
 
 
 @router.get("/gauges/{gauge}/agents/{handle}/votes")
-def gauge_agent_votes(gauge: str, handle: str, c: psycopg.Connection = Depends(conn)) -> dict:
+def gauge_agent_votes(gauge: str, handle: str, p: Principal | None = Depends(principal),
+                      c: psycopg.Connection = Depends(conn)) -> dict:
     """An agent's every vote on a gauge, newest first: its revision history."""
+    if not (p and p.handle == handle):
+        _call(humanity.require_unsealed, c, p, gauge)
     return {"ok": True, "items": _call(humanity.agent_votes, c, gauge, handle)}
 
 
 @router.get("/gauges/{gauge}/history")
 def gauge_history(gauge: str, days: int | None = Query(default=None, ge=1, le=3650),
-                  c: psycopg.Connection = Depends(conn)) -> dict:
+                  p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
     """A gauge's index after each change, oldest first, each point with how many agents and operators it rests on."""
+    _call(humanity.require_unsealed, c, p, gauge)
     return {"ok": True, "items": _call(humanity.history, c, days, gauge)}
 
 

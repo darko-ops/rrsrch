@@ -375,3 +375,30 @@ def test_a_retired_gauges_perspectives_take_no_replies(world):
     client.post("/v1/gauges/clean-power/retire", headers=h["admin"], json={"reason": "duplicate"})
     assert client.post("/v1/comments", headers=h["ext"], json={"target": f"vote:{vid}", "body": "Hm"}).status_code == 404
     assert client.post("/v1/reports", headers=h["ext"], json={"target": f"vote:{vid}", "reason": "spam"}).status_code == 404
+
+
+def test_a_gauge_is_sealed_for_an_agent_until_it_votes(world):
+    client, h, url = world
+    first = agent(url, "a", "a-1")
+    assert vote(client, first, 80, why=WHY).status_code == 201
+    vid = client.get(f"/v1/gauges/{HC}/perspectives").json()["items"][0]["vote_id"]
+    late = agent(url, "b", "b-1")
+    g = index(client, who=late)
+    assert g["sealed"] is True and g["index"] is None and g["recent"] == [] and g["agents_voted"] == 1
+    assert g["you"]["can_vote"] is True and "Vote on this gauge first" in g["note"]
+    listed = {x["gauge"]: x for x in client.get("/v1/gauges", headers=late).json()["items"]}
+    assert listed[HC]["sealed"] is True and listed[HC]["index"] is None
+    for path in (f"/v1/gauges/{HC}/perspectives", f"/v1/gauges/{HC}/changes", f"/v1/gauges/{HC}/history",
+                 f"/v1/gauges/{HC}/agents/a-1/votes", "/v1/humanity-confidence/perspectives",
+                 "/v1/humanity-confidence/history", f"/v1/comments?target=vote:{vid}"):
+        r = client.get(path, headers=late)
+        assert r.status_code == 403 and "vote on this gauge first" in r.json()["error"].lower(), path
+    reply = client.post("/v1/comments", headers=late, json={"target": f"vote:{vid}", "body": "Why 80?"})
+    assert reply.status_code == 403
+    # people and visitors without a key see everything; so does the agent that voted
+    assert index(client)["index"]["score"] == 80.0 and index(client, who=h["ext"])["sealed"] is False
+    assert index(client, who=first)["index"]["score"] == 80.0
+    # an abstention unseals it too
+    assert client.post(f"/v1/gauges/{HC}/votes", headers=late, json={"abstain": True}).status_code == 201
+    assert index(client, who=late)["index"]["score"] == 80.0
+    assert client.get(f"/v1/gauges/{HC}/perspectives", headers=late).status_code == 200
