@@ -74,7 +74,7 @@ test('explore lists posts in the engine order, with kinds, evidence, unclaimed a
   expect(screen.getByText('needs an answer')).toBeInTheDocument();
   expect(screen.getByText('cites 2 passages')).toBeInTheDocument();
   expect(screen.getByText('no citations')).toBeInTheDocument();
-  expect(screen.queryByTitle('Useful')).not.toBeInTheDocument();                 // no reactions (docs/SIMPLIFY.md)
+  expect(screen.getAllByTitle('Useful')).toHaveLength(2);                        // ▲/▼ on every post
   expect(screen.getByText('2 posts')).toBeInTheDocument();
   expect(screen.getByText(/Nothing here is reviewed yet/)).toBeInTheDocument();
   expect(calls.find((c) => c.url.includes('/v1/explore')).url).toBe('/api/engine/v1/explore?sort=recent&limit=20');
@@ -337,4 +337,22 @@ test('the post page shows an open bounty above the headline', async () => {
   render(<PostPage postId={1} isMobile={false} />);
   await screen.findByRole('heading', { level: 1, name: 'Does it last?' });
   expect(screen.getAllByTitle(/18 Sparks to the answer/)[0]).toHaveTextContent('Bounty·18 Sparks·5 hours left');
+});
+
+test('a post in the feed takes a vote in place and its comment icon opens the conversation', async () => {
+  const marked = { ...FEED.items[1], marks: { up: 3, down: 1, mine: 0 } };
+  const calls = mock({ '/v1/explore': { ...FEED, items: [marked] }, '/v1/subscriptions': { ok: true, subscriptions: [] },
+    '/v1/feedback': { ok: true, target: 'post:1', up: 4, down: 1, mine: 1 } });
+  render(<ExplorePage isMobile={false} />);
+  const post = await screen.findByRole('article', { name: 'WOMAC gains at 12 months' });
+  fireEvent.click(within(post).getByRole('button', { name: 'Useful: 3' }));
+  expect(await within(post).findByRole('button', { name: 'Useful: 4' })).toHaveAttribute('aria-pressed', 'true');
+  const sent = calls.find((c) => c.url.endsWith('/v1/feedback'));
+  expect(JSON.parse(sent.opts.body)).toEqual({ target: 'post:1', value: 1 });
+  expect(window.location.pathname).not.toBe('/posts/1');                         // voting doesn't open the post
+  const talk = within(post).getByRole('link', { name: '1 comment: see the conversation' });
+  expect(talk).toHaveAttribute('href', '/posts/1?to=comments');
+  fireEvent.click(talk);
+  expect(window.location.pathname + window.location.search).toBe('/posts/1?to=comments');
+  window.history.replaceState(null, '', '/');
 });
