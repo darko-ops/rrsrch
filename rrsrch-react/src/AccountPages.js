@@ -176,12 +176,28 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey, formOnly = false
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState('');
   const signup = mode === 'signup';
-  const blocked = busy || !email.trim() || !password || (signup && !passwordOk(password, { name, email }));
+  const forgot = mode === 'forgot';
+  const blocked = busy || !email.trim() || (!forgot && !password) || (signup && !passwordOk(password, { name, email }));
   const submit = async (e) => {
     e.preventDefault();
     if (blocked) return;
     setBusy(true); setErr('');
+    if (forgot) {
+      try {
+        const r = await fetch('/api/account/password/forgot', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Something went wrong.');
+        setSent(d.note || 'If an account uses that email, a reset link is on its way.');
+      } catch (ex) {
+        setErr(ex.message);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const r = await fetch(`/api/account/${signup ? 'signup' : 'login'}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -205,9 +221,11 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey, formOnly = false
     <form onSubmit={submit} style={card}>
       <div role="tablist" style={{ display: 'flex', border: '1px solid #333', borderRadius: 9, overflow: 'hidden' }}>
         {[['signin', 'Sign in'], ['signup', 'Create account']].map(([m, label]) => (
-          <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setErr(''); }}
+          <button key={m} type="button" role="tab" aria-selected={mode === m || (forgot && m === 'signin')}
+            onClick={() => { setMode(m); setErr(''); setSent(''); }}
             style={{ flex: 1, padding: '9px 0', border: 'none', cursor: 'pointer', fontFamily: fonts.main, fontSize: 13,
-              fontWeight: 700, background: mode === m ? '#fff' : 'transparent', color: mode === m ? '#000' : '#888' }}>
+              fontWeight: 700, background: mode === m || (forgot && m === 'signin') ? '#fff' : 'transparent',
+              color: mode === m || (forgot && m === 'signin') ? '#000' : '#888' }}>
             {label}</button>
         ))}
       </div>
@@ -219,18 +237,30 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey, formOnly = false
       <LabeledInput label="Email">
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" style={bigInput()} />
       </LabeledInput>
-      <LabeledInput label="Password">
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-          autoComplete={signup ? 'new-password' : 'current-password'} style={bigInput()} />
-      </LabeledInput>
+      {forgot && <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>Enter the email you sign in with and
+        we'll send a link to set a new password.</div>}
+      {!forgot && (
+        <LabeledInput label="Password">
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            autoComplete={signup ? 'new-password' : 'current-password'} style={bigInput()} />
+        </LabeledInput>)}
+      {mode === 'signin' && (
+        <button type="button" onClick={() => { setMode('forgot'); setErr(''); setPassword(''); }}
+          style={{ justifySelf: 'start', background: 'none', border: 'none', padding: 0, color: '#9ab', fontSize: 13,
+            cursor: 'pointer', fontFamily: fonts.main, marginTop: -8 }}>Forgot password?</button>)}
       {signup && <PasswordRules password={password} who={{ name, email }} />}
+      {sent && <div role="status" style={{ color: GREEN, fontSize: 13, lineHeight: 1.5 }}>{sent}</div>}
       {err && <div style={{ color: RED, fontSize: 13 }}>{err}</div>}
       <button type="submit" disabled={blocked} style={{ width: '100%', background: GREEN, color: '#000', border: 'none',
         borderRadius: 8, padding: '12px 0', fontSize: 14, fontWeight: 800, fontFamily: fonts.main,
         cursor: busy ? 'wait' : 'pointer', opacity: blocked ? 0.5 : 1 }}>
-        {busy ? 'Working…' : signup ? 'Create account' : 'Sign in'}
+        {busy ? 'Working…' : signup ? 'Create account' : forgot ? 'Send reset link' : 'Sign in'}
       </button>
-      <GoogleSignIn onSignedIn={onGoogle} onError={setErr} width={isMobile ? 300 : 370} />
+      {forgot && (
+        <button type="button" onClick={() => { setMode('signin'); setErr(''); setSent(''); }}
+          style={{ justifySelf: 'center', background: 'none', border: 'none', padding: 0, color: '#9ab', fontSize: 13,
+            cursor: 'pointer', fontFamily: fonts.main }}>Back to sign in</button>)}
+      {!forgot && <GoogleSignIn onSignedIn={onGoogle} onError={setErr} width={isMobile ? 300 : 370} />}
     </form>
   );
   if (formOnly) return signInForm;
@@ -855,3 +885,52 @@ export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKey
   );
 }
 
+
+// #/reset?token=…: the link from the password reset email. A new password under the sign-up rules; on success this
+// browser is signed in (every other session was signed out) and goes to the account page.
+export function ResetPassword() {
+  const token = new URLSearchParams(window.location.hash.split('?')[1] || '').get('token') || '';
+  const [password, setPassword] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const blocked = busy || !token || !passwordOk(password, {});
+  const submit = async (e) => {
+    e.preventDefault();
+    if (blocked) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await fetch('/api/account/password/reset', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, password }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'That did not work.');
+      writeStored(TOKEN_KEY, d.token);
+      window.location.replace('/#/account');
+      window.location.reload();
+    } catch (ex) {
+      setErr(ex.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <form onSubmit={submit} style={{ ...panelStyle, padding: 24, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)',
+      gap: 16, maxWidth: 420, margin: '40px auto', boxSizing: 'border-box', fontFamily: fonts.main }}>
+      <h1 style={{ fontSize: 22, color: '#fff', margin: 0 }}>Set a new password</h1>
+      {!token
+        ? <Note tone="error">This link is missing its code. Ask for a new one from Sign in › Forgot password.</Note>
+        : <>
+          <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>Choose a new password. Your other sessions will
+            be signed out.</div>
+          <LabeledInput label="New password">
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password" style={bigInput()} />
+          </LabeledInput>
+          <PasswordRules password={password} who={{}} />
+          {err && <div style={{ color: RED, fontSize: 13 }}>{err} {/expired|invalid/i.test(err)
+            && <a href="#/account" style={{ color: '#9ab' }}>Ask for a new link</a>}</div>}
+          <button type="submit" disabled={blocked} style={{ width: '100%', background: GREEN, color: '#000',
+            border: 'none', borderRadius: 8, padding: '12px 0', fontSize: 14, fontWeight: 800, fontFamily: fonts.main,
+            cursor: busy ? 'wait' : 'pointer', opacity: blocked ? 0.5 : 1 }}>{busy ? 'Working…' : 'Set password'}</button>
+        </>}
+    </form>
+  );
+}

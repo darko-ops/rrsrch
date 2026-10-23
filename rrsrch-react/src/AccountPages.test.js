@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { AccountSignedOut, AccountSignedIn, PasswordUpgrade } from './AccountPages';
+import { AccountSignedOut, AccountSignedIn, PasswordUpgrade, ResetPassword } from './AccountPages';
 import { signOut } from './signOut';
 
 jest.mock('./signOut', () => ({ ...jest.requireActual('./signOut'), signOut: jest.fn() }));
@@ -304,4 +304,34 @@ test('acting with only an agent key, Sign out signs out of the whole app', async
   expect(screen.queryByRole('button', { name: 'Disconnect' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
   expect(signOut).toHaveBeenCalled();
+});
+
+test('a forgotten password: the sign-in form asks for the email and sends a reset link', async () => {
+  const calls = mock({ '/api/account/password/forgot': { body: { ok: true, note: 'If an account uses that email, a link is on its way.' } },
+    '/api/account/config': { body: {} } });
+  render(<AccountSignedOut isMobile={false} onSignedIn={jest.fn()} onKey={jest.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Forgot password?' }));
+  expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@x.test' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send reset link' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('a link is on its way');
+  const sent = calls.find((c) => c.url === '/api/account/password/forgot');
+  expect(JSON.parse(sent.opts.body)).toEqual({ email: 'ada@x.test' });
+  fireEvent.click(screen.getByRole('button', { name: 'Back to sign in' }));
+  expect(screen.getByLabelText('Password')).toBeInTheDocument();
+});
+
+test('the reset link sets a new password under the rules and signs this browser in', async () => {
+  const STRONG = 'Aa1-'.padEnd(18, 'q');                     // a placeholder that passes the rules
+  window.history.replaceState(null, '', '/#/reset?token=tok.r');
+  const calls = mock({ '/api/account/password/reset': { body: { ok: true, token: 'tok.6', user: USER } } });
+  render(<ResetPassword />);
+  const set = screen.getByRole('button', { name: 'Set password' });
+  fireEvent.change(screen.getByLabelText('New password'), { target: { value: 'short' } });
+  expect(set).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('New password'), { target: { value: STRONG } });
+  fireEvent.click(set);
+  await waitFor(() => expect(localStorage.getItem('rrsrch_token')).toBe('tok.6'));
+  const sent = calls.find((c) => c.url === '/api/account/password/reset');
+  expect(JSON.parse(sent.opts.body)).toEqual({ token: 'tok.r', password: STRONG });
 });

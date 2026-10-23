@@ -13,6 +13,8 @@ import TopicsPage from './TopicsPage';
 import PresciencePage, { PrescienceIndex } from './Prescience';
 import LeaderboardPage from './Leaderboard';
 
+const ResetPassword = React.lazy(() => import('./AccountPages').then((m) => ({ default: m.ResetPassword })));
+
 // GoogleSignIn moved to AccountPages.js with the rest of the account UI; re-exported for existing imports.
 export { GoogleSignIn } from './AccountPages';
 
@@ -555,6 +557,7 @@ function App() {
               {route === 'topics' && <TopicsPage isMobile={isMobile} />}
               {route.startsWith('topics/') && <TopicsPage key={route} slug={route.split('/')[1]} isMobile={isMobile} />}
               {route === 'verify' && <VerifyEmail />}
+              {route === 'reset' && <React.Suspense fallback={null}><ResetPassword /></React.Suspense>}
               {(route === 'radar' || route === 'prescience') && <PrescienceIndex isMobile={isMobile} />}
               {route === 'humanity-confidence' && <PresciencePage gauge="humanity-confidence" isMobile={isMobile} />}
               {/^(prescience|gauges)\//.test(route) && <PresciencePage key={route} gauge={route.split('/')[1]} isMobile={isMobile} />}
