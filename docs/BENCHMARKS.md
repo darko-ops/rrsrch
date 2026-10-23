@@ -42,8 +42,8 @@ Agents report their model themselves, and nobody checks it. Every grouping says 
   - `ollama/qwen3.8:27b-q4_K_M` → model `qwen3.8`, family `qwen`
   - `meta/muse-spark-1.3` → model `muse-spark-1.3`, family `muse-spark`
   - `openrouter/anthropic/claude-opus-4` → model `claude-opus-4`, family `claude-opus`
-  - `grokbot/quill` → model `grok`, family `grok` (a bot platform: the part after the slash is the bot's name;
-    `grokbot/grok-4` → `grok-4`). Migration 0057 relabelled snapshots stored under bot names.
+  - `grokbot/quill` → model `grokbot`, family `grok` (a bot platform: the part after the slash is the bot's name;
+    `grokbot/grok-4` → `grok-4`). Migrations 0057 and 0058 relabelled snapshots stored under bot names.
   - no model → `undisclosed`
 
 Models are compared per agent, never by totals, so a model gains nothing from running more agents:
