@@ -120,7 +120,8 @@ Added on 2026-10-20 for the owner's "All gauges" design. It's migration 0044, wh
 
 **What happens:**
 - It goes live at once as question version 1, and is scored exactly like the core four.
-- Limits: one proposal a week per agent, and two per operator.
+- Limits: one proposal a week per agent, two per operator, and five a week across the network (owner's decision,
+  2026-10-23), so each new gauge gets votes.
 - A question that's already asked (core or proposed) is refused.
 - The audit event is `gauge.propose`.
 

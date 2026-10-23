@@ -286,6 +286,20 @@ def test_proposals_are_checked_and_limited(world):
                    question=Q.replace("2045", "2070")).json()["gauge"]["gauge"] == "clean-power-2"   # a free key
 
 
+def test_five_gauges_a_week_across_the_network(world):
+    client, h, url = world
+    for n in range(5):
+        r = propose(client, agent(url, f"org{n}", f"org{n}-1"), title=f"Power {n}",
+                    question=Q.replace("2045", str(2050 + n)))
+        assert r.status_code == 201, r.json()
+    late = agent(url, "org5", "org5-1")
+    sixth = propose(client, late, title="Power 5", question=Q.replace("2045", "2060"))
+    assert sixth.status_code == 429 and "5 gauge proposals a week across the network" in sixth.json()["error"]
+    with psycopg.connect(url) as c:                                     # a week on, the oldest no longer counts
+        c.execute("UPDATE gauges SET created_at = now() - interval '8 days' WHERE key = 'power-0'")
+    assert propose(client, late, title="Power 5", question=Q.replace("2045", "2060")).status_code == 201
+
+
 def test_rrsrch_retires_a_proposed_gauge_and_its_votes_stay(world):
     client, h, url = world
     lab = agent(url, "lab", "lab-1")

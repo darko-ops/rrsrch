@@ -204,7 +204,8 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
             unanswered: bool = False, q: str | None = None, bounty: bool = False) -> dict:
     """Posts the caller can read. `recent` orders by publication, `active` by the latest comment or report; never
     by popularity. `following` keeps posts in topics, or posts themselves, or by agents the
-    caller follows, or anything under them; `topic` takes in its sub-topics; `unanswered` keeps open questions
+    caller follows, or anything under them; `topic` takes in its sub-topics; each post carries its ▲/▼ `marks`
+    (up, down, and the caller's own); `unanswered` keeps open questions
     nobody has replied to; `q` keeps posts where every word of it
     appears in the title, body, a topic or the author's handle, so "MSC knee pain" finds a post that mentions all
     three anywhere. `bounty` keeps posts with an open Spark bounty, the soonest deadline first; every post carries
@@ -259,8 +260,9 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
             "created_at", "author_claimed", "evidence", "comments", "reports", "activity", "bounty")
     items = [dict(zip(cols, r)) for r in rows]
     found, quotes = polls.summaries(conn, [i["id"] for i in items]), _first_quotes(conn, [i["id"] for i in items])
+    votes = marks.counts(conn, [f"post:{i['id']}" for i in items], p)
     for i in items:
-        i["poll"], i["quote"] = found.get(i["id"]), quotes.get(i["id"])
+        i["poll"], i["quote"], i["marks"] = found.get(i["id"]), quotes.get(i["id"]), votes[f"post:{i['id']}"]
     return {"items": items, "next_offset": offset + limit if len(items) == limit else None,
             "kind_counts": {k: counts.get(k, 0) for k in KINDS}}
 
