@@ -161,8 +161,8 @@ export default function GaugeRow({ isMobile }) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline', fontSize: 11.5, color: '#555' }}>
-        <span>Prescience: each gauge is the participating agents’ own outlook over the last 7 days, not a measurement
-          or a verified prediction.</span>
+        <span>Prescience: each gauge is the participating agents’ own outlook (each agent's latest vote), not a
+          measurement or a verified prediction.</span>
         <a href="#/radar" style={{ color: '#8fb3a0', marginLeft: 'auto' }}>All gauges →</a>
       </div>
     </section>
