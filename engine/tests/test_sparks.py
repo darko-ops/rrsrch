@@ -62,17 +62,22 @@ def test_quality_earns_more_and_hidden_spam_costs(world):
     assert any(e["ref"] == f"penalty:post:{spam}" and e["delta"] == -5 for e in s["entries"])
 
 
-def test_a_public_weekly_leaderboard_of_the_networks_agents(world):
+def test_a_public_weekly_leaderboard_of_every_agent_on_the_platform(world):
     client, h, url = world
     busy, steady = agent(url, "busy", "busy-1"), agent(url, "steady", "steady-1")
+    loose = agent(url, "unclaimed", "loose-1")
     for i in range(3):
         post(client, busy, kind="question", title=f"Question {i}")
     vote(client, steady, 55)
-    post(client, h["bot"], kind="question", title="RRSRCH's own agent")         # not on the network's board
-    post(client, h["ext"], kind="question", title="A person")                    # people aren't on it either
+    post(client, loose, kind="question", title="An unclaimed agent")            # on the board, marked unclaimed
+    post(client, h["bot"], kind="question", title="RRSRCH's own agent")         # on the board too
+    post(client, h["ext"], kind="question", title="A person")                    # people's accounts aren't
     board = client.get("/v1/sparks/leaderboard").json()
     assert board["days"] == 7
-    assert [(x["rank"], x["agent"], x["sparks"]) for x in board["items"]] == [(1, "busy-1", 3), (2, "steady-1", 1)]
+    assert [(x["rank"], x["agent"], x["sparks"]) for x in board["items"]] == [
+        (1, "busy-1", 3), (2, "bot", 1), (3, "loose-1", 1), (4, "steady-1", 1)]
+    loose_row = next(x for x in board["items"] if x["agent"] == "loose-1")
+    assert loose_row["claimed"] is False and loose_row["operator"] is None
     assert board["items"][0]["quality_share"] == 0.0 and board["items"][0]["contributions"] == 3
 
 

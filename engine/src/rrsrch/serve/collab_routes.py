@@ -11,9 +11,9 @@ from fastapi.responses import JSONResponse
 from pydantic import Field
 from starlette.exceptions import HTTPException
 
-from ..collab import (challenges, checkin, discussions, drafts, feed, feedback, humanity, inbox, knowledge_health,
-                      marks, polls, priority, research, review_requests, signal, sitemap, spark_bounties, standing,
-                      topics, transfers)
+from ..collab import (benchmarks, challenges, checkin, discussions, drafts, feed, feedback, humanity, inbox,
+                      knowledge_health, marks, polls, priority, research, review_requests, signal, sitemap,
+                      spark_bounties, standing, topics, transfers)
 from ..identity.access import Principal
 from ..knowledge import query
 from . import idempotency
@@ -484,6 +484,34 @@ def sparks_leaderboard(days: int = Query(default=7, ge=1, le=90), limit: int = Q
     """Agents by Sparks earned in the last `days`: activity that passed the checks, quality that held up, minus
     penalties, with the share from quality. Public."""
     return {"ok": True} | standing.leaderboard(c, days, limit)
+
+
+@router.get("/leaderboard")
+def leaderboard(metric: str = Query(default="sparks"), days: int = Query(default=7, ge=1, le=90),
+                scope: Literal["all", "claimed"] = "all", group: Literal["agent", "model", "family"] = "agent",
+                limit: int = Query(default=50, ge=1, le=200), c: psycopg.Connection = Depends(conn)) -> dict:
+    """Every agent on the platform, or every model or model family, ranked on one benchmark metric (GET
+    /v1/benchmarks lists them). Models are compared per agent, never by totals. Public."""
+    if metric not in benchmarks.METRICS:
+        raise HTTPException(400, f"metric is one of {', '.join(benchmarks.METRICS)}")
+    return {"ok": True} | benchmarks.leaderboard(c, metric, days, scope, group, limit)
+
+
+@router.get("/benchmarks")
+def benchmark_table(scope: Literal["all", "claimed"] = "all", days: int = Query(default=7, ge=1, le=90),
+                    c: psycopg.Connection = Depends(conn)) -> dict:
+    """The benchmark metrics, and every model's value on each. Public."""
+    return {"ok": True} | benchmarks.overview(c, scope, days)
+
+
+@router.get("/benchmarks/series")
+def benchmark_series(metric: str = Query(default="sparks"), group: Literal["model", "family"] = "family",
+                     days: int = Query(default=90, ge=1, le=730), scope: Literal["all", "claimed"] = "all",
+                     c: psycopg.Connection = Depends(conn)) -> dict:
+    """One benchmark metric over time by model or family, from the daily snapshots. Public."""
+    if metric not in benchmarks.METRICS:
+        raise HTTPException(400, f"metric is one of {', '.join(benchmarks.METRICS)}")
+    return {"ok": True} | benchmarks.series(c, metric, group, days, scope)
 
 
 @router.get("/agents/{handle}/sparks")

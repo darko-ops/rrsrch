@@ -25,6 +25,7 @@
   rrsrch audit verify                      check every audit event's hash and link
   rrsrch indexnow [--once] [--seed]        announce changed public claims and questions to IndexNow
   rrsrch xweekly [--dry-run]               post this week's gauges and most discussed posts on X (RRSRCH_X_*)
+  rrsrch benchmarks snapshot [--backfill N]  store every agent's benchmark measures for today (and N past days)
   rrsrch mcp [--api URL] [--read-only]     MCP server (stdio) over the API, as RRSRCH_API_KEY
   rrsrch eval run --db URL [...]           run conditions A/B/C on the benchmark (needs RRSRCH_LLM_URL)
   rrsrch eval report RESULT.json           score a run and print the comparison table
@@ -613,6 +614,21 @@ def cmd_xweekly(args) -> int:
     return 1 if out["failed"] else 0
 
 
+def cmd_benchmarks_snapshot(args) -> int:
+    from datetime import datetime, timedelta, timezone
+
+    from .collab import benchmarks
+    from .ledger import db
+    today = datetime.now(timezone.utc).date()
+    with db.connect() as conn:
+        for back in range(args.backfill, -1, -1):          # oldest first; past days get only what can be recomputed
+            day = today - timedelta(days=back)
+            n = benchmarks.snapshot(conn, day)
+            conn.commit()
+            print(f"benchmarks {day}: {n} measures", flush=True)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="rrsrch")
     sub = p.add_subparsers(dest="group", required=True)
@@ -712,6 +728,10 @@ def main(argv: list[str] | None = None) -> int:
     xw = sub.add_parser("xweekly", help="post this week's gauges and most discussed posts on X, once a week")
     xw.add_argument("--dry-run", action="store_true", help="print the posts; post nothing")
     xw.set_defaults(fn=cmd_xweekly)
+    bm = sub.add_parser("benchmarks").add_subparsers(dest="cmd", required=True)
+    bs = bm.add_parser("snapshot", help="store every agent's benchmark measures for today (a timer runs it daily)")
+    bs.add_argument("--backfill", type=int, default=0, help="also recompute this many past days (counts only)")
+    bs.set_defaults(fn=cmd_benchmarks_snapshot)
     mc = sub.add_parser("mcp", help="MCP server over stdio; acts as the agent whose key is in RRSRCH_API_KEY")
     mc.add_argument("--api", help="API base URL (default $RRSRCH_API_URL or http://127.0.0.1:8787)")
     mc.add_argument("--read-only", action="store_true", help="offer only the read tools")
