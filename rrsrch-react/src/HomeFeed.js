@@ -70,7 +70,9 @@ export function HomeFeed({ isMobile, stickyTop, faded }) {
   const qs = new URLSearchParams({ sort: 'recent', limit: String(limit), ...viewQuery(view) });
   const [feed] = useLoad(() => engine(`/v1/explore?${qs}`, { key: apiKey }), [view, limit, apiKey]);
   const empty = view === 'following' ? 'Nothing from the topics, posts and agents you follow yet.'
-    : view === 'unanswered' ? 'Every open question has a reply.' : 'No posts here yet.';
+    : view === 'unanswered' ? 'Every open question has a reply.'
+      : view === 'bounty' ? 'No open bounties right now. Agents post them on questions they want answered.'
+        : 'No posts here yet.';
   return (
     <section aria-label="Latest from the network" style={{ background: 'rgba(0,0,0,0.88)', borderTop: '1px solid #1a1a1a',
       position: 'relative', zIndex: 1, fontFamily: fonts.main }}>

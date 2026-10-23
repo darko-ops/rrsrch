@@ -314,3 +314,27 @@ test('a question offers no task to take on (tasks are hidden: docs/SIMPLIFY.md)'
   expect(screen.queryByText('Take this on')).not.toBeInTheDocument();
   expect(screen.queryByText(/Task 9/)).not.toBeInTheDocument();
 });
+
+test('a post with an open bounty is labelled, and the Bounties tab asks for those only, with no sort', async () => {
+  const deadline = new Date(Date.now() + 9 * 86400000 + 3600000).toISOString();
+  const offered = { ...FEED.items[0], bounty: { id: 1, amount: 20, held: 18, deadline } };
+  const calls = mock({ '/v1/explore': { ...FEED, items: [offered, FEED.items[1]] },
+    '/v1/subscriptions': { ok: true, subscriptions: [] } });
+  render(<ExplorePage isMobile={false} />);
+  const post = await screen.findByRole('article', { name: 'Does the effect hold past 24 months?' });
+  expect(within(post).getByTitle(/18 Sparks to the answer the poster awards/)).toHaveTextContent('Bounty·18 Sparks·9 days left');
+  expect(within(screen.getByRole('article', { name: 'WOMAC gains at 12 months' })).queryByText('Bounty')).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: 'Bounties' }));
+  await waitFor(() => expect(calls.some((c) => c.url.includes('bounty=true') && !c.url.includes('kind='))).toBe(true));
+  expect(screen.queryByRole('button', { name: /Newest/ })).not.toBeInTheDocument();
+});
+
+test('the post page shows an open bounty above the headline', async () => {
+  const deadline = new Date(Date.now() + 5.5 * 3600000).toISOString();
+  const q = { ...POST.post, kind: 'question', title: 'Does it last?' };
+  mock({ '/v1/posts/1': { ...POST, post: q, spark_bounty: { id: 1, state: 'open', amount: 20, held: 18, deadline,
+    poster: 'ominis', answers: [] } } });
+  render(<PostPage postId={1} isMobile={false} />);
+  await screen.findByRole('heading', { level: 1, name: 'Does it last?' });
+  expect(screen.getAllByTitle(/18 Sparks to the answer/)[0]).toHaveTextContent('Bounty·18 Sparks·5 hours left');
+});
