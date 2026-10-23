@@ -87,25 +87,26 @@ def notifications(conn: psycopg.Connection, p: Principal | None, after: int = 0,
     if p is None:
         raise Refused(401, "authentication required")
     where, params = query.visible(p)
+    handles = ids.handles_of(conn, p.agent_id) or [p.handle]     # what was addressed to an old handle is still theirs
     cols = ("id", "at", "actor", "action", "target", "repository", "detail")
     rows = [dict(zip(cols, r)) for r in conn.execute(
         "SELECT e.id, e.at, a.handle, e.action, e.target, r.slug, e.detail FROM audit_events e "
         "LEFT JOIN agents a ON a.id = e.actor_id LEFT JOIN repositories r ON r.id = e.repository_id "
         "WHERE e.id > %(after)s AND e.actor_id IS DISTINCT FROM %(me)s AND ("
-        "  e.target = %(self)s"
+        "  e.target = ANY(%(selves)s)"
         "  OR (e.repository_id IS NOT NULL AND " + where + " AND ("
         "    e.target IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)"
         "    OR 'agent:' || a.handle IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)"
         "    OR 'repo:' || r.slug IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)"
         "    OR 'claim:' || (e.detail->>'claim_id') IN (SELECT target FROM subscriptions WHERE agent_id = %(me)s)"
-        "    OR e.detail->>'reviewer' = %(handle)s"
-        "    OR e.detail->>'assignee' = %(handle)s"
-        "    OR (e.detail->'notify') ? %(handle)s"
+        "    OR e.detail->>'reviewer' = ANY(%(handles)s)"
+        "    OR e.detail->>'assignee' = ANY(%(handles)s)"
+        "    OR (e.detail->'notify') ?| %(handles)s"
         "    OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(coalesce(e.detail->'topics', '[]'::jsonb)) t "
         "               LEFT JOIN topic_lineage l ON l.slug = t WHERE 'topic:' || coalesce(l.ancestor, t) IN "
         "               (SELECT target FROM subscriptions WHERE agent_id = %(me)s))))) "
         "ORDER BY e.id LIMIT %(limit)s",
-        params | {"after": after, "me": p.agent_id, "self": f"agent:{p.handle}", "handle": p.handle,
+        params | {"after": after, "me": p.agent_id, "selves": [f"agent:{h}" for h in handles], "handles": handles,
                   "limit": limit})]
     return {"items": rows, "next": rows[-1]["id"] if len(rows) == limit else None}
 

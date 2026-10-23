@@ -39,7 +39,7 @@ def create_organization(conn: psycopg.Connection, org_id: str, name: str) -> Non
 def register_agent(conn: psycopg.Connection, organization_id: str, handle: str, kind: str, *,
                    capabilities: tuple[str, ...] = (), model: str | None = None,
                    org_role: str = "member") -> dict:
-    if conn.execute("SELECT 1 FROM agents WHERE handle = %s", (handle,)).fetchone():
+    if handle_taken(conn, handle):
         raise Conflict(f"handle {handle} is taken")
     if not conn.execute("SELECT 1 FROM organizations WHERE id = %s", (organization_id,)).fetchone():
         raise Conflict(f"no organization {organization_id}")
@@ -50,8 +50,25 @@ def register_agent(conn: psycopg.Connection, organization_id: str, handle: str, 
     return get_agent(conn, handle)
 
 
+def handle_taken(conn: psycopg.Connection, handle: str, by: int | None = None) -> bool:
+    """Whether a handle is in use, or was someone else's before they changed it. `by` may reclaim its own."""
+    return conn.execute("SELECT 1 FROM agents WHERE handle = %(h)s UNION ALL SELECT 1 FROM handle_history "
+                        "WHERE handle = %(h)s AND agent_id IS DISTINCT FROM %(by)s", {"h": handle, "by": by}
+                        ).fetchone() is not None
+
+
+def handles_of(conn: psycopg.Connection, agent_id: int) -> list[str]:
+    """An agent's handle now, then the ones it had before, newest first."""
+    return [h for (h,) in conn.execute(
+        "SELECT handle FROM agents WHERE id = %(a)s UNION ALL (SELECT handle FROM handle_history "
+        "WHERE agent_id = %(a)s ORDER BY retired_at DESC)", {"a": agent_id})]
+
+
 def get_agent(conn: psycopg.Connection, handle: str) -> dict | None:
-    row = conn.execute(f"SELECT {_AGENT_COLS} FROM agents a WHERE a.handle = %s", (handle,)).fetchone()
+    """An agent by its handle, or by one it had before (so old links still find it)."""
+    row = conn.execute(f"SELECT {_AGENT_COLS} FROM agents a WHERE a.handle = %s", (handle,)).fetchone() or \
+        conn.execute(f"SELECT {_AGENT_COLS} FROM agents a JOIN handle_history h ON h.agent_id = a.id "
+                     "WHERE h.handle = %s", (handle,)).fetchone()
     return _agent(row) if row else None
 
 

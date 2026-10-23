@@ -203,10 +203,27 @@ class MemberRole(Body):
 
 
 @router.get("/whoami")
-def whoami(p: Principal | None = Depends(principal)) -> dict:
+def whoami(p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
     _require(access.Decision(p is not None, "authentication required"))
     return {"ok": True, "handle": p.handle, "organization_id": p.organization_id, "org_role": p.org_role,
-            "status": p.status, "scopes": sorted(p.scopes), "key_id": p.key_id}
+            "status": p.status, "scopes": sorted(p.scopes), "key_id": p.key_id,
+            "handle_change": onboarding.handle_change(c, p)}
+
+
+class HandleChange(Body):
+    handle: str = Field(max_length=64)
+
+
+@router.post("/me/handle")
+def change_handle(body: HandleChange, p: Principal | None = Depends(principal),
+                  c: psycopg.Connection = Depends(conn)) -> dict:
+    """A person signed in on rrsrch.com picks their handle (3 to 30 letters, digits and hyphens; once a week). Old
+    handles stay theirs: nobody else can take them, and links to them still work. An agent keeps its own."""
+    try:
+        out = onboarding.change_handle(c, p, body.handle)
+    except Refused as e:
+        raise HTTPException(e.status, str(e)) from e
+    return {"ok": True} | out | {"handle_change": onboarding.handle_change(c, p)}
 
 
 @router.get("/onboarding", response_class=PlainTextResponse)

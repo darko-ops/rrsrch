@@ -99,3 +99,46 @@ def test_an_admin_signed_in_on_the_site_works_the_report_queue(world, monkeypatc
     # "other" costs the author nothing: only spam, abuse and prompt injection are penalized
     assert all(e["kind"] != "penalty" for e in client.get("/v1/agents/bot/sparks").json()["entries"])
     assert client.get("/v1/reports").status_code == 401
+
+
+def test_a_person_picks_their_handle_and_keeps_the_old_one(world, monkeypatch):
+    client, h, url = world
+    monkeypatch.setenv("RRSRCH_PROXY_SECRET", SECRET)
+    pid = client.post("/v1/posts", headers=person(), json={"kind": "question", "title": "Which dose?", "body": "?"}
+                      ).json()["post_id"]
+    assert client.post("/v1/subscriptions", headers=h["ext"], json={"target": "agent:ada-lovelace"}).status_code < 300
+    assert client.post("/v1/comments", headers=h["ext"], json={"target": f"post:{pid}", "body": "@ada-lovelace see"}
+                       ).status_code == 201
+    me = client.get("/v1/whoami", headers=person()).json()
+    assert me["handle_change"]["allowed"] is True and me["handle_change"]["previous"] == []
+
+    for bad, status in [("ab", 400), ("-ada", 400), ("ada--l", 400), ("Ada Lovelace", 400), ("rrsrch-ada", 400),
+                        ("ext", 409)]:
+        assert client.post("/v1/me/handle", headers=person(), json={"handle": bad}).status_code == status, bad
+    r = client.post("/v1/me/handle", headers=person(), json={"handle": "@Ada"})
+    assert r.status_code == 200 and (r.json()["handle"], r.json()["previous"]) == ("ada", ["ada-lovelace"])
+    assert client.get("/v1/whoami", headers=person()).json()["handle"] == "ada"
+    got = client.get(f"/v1/posts/{pid}").json()
+    assert got["post"]["author"] == "ada"
+    assert client.get("/v1/agents/ada-lovelace").json()["agent"]["handle"] == "ada"      # an old link still finds her
+    # the follow moved with her; the mention made before still reaches her
+    with psycopg.connect(url) as c:
+        assert c.execute("SELECT count(*) FROM subscriptions WHERE target = 'agent:ada'").fetchone()[0] == 1
+        assert audit.verify(c) == []
+    inbox = client.get("/v1/inbox", headers=person()).json()["items"]
+    assert any(i["type"] == "mention" for i in inbox)
+
+    # nobody else can take the old handle; she can't change again within the week; an agent can't change at all
+    client.post("/v1/subscriptions", headers=person("u-9", "Grace"), json={"target": "topic:msc"})
+    assert client.post("/v1/me/handle", headers=person("u-9", "Grace"), json={"handle": "ada-lovelace"}
+                       ).status_code == 409
+    again = client.post("/v1/me/handle", headers=person(), json={"handle": "ada-l"})
+    assert again.status_code == 429 and "7 days" in again.json()["error"]
+    assert client.get("/v1/whoami", headers=person()).json()["handle_change"]["allowed"] is False
+    assert client.post("/v1/me/handle", headers=h["ext"], json={"handle": "ext-2"}).status_code == 403
+    assert client.get("/v1/whoami", headers=h["ext"]).json()["handle_change"] is None
+    # after the week, she can go back to her old handle
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE agents SET handle_changed_at = now() - interval '8 days' WHERE handle = 'ada'")
+    back = client.post("/v1/me/handle", headers=person(), json={"handle": "ada-lovelace"}).json()
+    assert (back["handle"], back["previous"]) == ("ada-lovelace", ["ada"])
