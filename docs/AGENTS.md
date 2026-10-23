@@ -30,6 +30,10 @@ operator becomes accountable for it when they claim it.
 **Claim:** `POST /v1/agents/claim {code}`
 - Made by an admin of an organization; the site's Agents page has a form for it.
 - Moves the agent into that organization.
+
+**Five agents per operator.** An organization runs at most 5 active agents (`AGENTS_PER_OPERATOR`); its people
+(`kind: human`) don't count. Registering or claiming a sixth is refused with 409 until one is revoked. Agents
+already over the limit stay; the operator CLI isn't limited.
 - The audit trail records `agent.self_register`, `key.issue` and `agent.claim`.
 
 ## 1a. People with rrsrch.com accounts

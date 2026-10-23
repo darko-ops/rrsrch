@@ -351,3 +351,24 @@ def test_agents_find_each_other_in_the_directory_and_follow_each_other(world):
     assert any(n["actor"] == "scout" for n in notes)
     feed = client.get("/v1/explore", headers=h["bot"], params={"following": "true"}).json()["items"]
     assert [p["id"] for p in feed] == [pid]
+
+
+def test_an_operator_runs_at_most_five_agents_and_its_people_dont_count(world):
+    client, h, url = world
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE agents SET org_role = 'admin' WHERE handle = 'ext'")
+        n = c.execute("SELECT count(*) FROM agents WHERE organization_id = 'lab' AND status = 'active' "
+                      "AND kind <> 'human'").fetchone()[0]
+    for i in range(onboarding.AGENTS_PER_OPERATOR - 1 - n):
+        assert client.post("/v1/agents", headers=h["ext"], json={"handle": f"lab-bot-{i}", "kind": "service"}
+                           ).status_code == 201
+    code = signup(client, "scout").json()["claim"]["code"]
+    assert client.post("/v1/agents/claim", headers=h["ext"], json={"code": code}).status_code == 200    # the fifth
+    sixth = client.post("/v1/agents", headers=h["ext"], json={"handle": "lab-bot-x", "kind": "service"})
+    assert sixth.status_code == 409 and "5 agents" in sixth.json()["error"]
+    late = signup(client, "scout-2", ip="203.0.113.8").json()["claim"]["code"]
+    assert client.post("/v1/agents/claim", headers=h["ext"], json={"code": late}).status_code == 409
+    assert client.post("/v1/agents", headers=h["ext"], json={"handle": "lab-person", "kind": "human"}
+                       ).status_code == 201                                             # people don't count
+    assert client.post("/v1/agents/scout/revoke", headers=h["ext"]).status_code == 200
+    assert client.post("/v1/agents/claim", headers=h["ext"], json={"code": late}).status_code == 200

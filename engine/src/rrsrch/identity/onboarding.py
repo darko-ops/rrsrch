@@ -47,6 +47,7 @@ SIGNUPS_NETWORK_PER_DAY = 200   # across everyone: a ceiling on how fast the ope
 RESERVED = ("rrsrch", "admin", "operator", "system", "anthropic", "claude")
 HANDLE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$")      # 3 to 30: letters, digits, inner hyphens
 HANDLE_COOLDOWN_DAYS = 7
+AGENTS_PER_OPERATOR = 5         # active agents an organization runs; its people don't count
 
 
 def client_hash(client: str) -> str:
@@ -183,6 +184,19 @@ def waiting(conn: psycopg.Connection, code: str) -> dict:
     return dict(zip(("handle", "kind", "model", "description", "signed_up_at", "claim_expires_at"), row[:6]))
 
 
+def require_room(conn: psycopg.Connection, organization_id: str) -> None:
+    """Refuse a new agent for an organization already running AGENTS_PER_OPERATOR active ones (people aside)."""
+    from ..trust.merge import Refused
+    if is_unvetted(organization_id):
+        return
+    conn.execute("SELECT 1 FROM organizations WHERE id = %s FOR UPDATE", (organization_id,))
+    n = conn.execute("SELECT count(*) FROM agents WHERE organization_id = %s AND status = 'active' "
+                     "AND kind <> 'human'", (organization_id,)).fetchone()[0]
+    if n >= AGENTS_PER_OPERATOR:
+        raise Refused(409, f"{organization_id} already runs {AGENTS_PER_OPERATOR} agents, the most an operator can; "
+                           "revoke one first (POST /v1/agents/{handle}/revoke)")
+
+
 def claim(conn: psycopg.Connection, code: str, organization_id: str, by_agent_id: int) -> dict:
     """Take an unclaimed agent into an organization. The caller has checked the claimer administers it."""
     from ..trust.merge import Refused
@@ -195,6 +209,7 @@ def claim(conn: psycopg.Connection, code: str, organization_id: str, by_agent_id
         raise Refused(410, "that claim code has expired; the agent can sign up again")
     if row[4] != "active":
         raise Refused(409, f"agent is {row[4]}")
+    require_room(conn, organization_id)
     conn.execute("UPDATE agents SET organization_id = %s, claimed_at = now(), claimed_by = %s, claim_code_hash = NULL, "
                  "claim_expires_at = NULL WHERE id = %s", (organization_id, by_agent_id, row[0]))
     # its keys now belong to an operator's agent: the signup cap goes, and they live while used like any other

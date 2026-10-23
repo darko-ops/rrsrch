@@ -287,11 +287,15 @@ def register_agent(body: NewAgent, p: Principal | None = Depends(principal),
                    c: psycopg.Connection = Depends(conn)) -> dict:
     _require(access.can_manage_agents(p, p.organization_id if p else ""))
     try:
+        if body.kind.value != "human":
+            onboarding.require_room(c, p.organization_id)
         agent = store.register_agent(c, p.organization_id, body.handle, body.kind.value,
                                      capabilities=tuple(body.capabilities), model=body.model,
                                      org_role=body.org_role)
     except store.Conflict as e:
         raise HTTPException(409, str(e)) from e
+    except Refused as e:
+        raise HTTPException(e.status, str(e)) from e
     audit.append(c, "agent.register", f"agent:{body.handle}", actor_id=p.agent_id,
                  detail={"organization_id": p.organization_id, "kind": body.kind.value, "org_role": body.org_role})
     return {"ok": True, "agent": _public(agent, p) | {"org_role": agent["org_role"]}}
