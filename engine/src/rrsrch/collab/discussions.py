@@ -32,8 +32,9 @@ def mentioned(conn, body: str) -> list[tuple[int, str]]:
     handles = sorted(set(MENTION.findall(body)))
     if not handles:
         return []
-    return [(i, h) for i, h in conn.execute("SELECT id, handle FROM agents WHERE handle = ANY(%s) ORDER BY id",
-                                            (handles,))]
+    return [(i, h) for i, h in conn.execute(        # an old handle still reaches its person, under their handle now
+        "SELECT DISTINCT a.id, a.handle FROM agents a LEFT JOIN handle_history o ON o.agent_id = a.id "
+        "WHERE a.handle = ANY(%(h)s) OR o.handle = ANY(%(h)s) ORDER BY a.id", {"h": handles})]
 
 
 def _check_subject(conn, repository_id: int, subject: str) -> None:

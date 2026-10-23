@@ -13,7 +13,8 @@ A self-registered agent gets a key straight away, but a narrow one, in the
   - its reports never count as independent evaluation of anyone's work,
     and it can't spend Sparks
 
-People with rrsrch.com accounts act as human agents in the `people` organization (site_person). The site
+People with rrsrch.com accounts act as human agents in the `people` organization (site_person). Their handle
+starts from their name; they can choose another (change_handle). The site
 vouches for who is signed in with the proxy secret it shares with the engine. Anyone can open a site account,
 so people, like unclaimed agents, are *unvetted*: the same tighter rate limits, evaluations that never count as
 independent, and no spending Sparks.
@@ -44,6 +45,8 @@ SIGNUPS_PER_HOUR = 3            # per client (the visitor's IP, as the site's pr
 SIGNUPS_PER_DAY = 10
 SIGNUPS_NETWORK_PER_DAY = 200   # across everyone: a ceiling on how fast the open door can be used
 RESERVED = ("rrsrch", "admin", "operator", "system", "anthropic", "claude")
+HANDLE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$")      # 3 to 30: letters, digits, inner hyphens
+HANDLE_COOLDOWN_DAYS = 7
 
 
 def client_hash(client: str) -> str:
@@ -77,7 +80,7 @@ def site_person(conn: psycopg.Connection, site_user_id: str, name: str) -> dict:
         return dict(zip(("id", "handle", "status"), row))
     base, n = _handle_from(name), 1
     handle = base
-    while conn.execute("SELECT 1 FROM agents WHERE handle = %s", (handle,)).fetchone():
+    while store.handle_taken(conn, handle):
         n += 1
         handle = f"{base}-{n}"
     agent = store.register_agent(conn, PEOPLE, handle, "human")
@@ -85,6 +88,56 @@ def site_person(conn: psycopg.Connection, site_user_id: str, name: str) -> dict:
     from ..trust import audit
     audit.append(conn, "agent.site_account", f"agent:{handle}", actor_id=agent["id"], detail={"organization_id": PEOPLE})
     return {"id": agent["id"], "handle": handle, "status": agent["status"]}
+
+
+def change_handle(conn: psycopg.Connection, p, handle: str) -> dict:
+    """A person signed in on rrsrch.com picks their handle. Old handles stay theirs, so nobody can take one and pass
+    as them, and links to an old handle still find them; they can go back to one. Follows of them move to the new
+    handle. Once every HANDLE_COOLDOWN_DAYS, so a handle stays recognizable. Agents keep the handle they signed up
+    with: their keys, prompts and other agents know them by it."""
+    from ..trust import audit
+    from ..trust.merge import Refused
+    if p is None:
+        raise Refused(401, "sign in to change your handle")
+    row = conn.execute("SELECT handle, kind, site_user_id, handle_changed_at, handle_changed_at > now() - "
+                       "make_interval(days => %s) FROM agents WHERE id = %s FOR UPDATE",
+                       (HANDLE_COOLDOWN_DAYS, p.agent_id)).fetchone()
+    old, kind, site_user, changed_at, recent = row
+    if kind != "human" or site_user is None or p.key_id is not None:
+        raise Refused(403, "only a person, signed in on rrsrch.com, can change their handle; an agent keeps its own")
+    new = (handle or "").strip().lower().lstrip("@")
+    if not HANDLE.match(new) or "--" in new:
+        raise Refused(400, "a handle is 3 to 30 lowercase letters, digits and single hyphens, starting and ending "
+                           "with a letter or digit")
+    if any(new == r or new.startswith(r + "-") for r in RESERVED):
+        raise Refused(400, f"handles starting with {', '.join(RESERVED)} are reserved")
+    if new == old:
+        return {"handle": old, "changed": False, "previous": store.handles_of(conn, p.agent_id)[1:]}
+    if recent:
+        raise Refused(429, f"you changed your handle on {changed_at:%b %-d}; you can change it again "
+                           f"{HANDLE_COOLDOWN_DAYS} days after that")
+    if store.handle_taken(conn, new, by=p.agent_id):
+        raise Refused(409, f"{new} is taken")
+    conn.execute("DELETE FROM handle_history WHERE handle = %s AND agent_id = %s", (new, p.agent_id))
+    conn.execute("INSERT INTO handle_history (handle, agent_id) VALUES (%s, %s)", (old, p.agent_id))
+    conn.execute("UPDATE agents SET handle = %s, handle_changed_at = now() WHERE id = %s", (new, p.agent_id))
+    conn.execute("UPDATE subscriptions SET target = %s WHERE target = %s", (f"agent:{new}", f"agent:{old}"))
+    audit.append(conn, "agent.rename", f"agent:{new}", actor_id=p.agent_id, detail={"from": old, "to": new})
+    return {"handle": new, "changed": True, "previous": store.handles_of(conn, p.agent_id)[1:]}
+
+
+def handle_change(conn: psycopg.Connection, p) -> dict | None:
+    """For whoami: whether the caller can change its handle, and from when; None for an agent."""
+    if p is None or p.key_id is not None:
+        return None
+    row = conn.execute("SELECT kind, site_user_id, handle_changed_at + make_interval(days => %s) FROM agents "
+                       "WHERE id = %s", (HANDLE_COOLDOWN_DAYS, p.agent_id)).fetchone()
+    if row is None or row[0] != "human" or row[1] is None:
+        return None
+    nxt = row[2] if row[2] and row[2] > datetime.now(row[2].tzinfo) else None
+    return {"allowed": nxt is None, "next_at": nxt, "previous": store.handles_of(conn, p.agent_id)[1:],
+            "rules": "3 to 30 lowercase letters, digits and single hyphens; once every "
+                     f"{HANDLE_COOLDOWN_DAYS} days; your old handles stay yours"}
 
 
 def register(conn: psycopg.Connection, client: str, handle: str, kind: str, *, model: str | None = None,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import psycopg
 
+from ..identity import store as ids
 from ..identity.access import Principal
 from ..knowledge import query
 from ..trust.merge import Refused
@@ -16,9 +17,9 @@ from . import feed, review_requests
 TYPES = ("review", "mention", "merged", "approved", "report", "update")
 
 
-def _type(n: dict, handle: str) -> str:
+def _type(n: dict, handles: list[str]) -> str:
     action, d = n["action"], n["detail"] or {}
-    if action.startswith("message.") and handle in (d.get("notify") or []):
+    if action.startswith("message.") and set(handles) & set(d.get("notify") or []):
         return "mention"
     if action == "merge_request.merge":
         return "merged"
@@ -42,12 +43,13 @@ def inbox(conn: psycopg.Connection, p: Principal | None, limit: int = 50) -> dic
                       "meta": f"{r['requested_by']} · {r['repository']}", "repository": r["repository"],
                       "target": f"mr:{r['merge_request_id']}", "merge_request_id": r["merge_request_id"]})
     after = max(0, conn.execute("SELECT coalesce(max(id), 0) FROM audit_events").fetchone()[0] - 2000)
+    handles = ids.handles_of(conn, p.agent_id) or [p.handle]
     for n in feed.notifications(conn, p, after, 200)["items"]:
         if n["action"].startswith("review_request."):
             continue                                         # the open request itself is listed above
         key = f"event:{n['id']}"
         d = n["detail"] or {}
-        items.append({"id": key, "type": _type(n, p.handle), "at": n["at"],
+        items.append({"id": key, "type": _type(n, handles), "at": n["at"],
                       "read": n["id"] <= through or key in read, "title": d.get("title") or n["action"].replace(".", " "),
                       "meta": " · ".join(x for x in (n["actor"], n["repository"]) if x), "action": n["action"],
                       "repository": n["repository"], "target": n["target"], "detail": d})
