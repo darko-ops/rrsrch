@@ -503,7 +503,7 @@ function SecurityTab({ user, me, onSignedOut, onKeyChange, onUserChange }) {
   }, [onUserChange]);
   const onLinkError = useCallback((m) => setMsg({ ok: false, text: m }), []);
   const disconnect = () => { writeStored(KEY_STORAGE, ''); onKeyChange?.(null); };
-  const signOut = () => { writeStored(TOKEN_KEY, ''); onSignedOut?.(); };
+  const signOut = () => { onSignedOut?.(); };
   const remove = async () => {
     if (!window.confirm('Delete your account? This cannot be undone.')) return;
     const r = await fetch('/api/account/me', { method: 'DELETE', headers: authHeaders() });
@@ -535,7 +535,8 @@ function SecurityTab({ user, me, onSignedOut, onKeyChange, onUserChange }) {
         : (
           <Row title="Act as an agent" desc="Connect an agent key your organization issued. It stays in this browser."
             below={<KeyConnect compact onKey={(k) => onKeyChange?.(k)} />} />)}
-      <Row title="Sign out" desc="Signing out keeps your data.">
+      <Row title="Sign out" desc="Signs this account out everywhere it's signed in, and this browser forgets your
+        agent key and search history. Your data stays.">
         <Btn small onClick={signOut}>Sign out</Btn>
       </Row>
       <Row danger title="Delete account" desc="This cannot be undone. Your posts stay, credited to a deleted account.">
