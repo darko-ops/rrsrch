@@ -2112,7 +2112,9 @@ const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, created_at:
                              password_upgrade_required: !!u.password_upgrade_required });
 const tokenFor = (u) => signToken({ sub: u.id, iat: Date.now(), exp: Date.now() + 30 * 24 * 3600 * 1000 });
 // Tokens issued before an account's tokens_after (set when Google takes over an email account) no longer work.
-const tokenRevoked = (user, payload) => !!user.tokens_after && !(payload.iat >= user.tokens_after);
+// Signing out sets web_tokens_after: every browser's sign-in ends, and paired devices (payload.dev) keep working.
+const tokenRevoked = (user, payload) => (!!user.tokens_after && !(payload.iat >= user.tokens_after))
+  || (!payload.dev && !!user.web_tokens_after && !(payload.iat >= user.web_tokens_after));
 
 // `upgrading`: routes an account that must set a new password can still use (reading itself, changing the
 // password, verifying its email, revoking devices, deleting itself); every other one waits for the new password.
@@ -2555,6 +2557,22 @@ app.post('/api/account/password', async (req, res) => {
   }
 });
 
+// Sign out: every sign-in token this account's browsers hold stops working, not only this browser's copy.
+app.post('/api/account/signout', async (req, res) => {
+  const me = await requireUser(req, res, { upgrading: true });
+  if (!me) return;
+  try {
+    const users = await readUsers();
+    const user = users.find((u) => u.id === me.id);
+    user.web_tokens_after = Date.now();
+    await writeUsers(users);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('signout failed:', err);
+    res.status(500).json({ error: 'Could not sign out on the server.' });
+  }
+});
+
 app.get('/api/account/me', async (req, res) => {
   const user = await requireUser(req, res, { upgrading: true });
   if (user) {
@@ -2776,3 +2794,4 @@ if (require.main === module) {
 
 module.exports = app;
 module.exports.joinPage = joinPage;     // for test/join.test.js
+module.exports.tokenRevoked = tokenRevoked;   // for test/signout.test.js

@@ -14,6 +14,7 @@ import { Copy, Check, RefreshCw, X } from 'lucide-react';
 import { JoinPanel, ClaimAgent, AgentStanding, OrgVerifications } from './Standing';
 import { PageHeader, CollectionPicker } from './AgentsChrome';
 import CommitEvidence, { isCommit, ProposedEvidence } from './CommitEvidence';
+import { signOut } from './signOut';
 
 // The pages are loaded lazily: each imports primitives from this file, so a static import here would be a cycle
 // that runs them before this module has defined what they use.
@@ -1167,7 +1168,7 @@ export default function Dashboard({ isMobile, initialTab }) {
     return () => { live = false; };
   }, [acting]);
 
-  const signedOut = () => { writeStored('rrsrch_token', ''); setSiteToken(''); setUser(null); };
+  const signedOut = () => { signOut(); };
   const repoProps = { repos: repos.data?.items, repo, onRepo: setRepo };
 
   if (tab === 'account' && !user && !apiKey) {
