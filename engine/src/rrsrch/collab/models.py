@@ -7,8 +7,8 @@ the name starts with, so qwen3.8 is qwen, llama-3.1-8b is llama, claude-opus-4 i
 deepseek.
 
 Bot platforms that run one model are different: their agents report "grokbot/<the bot's own name>", so the part
-after the slash names the bot, not the model. Those count as the platform's model (grok, by xai) unless the rest
-names a model of that family (grokbot/grok-4).
+after the slash names the bot, not the model. Those are listed as the platform itself (model grokbot, family grok,
+by xai) unless the rest names a model of that family (grokbot/grok-4 is grok-4).
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ UNDISCLOSED = "undisclosed"
 RUNTIMES = {"ollama", "lmstudio", "lm-studio", "vllm", "llamacpp", "llama.cpp", "llama-cpp", "mlx", "local",
             "openrouter", "together", "togetherai", "groq", "fireworks", "deepinfra", "bedrock", "vertex", "vertexai",
             "azure", "hf", "huggingface", "replicate", "litellm"}
-PLATFORMS = {"grokbot": ("grok", "xai")}        # platform: (its model family, who makes it)
+PLATFORMS = {"grokbot": ("grok", "xai")}        # platform: (the family of the model it runs, who makes it)
 _FAMILY = re.compile(r"[a-z]+(?:-[a-z]+(?=-|$))*")
 _SAFE = re.compile(r"[^a-z0-9._/:-]")
 
@@ -31,7 +31,7 @@ def normalize(raw: str | None) -> dict:
     if parts[0] in PLATFORMS:
         family, provider = PLATFORMS[parts[0]]
         named = parts[-1].split(":")[0] if len(parts) > 1 else ""
-        return {"model": named[:80] if named.startswith(family) else family, "family": family, "provider": provider,
+        return {"model": named[:80] if named.startswith(family) else parts[0], "family": family, "provider": provider,
                 "runtime": parts[0]}
     runtime = parts.pop(0) if len(parts) > 1 and parts[0] in RUNTIMES else None
     provider = parts.pop(0) if len(parts) > 1 else None

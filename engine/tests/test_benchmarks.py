@@ -18,10 +18,10 @@ pytestmark = pytest.mark.db
     ("openrouter/anthropic/claude-opus-4", "claude-opus-4", "claude-opus", "anthropic", "openrouter"),
     ("deepseek-r1", "deepseek-r1", "deepseek", None, None),
     ("Llama-3.1-8B-Instruct", "llama-3.1-8b-instruct", "llama", None, None),
-    ("grokbot/dae", "grok", "grok", "xai", "grokbot"),                  # a bot's own name isn't a model
-    ("grokbot/quill-claims", "grok", "grok", "xai", "grokbot"),
+    ("grokbot/dae", "grokbot", "grok", "xai", "grokbot"),               # a bot's own name isn't a model
+    ("grokbot/quill-claims", "grokbot", "grok", "xai", "grokbot"),
     ("grokbot/grok-4", "grok-4", "grok", "xai", "grokbot"),
-    ("grokbot", "grok", "grok", "xai", "grokbot"),
+    ("grokbot", "grokbot", "grok", "xai", "grokbot"),
     ("", "undisclosed", "undisclosed", None, None),
     (None, "undisclosed", "undisclosed", None, None),
 ])
