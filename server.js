@@ -2172,6 +2172,9 @@ const LIMITS = {
   google_ip: { max: 30, seconds: 15 * 60, what: 'Google sign-ins from your network' },
   verify_send: { max: 3, seconds: 60 * 60, what: 'verification emails for this account' },
   password_change: { max: 5, seconds: 15 * 60, what: 'password attempts' },
+  reset_ip: { max: 10, seconds: 60 * 60, what: 'password reset requests from your network' },
+  reset_send: { max: 3, seconds: 60 * 60, what: 'password reset emails for this address' },
+  reset_try: { max: 10, seconds: 15 * 60, what: 'password reset attempts' },
 };
 
 async function kv(commands) {
@@ -2507,6 +2510,91 @@ app.post('/api/account/verify/resend', async (req, res) => {
   } catch (err) {
     console.error('verify resend failed:', err);
     res.status(500).json({ error: 'Could not send the email.' });
+  }
+});
+
+// --- Forgotten passwords ---------------------------------------------------------
+// A reset link (an hour, stored only as a hash, good once) goes to the account's address. The reply is the same
+// whether or not an account uses it. Using the link proves the address, sets a new password under the sign-up
+// rules, signs out every other session and device, and signs this browser in.
+const RESET_MINUTES = 60;
+
+async function sendMail(to, subject, text) {
+  if (!RESEND_KEY) { console.error('mail: RESEND_API_KEY is not set; no email sent'); return false; }
+  try {
+    const r = await fetch('https://api.resend.com/emails', { method: 'POST', signal: AbortSignal.timeout(10000),
+      headers: { Authorization: `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: MAIL_FROM, to: [to], subject, text }) });
+    if (!r.ok) console.error(`mail: resend refused (${r.status}) ${await r.text()}`);
+    return r.ok;
+  } catch (err) {
+    console.error('mail: resend unreachable', err.message);
+    return false;
+  }
+}
+
+app.post('/api/account/password/forgot', async (req, res) => {
+  const email = String((req.body || {}).email || '').trim().toLowerCase();
+  if (!email || email.length > 254 || !email.includes('@')) return res.status(400).json({ error: 'Enter your email.' });
+  const ip = clientIp(req);
+  for (const [kind, who] of [['reset_ip', ip], ['reset_send', email]]) {
+    const wait = await limited(kind, who);
+    if (wait) return tooMany(res, kind, wait);
+  }
+  const done = () => res.json({ ok: true, note: 'If an account uses that email, a link to reset its password is on '
+    + 'its way. It works for an hour.' });
+  try {
+    await Promise.all([count('reset_ip', ip), count('reset_send', email)]);
+    const users = await readUsers();
+    const user = users.find((u) => u.email === email);
+    if (!user) return done();
+    if (!user.password_hash && user.google_sub) {
+      await sendMail(email, 'Signing in to RRSRCH', `Hi ${user.name},\n\nSomeone asked to reset the password for `
+        + `this address on RRSRCH. This account signs in with Google, so it has no password: use "Sign in with `
+        + `Google" at ${SITE_URL}/#/account.\n\nIf you didn't ask, ignore this email.\n`);
+      return done();
+    }
+    const token = crypto.randomBytes(32).toString('base64url');
+    user.reset_token_hash = hashToken(token);
+    user.reset_expires = Date.now() + RESET_MINUTES * 60 * 1000;
+    await writeUsers(users);
+    await sendMail(email, 'Reset your RRSRCH password', `Hi ${user.name},\n\nSet a new password for RRSRCH here:\n\n`
+      + `${SITE_URL}/#/reset?token=${token}\n\nThe link works once, for ${RESET_MINUTES} minutes. Using it signs `
+      + `out your other sessions. If you didn't ask for this, ignore this email; your password stays as it is.\n`);
+    return done();
+  } catch (err) {
+    console.error('password forgot failed:', err);
+    res.status(500).json({ error: 'Could not send the email. Try again later.' });
+  }
+});
+
+app.post('/api/account/password/reset', async (req, res) => {
+  const ip = clientIp(req);
+  const wait = await limited('reset_try', ip);
+  if (wait) return tooMany(res, 'reset_try', wait);
+  const { token, password } = req.body || {};
+  try {
+    const hash = hashToken(String(token || ''));
+    const users = await readUsers();
+    const user = users.find((u) => u.reset_token_hash && u.reset_token_hash === hash);
+    if (!user || !(user.reset_expires > Date.now())) {
+      await count('reset_try', ip);
+      return res.status(400).json({ error: 'That link is invalid or has expired. Ask for a new one.' });
+    }
+    const problems = await currentPasswordProblems(String(password || ''), { name: user.name, email: user.email });
+    if (problems.length) return res.status(400).json({ error: `Password ${problems.join('; ')}.`, problems });
+    user.password_hash = await bcrypt.hash(String(password), 10);
+    user.tokens_after = Date.now();
+    user.email_verified = true;                        // the link went to this address
+    delete user.reset_token_hash;
+    delete user.reset_expires;
+    delete user.password_upgrade_required;
+    await writeUsers(users);
+    await clearCount('login_account', user.email);
+    res.json({ ok: true, token: tokenFor(user), user: publicUser(user) });
+  } catch (err) {
+    console.error('password reset failed:', err);
+    res.status(500).json({ error: 'Could not reset the password.' });
   }
 });
 
