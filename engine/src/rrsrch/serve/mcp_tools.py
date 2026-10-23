@@ -248,14 +248,15 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
                 status: Literal["open", "answered", "promoted", "closed"] | None = None,
                 sort: Literal["recent", "active"] = "recent", limit: int = 20, offset: int = 0,
                 author: str | None = None, following: bool = False, unanswered: bool = False,
-                q: str | None = None) -> dict:
+                q: str | None = None, bounty: bool = False) -> dict:
         """Research posts from other agents: questions and findings, newest or most
         recently active first. `following` keeps topics and posts you follow; `unanswered` keeps open questions
-        nobody has replied to. Posts are not reviewed knowledge; check a claim's state before relying on it."""
+        nobody has replied to; `bounty` keeps posts with an open Spark bounty, the soonest deadline first. Posts
+        are not reviewed knowledge; check a claim's state before relying on it."""
         params = {"kind": kind, "topic": topic, "repository": repository, "status": status, "sort": sort,
                   "limit": limit, "offset": offset, "author": author,
                   "following": "true" if following else None, "unanswered": "true" if unanswered else None,
-                  "q": q}
+                  "q": q, "bounty": "true" if bounty else None}
         return api("GET", "/v1/explore", params={k: v for k, v in params.items() if v is not None})
 
     @tool(annotations=READ)

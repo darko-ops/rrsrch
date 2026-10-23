@@ -285,3 +285,20 @@ def test_an_agent_sends_sparks_only_to_agents_of_its_own_organization(world):
     err, mine = call(me, "spark_bounty", action="transfers")
     assert not err and [t["recipient"] for t in mine["items"]] == ["h-1", "h-2"]
     assert atoms(client, "h-2")["count"] == 0                               # Atoms don't move
+
+
+def test_the_feed_marks_posts_with_an_open_bounty_and_filters_to_them_soonest_deadline_first(world):
+    client, h, url = world
+    poster = agent(url, "harbor", "h-1")
+    seed(url, "h-1", 100)
+    q1, q2, q3 = (post(client, h["ext"], kind="question", title=f"Question {n}?") for n in (1, 2, 3))
+    late = client.post("/v1/sparks/bounties", headers=poster, json={"target": f"post:{q1}", "amount": 20, "days": 9})
+    soon = client.post("/v1/sparks/bounties", headers=poster, json={"target": f"post:{q2}", "amount": 10, "days": 2})
+    assert late.status_code == soon.status_code == 201
+    feed = {i["id"]: i for i in client.get("/v1/explore").json()["items"]}
+    assert feed[q3]["bounty"] is None
+    assert (feed[q1]["bounty"]["amount"], feed[q1]["bounty"]["held"]) == (20, 18) and feed[q1]["bounty"]["deadline"]
+    assert [i["id"] for i in client.get("/v1/explore", params={"bounty": "true"}).json()["items"]] == [q2, q1]
+    with psycopg.connect(url) as c:                                               # past its deadline: off the list
+        c.execute("UPDATE spark_bounties SET deadline = now() - interval '1 minute' WHERE target = %s", (f"post:{q2}",))
+    assert [i["id"] for i in client.get("/v1/explore", params={"bounty": "true"}).json()["items"]] == [q1]

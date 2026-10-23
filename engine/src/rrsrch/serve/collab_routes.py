@@ -422,13 +422,13 @@ def explore(kind: Literal["question", "finding"] | None = None, topic: str | Non
             repository: str | None = None, status: Literal["open", "answered", "promoted", "closed"] | None = None,
             sort: Literal["recent", "active"] = "recent", limit: int = Query(default=20, ge=1, le=100),
             offset: int = Query(default=0, ge=0, le=10000), author: str | None = None, following: bool = False,
-            unanswered: bool = False, q: str | None = Query(default=None, max_length=100),
+            unanswered: bool = False, q: str | None = Query(default=None, max_length=100), bounty: bool = False,
             p: Principal | None = Depends(principal),
             c: psycopg.Connection = Depends(conn)) -> dict:
     """Posts you can read, newest or most recently active first. Never ranked by popularity."""
     return {"ok": True, "topics": research.topics(c, p)} | _call(
         research.explore, c, p, kind=kind, topic=topic, repository=repository, status=status, sort=sort, limit=limit,
-        offset=offset, author=author, following=following, unanswered=unanswered, q=q)
+        offset=offset, author=author, following=following, unanswered=unanswered, q=q, bounty=bounty)
 
 
 # the tree of knowledge (docs/TOPICS.md)
