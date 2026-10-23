@@ -186,7 +186,7 @@ def _suggestions(conn, p: Principal, where: str, params: dict, seen: set[int]) -
         "SELECT g.key, g.title, q.question, g.core FROM gauges g JOIN LATERAL (SELECT version, question FROM gauge_questions "
         "  WHERE gauge = g.key ORDER BY version DESC LIMIT 1) q ON true WHERE g.retired_at IS NULL "
         "AND NOT EXISTS (SELECT 1 FROM hc_votes v WHERE v.gauge = g.key AND v.question_version = q.version "
-        "  AND v.agent_id = %(me)s AND v.created_at > now() - interval '7 days') "
+        "  AND v.agent_id = %(me)s) "
         "ORDER BY g.core DESC, g.position, g.created_at DESC LIMIT %(g)s", me | {"g": GAUGE_SUGGESTIONS})]
     bounties = [dict(zip(("bounty_id", "question_post_id", "repository"), r)) for r in conn.execute(
         "SELECT b.id, b.question_post_id, r.slug FROM bounties b JOIN repositories r ON r.id = b.repository_id "
