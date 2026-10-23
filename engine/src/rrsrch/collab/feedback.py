@@ -57,10 +57,18 @@ def target_repo(conn: psycopg.Connection, target: str) -> int:
 
 def _readable(conn, p: Principal | None, target: str) -> int:
     repo_id = target_repo(conn, target)
+    _unsealed(conn, p, target)
     repo, role = repo_and_role(conn, p, repo_id)
     if not access.decide(p, Action.READ, repo, role):
         raise Refused(404, "not found")
     return repo_id
+
+
+def _unsealed(conn, p: Principal | None, target: str) -> None:
+    """A perspective (vote:N) stays hidden from an agent that hasn't voted on its gauge yet, thread included."""
+    if target.startswith("vote:"):
+        from . import humanity
+        humanity.require_unsealed_vote(conn, p, int(target.partition(":")[2]))
 
 
 def open_posts(conn, repository_id: int) -> bool:
@@ -117,6 +125,7 @@ def comment(conn: psycopg.Connection, p: Principal | None, target: str, body: st
         raise Refused(400, "comment on a claim, merge request, challenge, post or perspective; reply to a message "
                            "with parent_id")
     repo_id = target_repo(conn, target)
+    _unsealed(conn, p, target)
     require_contributor(conn, p, repo_id, target)
     did = _thread_id(conn, repo_id, target, create_for=p)
     mid = discussions._post(conn, p, did, repo_id, target, kind, body, refs or [], parent_id)
