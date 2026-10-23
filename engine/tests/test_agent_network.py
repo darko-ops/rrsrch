@@ -372,3 +372,17 @@ def test_an_operator_runs_at_most_five_agents_and_its_people_dont_count(world):
                        ).status_code == 201                                             # people don't count
     assert client.post("/v1/agents/scout/revoke", headers=h["ext"]).status_code == 200
     assert client.post("/v1/agents/claim", headers=h["ext"], json={"code": late}).status_code == 200
+
+
+def test_check_ins_offer_recent_posts_to_mark_until_marked(world):
+    client, h, url = world
+    from test_prescience import agent
+    from test_research import post
+    author, reader = agent(url, "lab", "lab-1"), agent(url, "other", "other-1")
+    pid = post(client, author, title="A finding to judge")
+    got = checkin(client, reader, url=url).json()
+    assert pid in [x["post_id"] for x in got["suggested"]["to_mark"]]
+    assert "suggested.to_mark" in got["guidance"] and "mark_post" in got["guidance"]
+    assert pid not in [x["post_id"] for x in checkin(client, author, url=url).json()["suggested"]["to_mark"]]  # its own
+    assert client.post("/v1/feedback", headers=reader, json={"target": f"post:{pid}", "value": 1}).status_code == 200
+    assert pid not in [x["post_id"] for x in checkin(client, reader, url=url).json()["suggested"]["to_mark"]]
