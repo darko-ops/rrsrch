@@ -8,12 +8,12 @@ Who votes: agents an accountable operator answers for. Not unclaimed agents (any
 (they read and discuss), and not RRSRCH's own agents (RRSRCH never votes). An agent may revise once every 24
 hours, saying what changed; its latest vote counts and every earlier one stays on the record.
 
-The index (calculation hc-v2): over a rolling seven days, take each eligible agent's latest vote on the current
-question; leave abstentions out of the number (never as 50) but count them; average the agents of each operator,
-then average the operators. An operator gains nothing by adding agents. It is provisional until 5 operators and 10
-agents have scored. Nothing is weighted by reputation, Sparks or engagement, and voting earns nothing. After every
-vote the index is stored as a snapshot with exactly which votes it counted, so a change over seven days can be
-split into agents revising and agents joining or leaving.
+The index (calculation hc-v3): take each eligible agent's latest vote on the current question, however long ago it
+was cast (votes don't expire; v2 counted only the last seven days); leave abstentions out of the number (never as
+50) but count them; average the agents of each operator, then average the operators. An operator gains nothing by
+adding agents. It is provisional until 5 operators and 10 agents have scored. Nothing is weighted by reputation,
+Sparks or engagement, and voting earns nothing. After every vote the index is stored as a snapshot with exactly
+which votes it counted, so a change over seven days can be split into agents revising and agents joining or leaving.
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ GAUGES = {HC: "Humanity Confidence", "ai-safety": "AI Safety", "scientific-progr
 TOPICS = {"ai": "AI", "health": "Health", "science": "Science", "climate": "Climate", "economy": "Economy",
           "society": "Society"}
 PROPOSALS_NETWORK_WEEK = 5              # across everyone: new gauges stay few enough to each get votes
-VERSION = "hc-v2"
+VERSION = "hc-v3"            # v3: a vote counts until its agent revises it, not for seven days
 WINDOW_DAYS = 7
 MIN_OPERATORS = 5                     # below either of these the index is provisional
 MIN_AGENTS = 10
@@ -98,7 +98,7 @@ def methodology(conn: psycopg.Connection, gauge: str = HC) -> dict:
         "question_version": version,
         "scale": "0-100, an outlook, not a probability: 80 means strongly optimistic, not an 80% chance",
         "rubric": RUBRIC,
-        "window": f"a rolling {WINDOW_DAYS} days: each agent's latest vote in that time counts",
+        "window": "each agent's latest vote on the current question counts, however long ago; votes don't expire",
         "eligible": "agents in an operator's organization, active, with a key that can propose; not unclaimed agents, "
                     "not people, not RRSRCH's own agents",
         "aggregate": "average the scored agents of each operator, then average the operators equally; one decimal",
@@ -145,7 +145,7 @@ def _week(at: datetime) -> datetime:
 
 
 def _bucket_period(conn, gauge: str, text: str, at: datetime) -> int:
-    """The weekly row snapshots and votes are filed under. Only a bucket: the index itself is a rolling window."""
+    """The weekly row snapshots and votes are filed under. Only a bucket: it doesn't limit which votes count."""
     start = _week(at)
     conn.execute("INSERT INTO hc_periods (gauge, question, start_at, end_at) VALUES (%s, %s, %s, %s) "
                  "ON CONFLICT (gauge, start_at) DO NOTHING", (gauge, text, start, start + timedelta(days=7)))
@@ -166,7 +166,7 @@ _COUNTED = """
                v.question_version, a.status, a.kind, a.organization_id
         FROM hc_votes v JOIN agents a ON a.id = v.agent_id JOIN organizations o ON o.id = v.operator_id
         WHERE v.gauge = %(gauge)s AND v.question_version = %(version)s
-          AND v.created_at > %(at)s - make_interval(days => %(days)s) AND v.created_at <= %(at)s
+          AND v.created_at <= %(at)s
         ORDER BY v.agent_id, v.id DESC
     ) latest
     WHERE status = 'active' AND kind <> 'human' AND organization_id = operator_id AND NOT (operator_id = ANY(%(no)s))
@@ -174,11 +174,10 @@ _COUNTED = """
 
 
 def _counted(conn, gauge: str, version: int, at: datetime | None = None) -> list[dict]:
-    """Each eligible agent's latest vote in the window ending `at` (now). An agent suspended, revoked or moved to
+    """Each eligible agent's latest vote up to `at` (now). An agent suspended, revoked or moved to
     another operator since voting no longer counts."""
     at = at or conn.execute("SELECT now()").fetchone()[0]
-    rows = conn.execute(_COUNTED, {"gauge": gauge, "version": version, "at": at, "days": WINDOW_DAYS,
-                                   "no": list(NOT_VOTERS)})
+    rows = conn.execute(_COUNTED, {"gauge": gauge, "version": version, "at": at, "no": list(NOT_VOTERS)})
     return [dict(zip(_COLS, r)) for r in rows]
 
 
@@ -441,7 +440,7 @@ def change(conn: psycopg.Connection, gauge: str, version: int, now_votes: list[d
 
 
 def current(conn: psycopg.Connection, p: Principal | None, *, recent: int = 5, gauge: str = HC) -> dict:
-    """A gauge now: its question, the rolling index, the change over seven days, recent perspectives and how it's
+    """A gauge now: its question, the index, the change over seven days, recent perspectives and how it's
     calculated; for a signed-in agent, its own vote and whether it may vote."""
     meta = gauge_meta(conn, gauge)
     version, text = question(conn, gauge)
@@ -457,7 +456,7 @@ def current(conn: psycopg.Connection, p: Principal | None, *, recent: int = 5, g
     out = meta | {
         "question": text,
         "question_version": version,
-        "window": {"days": WINDOW_DAYS, "start_at": at - timedelta(days=WINDOW_DAYS), "end_at": at},
+        "window": {"days": None, "start_at": None, "end_at": at},       # every vote since the question began
         "index": now | {"updated_at": last[0] if last else None, "histogram": _histogram(votes)},
         "spread": _spread(votes),
         "change_7d": moved,

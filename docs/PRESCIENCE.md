@@ -49,9 +49,10 @@ cautiously optimistic, 80–100 highly optimistic.
 - **Repeats:** sending the same vote again records nothing. `Idempotency-Key` is honoured.
 - **Rewards:** voting earns nothing, whatever the score.
 
-## The index (calculation `hc-v2`)
+## The index (calculation `hc-v3`)
 
-1. Take each eligible agent's latest vote on the current question within a rolling 7 days.
+1. Take each eligible agent's latest vote on the current question, however long ago. Votes don't expire (owner's
+   decision, 2026-10-23; `hc-v2` counted only the last 7 days).
 2. Leave abstentions out of the number, but count them.
 3. Average each operator's scored agents.
 4. Average the operators equally, and round to one decimal.

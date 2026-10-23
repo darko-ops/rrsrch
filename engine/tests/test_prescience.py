@@ -1,4 +1,4 @@
-"""Prescience (docs/PRESCIENCE.md): the four gauges under calculation hc-v2, against the design's acceptance tests."""
+"""Prescience (docs/PRESCIENCE.md): the four gauges under calculation hc-v3, against the design's acceptance tests."""
 import psycopg
 import pytest
 from test_agent_network import signup
@@ -56,7 +56,7 @@ def test_nothing_is_shown_before_anyone_votes_and_reading_stores_nothing(world):
     assert g["change_7d"] is None and g["question_version"] == 2 and g["question"].startswith("Taking health, prosperity")
     assert g["index"]["histogram"]["counts"] == [0] * 101
     m = client.get(f"/v1/gauges/{HC}/methodology").json()
-    assert m["calculation_version"] == "hc-v2" and m["question_version"] == 2 and len(m["rubric"]) == 5
+    assert m["calculation_version"] == "hc-v3" and m["question_version"] == 2 and len(m["rubric"]) == 5
     assert m["thresholds"]["active"] == "at least 5 operators and 10 scored agents"
     with psycopg.connect(url) as c:
         assert c.execute("SELECT count(*) FROM hc_snapshots").fetchone()[0] == 0
@@ -151,14 +151,14 @@ def test_sending_the_same_vote_again_records_nothing(world):
     assert r.status_code == 200 and r.json()["recorded"] is False
 
 
-def test_votes_older_than_seven_days_stop_counting(world):
+def test_votes_keep_counting_until_revised(world):
     client, h, url = world
     agent(url, "old", "old-1")
-    past_vote(url, "old-1", 10, days_ago=8)
+    past_vote(url, "old-1", 10, days_ago=40)
     vote(client, agent(url, "new", "new-1"), 70)
     i = index(client)["index"]
-    assert (i["score"], i["agents"]) == (70.0, 1)
-    assert [v["agent"] for v in client.get(f"/v1/gauges/{HC}/perspectives").json()["items"]] == ["new-1"]
+    assert (i["score"], i["agents"]) == (40.0, 2)                                  # (10 + 70) / 2
+    assert {v["agent"] for v in client.get(f"/v1/gauges/{HC}/perspectives").json()["items"]} == {"old-1", "new-1"}
 
 
 def test_earlier_question_versions_are_a_separate_series(world):
@@ -181,14 +181,14 @@ def test_the_seven_day_change_is_split_into_revisions_and_participation(world):
                   "model_families, calculation_version, gauge, question_version, vote_ids, created_at) "
                   "VALUES (%s, 60, 2, 2, 2, 0, 0, 'hc-v2', %s, 2, %s, now() - interval '8 days')", (pid, HC, sorted(old)))
     assert vote(client, a, 50, change_reason="Read the new governance report.").status_code == 201
-    assert vote(client, b, 20).status_code == 201         # c-1's vote has expired; b-1 joined
+    assert vote(client, b, 20).status_code == 201         # b-1 joined; c-1's vote still counts
     g = index(client)
-    assert g["index"]["score"] == 35.0                    # (50 + 20) / 2
+    assert g["index"]["score"] == 50.0                    # (50 + 20 + 80) / 3
     ch = g["change_7d"]
-    assert (ch["change"], ch["previous_score"]) == (-25.0, 60.0)
-    assert (ch["from_revisions"], ch["from_participation"]) == (10.0, -35.0)   # a-1 rose 10; joining and leaving the rest
-    assert (ch["joined"], ch["left"], ch["mostly_participation"]) == (1, 1, True)
-    assert g["change_from_previous"] == -25.0
+    assert (ch["change"], ch["previous_score"]) == (-10.0, 60.0)
+    assert (ch["from_revisions"], ch["from_participation"]) == (5.0, -15.0)    # a-1 rose 10 (5 on two); b-1 the rest
+    assert (ch["joined"], ch["left"], ch["mostly_participation"]) == (1, 0, True)
+    assert g["change_from_previous"] == -10.0
 
 
 def test_a_snapshot_replays_to_the_same_number(world):
@@ -199,7 +199,7 @@ def test_a_snapshot_replays_to_the_same_number(world):
         score, ids_, version = c.execute("SELECT score, vote_ids, calculation_version FROM hc_snapshots "
                                          "ORDER BY id DESC LIMIT 1").fetchone()
         replay = humanity.tally(humanity._votes_by_id(c, list(ids_)))
-        assert version == "hc-v2" and replay["score"] == float(score) == index(client)["index"]["score"]
+        assert version == "hc-v3" and replay["score"] == float(score) == index(client)["index"]["score"]
 
 
 def test_each_gauge_is_counted_separately_and_audited(world):
