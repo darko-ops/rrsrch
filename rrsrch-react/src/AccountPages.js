@@ -46,7 +46,7 @@ function Avatar({ name, size }) {
 
 function LabeledInput({ label, children, wide }) {
   return (
-    <label style={{ display: 'grid', gap: 6, ...(wide ? { gridColumn: '1 / -1' } : {}) }}>
+    <label style={{ display: 'grid', gap: 6, alignContent: 'start', ...(wide ? { gridColumn: '1 / -1' } : {}) }}>
       <span style={fieldLabel()}>{label}</span>
       {children}
     </label>
@@ -326,8 +326,31 @@ function IdentityCard({ user, me, apiKey }) {
   );
 }
 
-function ProfileTab({ user, me, apiKey, onUserChange }) {
+// A person's handle on the engine: 3 to 30 lowercase letters, digits and single hyphens (engine identity/onboarding).
+export const HANDLE_RE = /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$/;
+export function handleProblem(h) {
+  if (!h) return null;
+  if (h.length < 3 || h.length > 30) return '3 to 30 characters.';
+  if (!HANDLE_RE.test(h) || h.includes('--')) return 'Lowercase letters, digits and single hyphens; no hyphen at either end.';
+  return null;
+}
+const day = (iso) => new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+function ProfileTab({ user, me, apiKey, onUserChange, onMeChange }) {
   const handle = me?.handle;
+  // the person's own identity, by their sign-in: a connected agent key keeps its own handle
+  const [person, setPerson] = useState(null);
+  useEffect(() => {
+    let live = true;
+    engine('/v1/whoami', { key: siteToken() }).then((r) => { if (live) setPerson(r.ok ? r.data : null); });
+    return () => { live = false; };
+  }, []);
+  const mine = person?.handle || '';
+  const change = person?.handle_change;
+  const [newHandle, setNewHandle] = useState(null);           // null: unchanged
+  const wanted = newHandle === null ? mine : newHandle;
+  const handleIssue = newHandle !== null && newHandle !== mine ? handleProblem(newHandle) : null;
+  const locked = !!change && !change.allowed;
   const [name, setName] = useState(user.name || '');
   const [about, setAbout] = useState('');
   const [loadedAbout, setLoadedAbout] = useState('');
@@ -349,6 +372,14 @@ function ProfileTab({ user, me, apiKey, onUserChange }) {
       const d = await r.json().catch(() => ({}));
       if (r.ok) onUserChange?.(d.user); else errors.push(d.error || 'Could not save your name.');
     }
+    if (newHandle !== null && newHandle !== mine) {
+      const r = await engine('/v1/me/handle', { key: siteToken(), method: 'POST', body: { handle: newHandle } });
+      if (r.ok) {
+        setPerson((p) => ({ ...(p || {}), handle: r.data.handle, handle_change: r.data.handle_change }));
+        setNewHandle(null);
+        if (!me || me.key_id == null) onMeChange?.({ ...(me || {}), handle: r.data.handle });
+      } else errors.push(r.error);
+    }
     if (handle && about !== loadedAbout) {
       const r = await engine(`/v1/agents/${handle}`, { key: apiKey, method: 'PATCH', body: { description: about } });
       if (r.ok) setLoadedAbout(about); else errors.push(r.error);
@@ -362,8 +393,22 @@ function ProfileTab({ user, me, apiKey, onUserChange }) {
         <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} style={bigInput()} />
       </LabeledInput>
       <LabeledInput label="Handle">
-        <input value={handle || ''} readOnly placeholder="assigned when you first post" title="Handles don't change"
-          style={{ ...bigInput(), fontFamily: fonts.mono, color: '#aaa' }} />
+        <div style={{ position: 'relative' }}>
+          <span aria-hidden="true" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+            fontFamily: fonts.mono, color: '#666', pointerEvents: 'none' }}>@</span>
+          <input value={wanted} disabled={locked} aria-invalid={!!handleIssue} spellCheck={false} autoCapitalize="none"
+            onChange={(e) => setNewHandle(e.target.value.toLowerCase().replace(/^@/, '').replace(/\s+/g, '-'))}
+            maxLength={30} placeholder={mine ? '' : 'choose a handle'} aria-label="Handle"
+            style={{ ...bigInput(), fontFamily: fonts.mono, paddingLeft: 26, color: locked ? '#888' : '#fff',
+              borderColor: handleIssue ? RED : undefined }} />
+        </div>
+        <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.5, color: handleIssue ? RED : '#777' }}>
+          {handleIssue
+            || (locked ? `You can change it again on ${day(change.next_at)}.`
+              : 'Lowercase letters, digits, hyphens. Once a week; your old handle stays yours and still links to you.')}
+          {change?.previous?.length > 0 && !handleIssue && (
+            <span style={{ color: '#666' }}> Before: {change.previous.map((h) => `@${h}`).join(', ')}.</span>)}
+        </div>
       </LabeledInput>
       <LabeledInput label="About" wide>
         <textarea rows={3} value={about} onChange={(e) => setAbout(e.target.value)} maxLength={500} disabled={!handle}
@@ -371,7 +416,7 @@ function ProfileTab({ user, me, apiKey, onUserChange }) {
           style={{ ...bigInput(), resize: 'vertical' }} />
       </LabeledInput>
       <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 10, alignItems: 'center' }}>
-        <Btn kind="primary" onClick={save} disabled={busy || !name.trim()}>{busy ? 'Saving…' : 'Save'}</Btn>
+        <Btn kind="primary" onClick={save} disabled={busy || !name.trim() || !!handleIssue}>{busy ? 'Saving…' : 'Save'}</Btn>
         {msg && <Note tone={msg.ok ? 'ok' : 'error'}>{msg.text}</Note>}
       </div>
     </div>
@@ -770,7 +815,8 @@ function SiteKeys() {
   return <KeysPage apiKey={token} me={who.data} header={false} />;
 }
 
-export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKeyChange, onUserChange, initialTab }) {
+export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKeyChange, onUserChange, onMeChange,
+  initialTab }) {
   const [tab, setTab] = useState(() => (TABS.some(([id]) => id === initialTab) ? initialTab : 'profile'));
   if (!user) {
     return <KeyOnlyAccount apiKey={apiKey} me={me} isMobile={isMobile} onKeyChange={onKeyChange} onUserChange={onUserChange} />;
@@ -790,7 +836,8 @@ export function AccountSignedIn({ user, apiKey, me, isMobile, onSignedOut, onKey
                   borderBottom: `2px solid ${tab === id ? GREEN : 'transparent'}` }}>{label}</button>
             ))}
           </div>
-          {tab === 'profile' && <ProfileTab user={user} me={me} apiKey={apiKey} onUserChange={onUserChange} />}
+          {tab === 'profile' && <ProfileTab user={user} me={me} apiKey={apiKey} onUserChange={onUserChange}
+            onMeChange={onMeChange} />}
           {tab === 'security' && <SecurityTab user={user} me={me} onSignedOut={onSignedOut} onKeyChange={onKeyChange}
             onUserChange={onUserChange} />}
           {tab === 'organization' && <OrganizationTab user={user} />}
