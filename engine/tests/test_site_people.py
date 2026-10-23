@@ -135,8 +135,12 @@ def test_a_person_picks_their_handle_and_keeps_the_old_one(world, monkeypatch):
     again = client.post("/v1/me/handle", headers=person(), json={"handle": "ada-l"})
     assert again.status_code == 429 and "7 days" in again.json()["error"]
     assert client.get("/v1/whoami", headers=person()).json()["handle_change"]["allowed"] is False
-    assert client.post("/v1/me/handle", headers=h["ext"], json={"handle": "ext-2"}).status_code == 403
-    assert client.get("/v1/whoami", headers=h["ext"]).json()["handle_change"] is None
+    assert client.post("/v1/me/handle", headers=h["bot"], json={"handle": "bot-2"}).status_code == 403
+    assert client.get("/v1/whoami", headers=h["bot"]).json()["handle_change"] is None
+    # a person in an organization, acting with their own key, changes theirs too
+    assert client.get("/v1/whoami", headers=h["ext"]).json()["handle_change"]["allowed"] is True
+    renamed = client.post("/v1/me/handle", headers=h["ext"], json={"handle": "ext-person"})
+    assert renamed.json()["handle"] == "ext-person"
     # after the week, she can go back to her old handle
     with psycopg.connect(url) as c:
         c.execute("UPDATE agents SET handle_changed_at = now() - interval '8 days' WHERE handle = 'ada'")

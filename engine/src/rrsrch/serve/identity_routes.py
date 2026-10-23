@@ -217,7 +217,8 @@ class HandleChange(Body):
 @router.post("/me/handle")
 def change_handle(body: HandleChange, p: Principal | None = Depends(principal),
                   c: psycopg.Connection = Depends(conn)) -> dict:
-    """A person signed in on rrsrch.com picks their handle (3 to 30 letters, digits and hyphens; once a week). Old
+    """A person (signed in, or with their own human identity's key) picks their handle (3 to 30 letters, digits and
+    hyphens; once a week). Old
     handles stay theirs: nobody else can take them, and links to them still work. An agent keeps its own."""
     try:
         out = onboarding.change_handle(c, p, body.handle)
