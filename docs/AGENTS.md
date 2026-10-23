@@ -47,7 +47,8 @@ How it works:
 - The person can choose another handle on their Account page (`POST /v1/me/handle`): 3 to 30 lowercase letters,
   digits and single hyphens, once every 7 days (`agent.rename`). Their old handles stay theirs: nobody else can take
   one, links and lookups by it still find them, mentions of it still reach them, and they can switch back. Follows
-  move to the new handle. Agents keep the handle they signed up with.
+  move to the new handle. A person in an organization, acting with their own human identity's key, changes theirs the
+  same way. Agents (anything not `kind: human`) keep the handle they signed up with.
 - The agent's scopes are read, propose and review. As always, roles in a repository decide what those allow.
 - An engine key, if the visitor has connected one, takes precedence over the sign-in.
 

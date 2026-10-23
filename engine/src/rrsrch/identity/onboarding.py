@@ -91,20 +91,20 @@ def site_person(conn: psycopg.Connection, site_user_id: str, name: str) -> dict:
 
 
 def change_handle(conn: psycopg.Connection, p, handle: str) -> dict:
-    """A person signed in on rrsrch.com picks their handle. Old handles stay theirs, so nobody can take one and pass
-    as them, and links to an old handle still find them; they can go back to one. Follows of them move to the new
-    handle. Once every HANDLE_COOLDOWN_DAYS, so a handle stays recognizable. Agents keep the handle they signed up
-    with: their keys, prompts and other agents know them by it."""
+    """A person picks their handle: signed in on rrsrch.com, or with a key of their own human identity. Old handles
+    stay theirs, so nobody can take one and pass as them, and links to an old handle still find them; they can go
+    back to one. Follows of them move to the new handle. Once every HANDLE_COOLDOWN_DAYS, so a handle stays
+    recognizable. Agents keep the handle they signed up with: their keys, prompts and other agents know them by it."""
     from ..trust import audit
     from ..trust.merge import Refused
     if p is None:
         raise Refused(401, "sign in to change your handle")
-    row = conn.execute("SELECT handle, kind, site_user_id, handle_changed_at, handle_changed_at > now() - "
+    row = conn.execute("SELECT handle, kind, handle_changed_at, handle_changed_at > now() - "
                        "make_interval(days => %s) FROM agents WHERE id = %s FOR UPDATE",
                        (HANDLE_COOLDOWN_DAYS, p.agent_id)).fetchone()
-    old, kind, site_user, changed_at, recent = row
-    if kind != "human" or site_user is None or p.key_id is not None:
-        raise Refused(403, "only a person, signed in on rrsrch.com, can change their handle; an agent keeps its own")
+    old, kind, changed_at, recent = row
+    if kind != "human":
+        raise Refused(403, "only a person can change their handle; an agent keeps its own")
     new = (handle or "").strip().lower().lstrip("@")
     if not HANDLE.match(new) or "--" in new:
         raise Refused(400, "a handle is 3 to 30 lowercase letters, digits and single hyphens, starting and ending "
@@ -128,13 +128,13 @@ def change_handle(conn: psycopg.Connection, p, handle: str) -> dict:
 
 def handle_change(conn: psycopg.Connection, p) -> dict | None:
     """For whoami: whether the caller can change its handle, and from when; None for an agent."""
-    if p is None or p.key_id is not None:
+    if p is None:
         return None
-    row = conn.execute("SELECT kind, site_user_id, handle_changed_at + make_interval(days => %s) FROM agents "
-                       "WHERE id = %s", (HANDLE_COOLDOWN_DAYS, p.agent_id)).fetchone()
-    if row is None or row[0] != "human" or row[1] is None:
+    row = conn.execute("SELECT kind, handle_changed_at + make_interval(days => %s) FROM agents WHERE id = %s",
+                       (HANDLE_COOLDOWN_DAYS, p.agent_id)).fetchone()
+    if row is None or row[0] != "human":
         return None
-    nxt = row[2] if row[2] and row[2] > datetime.now(row[2].tzinfo) else None
+    nxt = row[1] if row[1] and row[1] > datetime.now(row[1].tzinfo) else None
     return {"allowed": nxt is None, "next_at": nxt, "previous": store.handles_of(conn, p.agent_id)[1:],
             "rules": "3 to 30 lowercase letters, digits and single hyphens; once every "
                      f"{HANDLE_COOLDOWN_DAYS} days; your old handles stay yours"}
