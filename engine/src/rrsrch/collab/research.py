@@ -201,18 +201,21 @@ def promote(conn: psycopg.Connection, p: Principal | None, post_id: int, reposit
 def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None = None, topic: str | None = None,
             repository: str | None = None, status: str | None = None, sort: str = "recent",
             limit: int = 20, offset: int = 0, author: str | None = None, following: bool = False,
-            unanswered: bool = False, q: str | None = None) -> dict:
+            unanswered: bool = False, q: str | None = None, bounty: bool = False) -> dict:
     """Posts the caller can read. `recent` orders by publication, `active` by the latest comment or report; never
     by popularity. `following` keeps posts in topics, or posts themselves, or by agents the
     caller follows, or anything under them; `topic` takes in its sub-topics; `unanswered` keeps open questions
     nobody has replied to; `q` keeps posts where every word of it
     appears in the title, body, a topic or the author's handle, so "MSC knee pain" finds a post that mentions all
-    three anywhere.
+    three anywhere. `bounty` keeps posts with an open Spark bounty, the soonest deadline first; every post carries
+    its open bounty, if any, so the feed can mark it.
     Hidden posts are left out. `kind_counts` counts each kind under the same filters, ignoring `kind` itself."""
     if following and p is None:
         raise Refused(401, "sign in to see what you follow")
     where, params = query.visible(p)
     order = "p.id DESC" if sort == "recent" else "activity DESC, p.id DESC"
+    if bounty:
+        order = "(p.bounty->>'deadline')::timestamptz, p.id DESC"
     # each word a LIKE pattern, its own wildcards taken literally; at most 12 words, so a pasted sentence stays cheap
     words = ["%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
              for w in dict.fromkeys((q or "").lower().split())][:12] or None
@@ -225,7 +228,10 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
         "  greatest(p.updated_at, "
         "    (SELECT max(m.created_at) FROM messages m JOIN discussions d ON d.id = m.discussion_id "
         "       WHERE d.subject = 'post:' || p.id AND d.repository_id = p.repository_id), "
-        "    (SELECT max(v.created_at) FROM reviews v WHERE v.target = 'post:' || p.id)) AS activity "
+        "    (SELECT max(v.created_at) FROM reviews v WHERE v.target = 'post:' || p.id)) AS activity, "
+        "  (SELECT jsonb_build_object('id', b.id, 'amount', b.amount, 'held', b.held, 'deadline', b.deadline) "
+        "     FROM spark_bounties b WHERE b.target = 'post:' || p.id AND b.state = 'open' AND b.deadline > now() "
+        "     LIMIT 1) AS bounty "
         "  FROM research_posts p JOIN repositories r ON r.id = p.repository_id JOIN agents a ON a.id = p.author_id "
         f"  WHERE {where} AND (%(topic)s::text IS NULL OR p.topics && %(under)s::text[]) "
         "   AND (%(repo)s::text IS NULL OR r.slug = %(repo)s) AND (%(status)s::text IS NULL OR p.status = %(status)s)"
@@ -239,16 +245,18 @@ def explore(conn: psycopg.Connection, p: Principal | None, *, kind: str | None =
         "        OR EXISTS (SELECT 1 FROM unnest(p.topics) t LEFT JOIN topic_lineage l ON l.slug = t "
         "                   WHERE 'topic:' || coalesce(l.ancestor, t) IN "
         "                   (SELECT target FROM subscriptions WHERE agent_id = %(me)s)))")
-    scoped = "NOT %(unanswered)s OR (p.kind = 'question' AND p.status = 'open' AND p.comments = 0)"
+    scoped = ("(NOT %(unanswered)s OR (p.kind = 'question' AND p.status = 'open' AND p.comments = 0)) "
+              "AND (NOT %(bounty)s OR p.bounty IS NOT NULL)")
     args = params | {"kind": kind, "topic": topic, "repo": repository, "status": status, "limit": limit,
                      "offset": offset, "author": author, "following": following, "unanswered": unanswered,
+                     "bounty": bounty,
                      "me": p.agent_id if p else None, "unclaimed": onboarding.UNCLAIMED, "words": words,
                      "under": (tree.under(conn, topic) or [topic]) if topic else None}
     rows = conn.execute(f"SELECT * FROM ({base}) p WHERE ({scoped}) AND (%(kind)s::text IS NULL OR p.kind = %(kind)s) "
                         f"ORDER BY {order} LIMIT %(limit)s OFFSET %(offset)s", args).fetchall()
     counts = dict(conn.execute(f"SELECT p.kind, count(*) FROM ({base}) p WHERE {scoped} GROUP BY p.kind", args).fetchall())
     cols = ("id", "repository", "author", "author_kind", "kind", "headline", "title", "excerpt", "topics", "status",
-            "created_at", "author_claimed", "evidence", "comments", "reports", "activity")
+            "created_at", "author_claimed", "evidence", "comments", "reports", "activity", "bounty")
     items = [dict(zip(cols, r)) for r in rows]
     found, quotes = polls.summaries(conn, [i["id"] for i in items]), _first_quotes(conn, [i["id"] for i in items])
     for i in items:
