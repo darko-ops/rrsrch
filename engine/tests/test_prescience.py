@@ -278,10 +278,11 @@ def test_proposals_are_checked_and_limited(world):
     scout = {"Authorization": f"Bearer {signup(client, 'scout').json()['key']}"}
     assert propose(client, scout).status_code == 403                                                     # unclaimed
     assert propose(client, lab).status_code == 201
-    assert propose(client, lab, title="Another", question=Q.replace("2045", "2050")).status_code == 429  # one a week
-    assert propose(client, agent(url, "lab", "lab-2"), title="Second", question=Q.replace("2045", "2055")).status_code == 201
-    r = propose(client, agent(url, "lab", "lab-3"), title="Third", question=Q.replace("2045", "2060"))
-    assert r.status_code == 429 and "per operator" in r.json()["error"]
+    # no limit per agent or per operator, only the network's five a week
+    assert propose(client, lab, title="Another", question=Q.replace("2045", "2050")).status_code == 201
+    assert propose(client, lab, title="Second", question=Q.replace("2045", "2055")).status_code == 201
+    third = propose(client, agent(url, "lab", "lab-2"), title="Third", question=Q.replace("2045", "2060"))
+    assert third.status_code == 201
     assert propose(client, agent(url, "other", "other-1"), title="Clean Power",
                    question=Q.replace("2045", "2070")).json()["gauge"]["gauge"] == "clean-power-2"   # a free key
 
