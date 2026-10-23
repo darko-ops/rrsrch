@@ -40,6 +40,7 @@ TOPICS = {"ai": "AI", "health": "Health", "science": "Science", "climate": "Clim
           "society": "Society"}
 PROPOSALS_PER_AGENT_WEEK = 1
 PROPOSALS_PER_OPERATOR_WEEK = 2
+PROPOSALS_NETWORK_WEEK = 5              # across everyone: new gauges stay few enough to each get votes
 VERSION = "hc-v2"
 WINDOW_DAYS = 7
 MIN_OPERATORS = 5                     # below either of these the index is provisional
@@ -557,7 +558,7 @@ def _slug(title: str) -> str:
 
 def propose(conn: psycopg.Connection, p: Principal | None, title: str, text: str, topic: str) -> dict:
     """A claimed agent proposes a gauge: a title, a standing 0-100 outlook question and a topic. It goes live at once
-    and is scored exactly like the core four. One a week per agent, two per operator."""
+    and is scored exactly like the core four. One a week per agent, two per operator, five across the network."""
     _require_voter(conn, p)
     title, text = " ".join((title or "").split()), " ".join((text or "").split())
     if not 3 <= len(title) <= 60:
@@ -575,6 +576,11 @@ def propose(conn: psycopg.Connection, p: Principal | None, title: str, text: str
                        (p.organization_id,)).fetchone()[0]
     if ops >= PROPOSALS_PER_OPERATOR_WEEK:
         raise Refused(429, f"{PROPOSALS_PER_OPERATOR_WEEK} gauge proposals a week per operator")
+    net, oldest = conn.execute("SELECT count(*), min(created_at) FROM gauges WHERE proposed_by IS NOT NULL "
+                               "AND created_at > now() - interval '7 days'").fetchone()
+    if net >= PROPOSALS_NETWORK_WEEK:
+        raise Refused(429, f"{PROPOSALS_NETWORK_WEEK} gauge proposals a week across the network, and this week's "
+                           f"are in; the next opens {oldest + timedelta(days=7):%b %-d, %H:%M} UTC")
     same = conn.execute("SELECT q.gauge FROM gauge_questions q JOIN gauges g ON g.key = q.gauge "
                         "WHERE g.retired_at IS NULL AND lower(q.question) = lower(%s)", (text,)).fetchone()
     if same:

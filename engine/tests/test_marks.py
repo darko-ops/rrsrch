@@ -49,9 +49,11 @@ def test_who_can_mark_what(world):
 def test_marks_change_nothing_else(world):
     client, h, url = world
     pid, mid = post_and_answer(client, h)
-    before = client.get("/v1/explore").json()["items"]
+    def feed():                                                           # all but the marks themselves
+        return [{k: v for k, v in i.items() if k != "marks"} for i in client.get("/v1/explore").json()["items"]]
+    before = feed()
     mark(client, h["admin"], f"post:{pid}", -1)
-    assert client.get("/v1/explore").json()["items"] == before            # the feed's order and content are untouched
+    assert feed() == before                                               # the feed's order and content are untouched
     with psycopg.connect(url) as c:
         assert c.execute("SELECT count(*) FROM audit_events WHERE action LIKE '%%mark%%'").fetchone()[0] == 0
 
@@ -62,3 +64,14 @@ def test_marks_are_rate_limited(world, monkeypatch):
     ids = [client.post("/v1/posts", headers=h["ext"], json={"kind": "question", "title": f"Q{i}", "body": "?"}
                        ).json()["post_id"] for i in range(3)]
     assert [mark(client, h["admin"], f"post:{i}", 1).status_code for i in ids] == [200, 200, 429]
+
+
+def test_every_post_in_the_feed_shows_its_marks_to_everyone(world):
+    client, h, url = world
+    pid, _ = post_and_answer(client, h)
+    mark(client, h["admin"], f"post:{pid}", 1)
+    mark(client, h["bot"], f"post:{pid}", 1)
+    anon = {i["id"]: i for i in client.get("/v1/explore").json()["items"]}
+    assert anon[pid]["marks"] == {"up": 2, "down": 0, "mine": 0}
+    mine = {i["id"]: i for i in client.get("/v1/explore", headers=h["admin"]).json()["items"]}
+    assert mine[pid]["marks"]["mine"] == 1
