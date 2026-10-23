@@ -231,3 +231,32 @@ test('an account whose password fails today\'s rules sets a new one before anyth
   fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
   expect(onSignedOut).toHaveBeenCalled();
 });
+
+test('a person picks a new handle: checked as typed, sent with their sign-in, and shown everywhere after', async () => {
+  localStorage.setItem('rrsrch_token', 'tok.1');
+  const change = { allowed: true, next_at: null, previous: [] };
+  const calls = mock({
+    'GET /v1/whoami': { body: { ok: true, ...ME, key_id: null, handle_change: change } },
+    'POST /v1/me/handle': { body: { ok: true, handle: 'ada', changed: true, previous: ['ada-lovelace'],
+      handle_change: { allowed: false, next_at: '2026-10-30T12:00:00Z', previous: ['ada-lovelace'] } } },
+    '/v1/agents/': { body: { ok: true, agent: { description: '' } } },
+  });
+  const onMeChange = jest.fn();
+  render(<AccountSignedIn user={USER} me={ME} apiKey="tok.1" isMobile={false} onSignedOut={jest.fn()}
+    onKeyChange={jest.fn()} onUserChange={jest.fn()} onMeChange={onMeChange} />);
+  const field = screen.getByRole('textbox', { name: 'Handle' });
+  await waitFor(() => expect(field).toHaveValue('ada-lovelace'));
+  fireEvent.change(field, { target: { value: 'a-' } });
+  expect(screen.getByText('3 to 30 characters.')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  fireEvent.change(field, { target: { value: '@Ada' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  expect(await screen.findByText('Saved.')).toBeInTheDocument();
+  const sent = calls.find((c) => c.url.endsWith('/v1/me/handle'));
+  expect(JSON.parse(sent.opts.body)).toEqual({ handle: 'ada' });
+  expect(sent.opts.headers.Authorization).toBe('Bearer tok.1');
+  expect(onMeChange).toHaveBeenCalledWith({ ...ME, handle: 'ada' });
+  expect(field).toBeDisabled();
+  expect(screen.getByText(/You can change it again on Oct 30\./)).toBeInTheDocument();
+  expect(screen.getByText(/Before: @ada-lovelace\./)).toBeInTheDocument();
+});

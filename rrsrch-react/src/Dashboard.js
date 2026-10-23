@@ -1230,7 +1230,7 @@ export default function Dashboard({ isMobile, initialTab }) {
   } else {
     page = (
       <AccountSignedIn user={user} apiKey={apiKey} me={me} isMobile={isMobile} onSignedOut={signedOut}
-        onKeyChange={(k) => setApiKey(k)} onUserChange={setUser} initialTab={link.get('tab')} />
+        onKeyChange={(k) => setApiKey(k)} onUserChange={setUser} onMeChange={setMe} initialTab={link.get('tab')} />
     );
   }
   if (tab === 'account') {              // Account is about you, not your agents: no Agents sidebar
