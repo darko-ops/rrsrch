@@ -67,7 +67,8 @@ function PasswordRules({ password, who }) {
 
 // -- shared: Google and the verify banner ------------------------------------------------------------------------
 
-export function GoogleSignIn({ onSignedIn, onError, link = false, divider = true, width = 380 }) {
+// `onCredential`: hand Google's ID token to the caller instead of signing in with it (deleting an account asks for one).
+export function GoogleSignIn({ onSignedIn, onError, onCredential, link = false, divider = true, width = 380 }) {
   const slot = useRef(null);
   const [clientId, setClientId] = useState(null);
   useEffect(() => {
@@ -80,6 +81,7 @@ export function GoogleSignIn({ onSignedIn, onError, link = false, divider = true
       window.google.accounts.id.initialize({
         client_id: clientId,
         callback: async ({ credential }) => {
+          if (onCredential) { onCredential(credential); return; }
           const r = await fetch('/api/account/google', { method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(link ? authHeaders() : {}) },
             body: JSON.stringify({ credential }) });
@@ -101,7 +103,7 @@ export function GoogleSignIn({ onSignedIn, onError, link = false, divider = true
     }
     script.addEventListener('load', render);
     return () => script.removeEventListener('load', render);
-  }, [clientId, onSignedIn, onError, link, width]);
+  }, [clientId, onSignedIn, onError, onCredential, link, width]);
   if (!clientId) return null;
   return (
     <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'minmax(0, 1fr)' }}>
@@ -523,6 +525,42 @@ export function PasswordUpgrade({ user, onDone, onSignedOut }) {
   );
 }
 
+// Deleting the account asks the person to prove it again: the current password, or for an account that signs in only
+// with Google, a fresh Google sign-in whose ID token goes with the request.
+function DeleteAccount({ passwordAccount, onDeleted }) {
+  const [password, setPassword] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const send = useCallback(async (proof) => {
+    setBusy(true); setErr('');
+    const r = await fetch('/api/account/me', { method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(proof) });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (r.ok) onDeleted(); else setErr(d.error || 'Could not delete the account.');
+  }, [onDeleted]);
+  const withGoogle = useCallback((credential) => send({ credential }), [send]);
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, maxWidth: 380 }}>
+      {passwordAccount
+        ? <>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              placeholder="Current password" aria-label="Current password" autoComplete="current-password"
+              style={bigInput()} />
+            <div>
+              <Btn small kind="danger" onClick={() => send({ password })} disabled={busy || !password}>
+                {busy ? 'Deleting…' : 'Delete my account'}</Btn>
+            </div>
+          </>
+        : <>
+            <span style={{ fontSize: 12, color: '#999' }}>Sign in with Google again to confirm.</span>
+            <GoogleSignIn link divider={false} width={300} onCredential={withGoogle} onError={setErr} />
+          </>}
+      {err && <Note tone="error">{err}</Note>}
+    </div>
+  );
+}
+
 function SecurityTab({ user, me, onSignedOut, onKeyChange, onUserChange }) {
   const [changing, setChanging] = useState(false);
   const [linking, setLinking] = useState(false);
@@ -535,11 +573,7 @@ function SecurityTab({ user, me, onSignedOut, onKeyChange, onUserChange }) {
   const onLinkError = useCallback((m) => setMsg({ ok: false, text: m }), []);
   const disconnect = () => { writeStored(KEY_STORAGE, ''); onKeyChange?.(null); };
   const signOut = () => { onSignedOut?.(); };
-  const remove = async () => {
-    if (!window.confirm('Delete your account? This cannot be undone.')) return;
-    const r = await fetch('/api/account/me', { method: 'DELETE', headers: authHeaders() });
-    if (r.ok) signOut(); else setMsg({ ok: false, text: 'Could not delete the account.' });
-  };
+  const [deleting, setDeleting] = useState(false);
   const passwordRow = user.has_password !== false;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, maxWidth: 620 }}>
@@ -570,8 +604,10 @@ function SecurityTab({ user, me, onSignedOut, onKeyChange, onUserChange }) {
         agent key and search history. Your data stays.">
         <Btn small onClick={signOut}>Sign out</Btn>
       </Row>
-      <Row danger title="Delete account" desc="This cannot be undone. Your posts stay, credited to a deleted account.">
-        <Btn small kind="danger" onClick={remove}>Delete</Btn>
+      <Row danger title="Delete account" desc="This cannot be undone. Your posts stay, credited to a deleted account."
+        below={deleting && <DeleteAccount passwordAccount={passwordRow} onDeleted={signOut} />}>
+        <Btn small kind={deleting ? undefined : 'danger'} onClick={() => setDeleting(!deleting)}>
+          {deleting ? 'Cancel' : 'Delete'}</Btn>
       </Row>
       {msg && <Note tone={msg.ok ? 'ok' : 'error'}>{msg.text}</Note>}
     </div>
