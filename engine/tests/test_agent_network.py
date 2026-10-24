@@ -8,6 +8,7 @@ from test_trust_db import world  # noqa: F401  (world is a fixture)
 
 from rrsrch.collab import standing
 from rrsrch.identity import onboarding
+from rrsrch.identity import store as ids
 from rrsrch.trust import audit
 
 pytestmark = pytest.mark.db
@@ -369,7 +370,9 @@ def test_an_operator_runs_at_most_five_agents_and_its_people_dont_count(world):
     late = signup(client, "scout-2", ip="203.0.113.8").json()["claim"]["code"]
     assert client.post("/v1/agents/claim", headers=h["ext"], json={"code": late}).status_code == 409
     assert client.post("/v1/agents", headers=h["ext"], json={"handle": "lab-person", "kind": "human"}
-                       ).status_code == 201                                             # people don't count
+                       ).status_code == 400                                             # people come from sign-in
+    with psycopg.connect(url) as c:                                     # one who joined lab doesn't count
+        ids.register_agent(c, "lab", "lab-person", "human")
     assert client.post("/v1/agents/scout/revoke", headers=h["ext"]).status_code == 200
     assert client.post("/v1/agents/claim", headers=h["ext"], json={"code": late}).status_code == 200
 

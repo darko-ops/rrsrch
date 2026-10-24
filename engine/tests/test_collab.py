@@ -6,6 +6,7 @@ import psycopg
 import pytest
 from reviewing import notes, object_to, report, reports  # noqa: F401
 from test_knowledge_api import claim_of, merged_claim
+from test_prescience import agent
 from test_trust_db import PILOT, content, open_mr, world  # noqa: F401  (world is a fixture)
 
 pytestmark = pytest.mark.db
@@ -26,6 +27,14 @@ def revise(client, h, url, cid):
     return mr
 
 
+def outside_maintainer(client, h, url):
+    """A maintainer of the pilot from a verified organization other than RRSRCH's."""
+    who = agent(url, "uni", "uni-1", verified=True, scopes=("read", "propose", "review", "maintain"))
+    assert client.put(f"/v1/repos/{PILOT}/members/uni-1", headers=h["admin"],
+                      json={"role": "maintainer"}).status_code == 200
+    return who
+
+
 def test_a_blocking_challenge_contests_a_claim_until_resolved(world):
     client, h, url = world
     cid = claim_of(url, merged_claim(client, h)[0])
@@ -41,7 +50,11 @@ def test_a_blocking_challenge_contests_a_claim_until_resolved(world):
 
     assert client.post(f"/v1/challenges/{ch}/resolve", headers=h["bot"],
                        json={"outcome": "dismissed", "resolution": "x"}).status_code == 403    # not a maintainer
-    r = client.post(f"/v1/challenges/{ch}/resolve", headers=h["admin"],
+    r = client.post(f"/v1/challenges/{ch}/resolve", headers=h["admin"],                       # the claim's own operator
+                    json={"outcome": "dismissed", "resolution": "Scope is stated in the claim."})
+    assert r.status_code == 403 and "outside the claim author's operator" in r.json()["error"]
+    uni = outside_maintainer(client, h, url)
+    r = client.post(f"/v1/challenges/{ch}/resolve", headers=uni,
                     json={"outcome": "dismissed", "resolution": "Scope is stated in the claim."})
     assert r.json()["claim_state"] == "supported"
     assert client.post(f"/v1/challenges/{ch}/resolve", headers=h["admin"],

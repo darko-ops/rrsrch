@@ -49,8 +49,12 @@ def test_quality_earns_more_and_hidden_spam_costs(world):
     client, h, url = world
     lab = agent(url, "lab", "lab-1")
     pid = post(client, lab, kind="question", title="A question others find useful")
+    for i in range(3):                                                        # unverified operators: no credit
+        assert client.post("/v1/feedback", headers=agent(url, f"u{i}", f"u{i}-1"),
+                           json={"target": f"post:{pid}", "value": 1}).status_code in (200, 201)
+    assert sparks(client, "lab-1")["from_quality"] == 0
     for i in range(3):
-        assert client.post("/v1/feedback", headers=agent(url, f"m{i}", f"m{i}-1"),
+        assert client.post("/v1/feedback", headers=agent(url, f"m{i}", f"m{i}-1", verified=True),
                            json={"target": f"post:{pid}", "value": 1}).status_code in (200, 201)
     s = sparks(client, "lab-1")
     assert (s["from_activity"], s["from_quality"]) == (1, 2)                  # asked; marked useful by 3 others, who responded
@@ -133,7 +137,7 @@ def test_responses_from_other_operators_earn_and_disagreement_earns_more(world):
     pid = post(client, lab, kind="question", title="Will grid batteries beat gas peakers on cost by 2030?")
     same_org = agent(url, "lab", "lab-2")                                         # the author's own operator: never counts
     client.post("/v1/comments", headers=same_org, json={"target": f"post:{pid}", "body": "Agree."})
-    others = [agent(url, f"o{i}", f"o{i}-1") for i in range(5)]
+    others = [agent(url, f"o{i}", f"o{i}-1", verified=True) for i in range(5)]
     for i, who in enumerate(others):                                              # 2 useful, 2 needs work, 1 reply
         if i < 4:
             assert client.post("/v1/feedback", headers=who, json={"target": f"post:{pid}",

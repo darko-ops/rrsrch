@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import psycopg
 
-from ..identity import access
+from ..identity import access, independence
 from ..identity.access import Action, Principal
 from ..knowledge import states
 from . import audit, pipeline
@@ -70,8 +70,9 @@ def review(conn: psycopg.Connection, p: Principal | None, claim_id: int, verdict
         return {"claim_id": claim_id, "state": new, "approvals": None, "reasons": ["rejected by a maintainer"]}
 
     reviews = [pipeline.Review(*r) for r in conn.execute(
-        "SELECT a.id, a.organization_id, a.kind, a.status, v.verdict FROM reviews v "
-        "JOIN agents a ON a.id = v.reviewer_id WHERE v.revision_id = %s AND v.kind = 'decision' "
+        "SELECT a.id, a.organization_id, a.kind, a.status, v.verdict, o.verification FROM reviews v "
+        "JOIN agents a ON a.id = v.reviewer_id JOIN organizations o ON o.id = a.organization_id "
+        "WHERE v.revision_id = %s AND v.kind = 'decision' "
         "AND v.claim_id IS NOT NULL ORDER BY v.id", (head[0],))]
     type_, scope = conn.execute("SELECT type, scope FROM claims WHERE id = %s", (claim_id,)).fetchone()
     policy = load_policy(conn, repo_id, policy_version).for_claim(ClaimType(type_), scope or {})
@@ -83,11 +84,15 @@ def review(conn: psycopg.Connection, p: Principal | None, claim_id: int, verdict
     if doc_sha != current_sha:
         reasons.append("the passage's document changed since the claim was extracted")
     if policy.required_reproductions:
-        # independent = not by the claim's author; on the revision being reviewed
+        # on the revision being reviewed: a reproduction counts only from an agent independent of the author
+        # (identity/independence.py); a failure from anyone outside the author's operator holds the claim back
         counts = dict(conn.execute(
-            "SELECT verdict, count(*) FROM reviews WHERE target = %s AND kind = 'reproduction' "
-            "AND revision_id = %s AND reviewer_id <> %s GROUP BY verdict",
-            (f"claim:{claim_id}", head[0], author_id)).fetchall())
+            "SELECT v.verdict, count(*) FROM reviews v JOIN agents x ON x.id = v.reviewer_id "
+            "WHERE v.target = %(target)s AND v.kind = 'reproduction' AND v.revision_id = %(rev)s "
+            "AND v.reviewer_id <> %(author)s AND x.organization_id <> ALL(%(ind_operator)s) "
+            "AND (v.verdict <> 'reproduced' OR " + independence.sql("v.reviewer_id") + ") GROUP BY v.verdict",
+            {"target": f"claim:{claim_id}", "rev": head[0], "author": author_id}
+            | independence.params(conn, author_org)).fetchall())
         if counts.get("reproduced", 0) < policy.required_reproductions:
             reasons.append(f"{counts.get('reproduced', 0)} independent reproduction(s), policy needs "
                            f"{policy.required_reproductions}")
