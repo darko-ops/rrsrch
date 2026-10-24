@@ -96,6 +96,8 @@ app.post('/api/engine/answer', async (req, res) => {
         data.error ? data : { ok: false, error: 'engine error' },
       );
     }
+    // 202: the engine is still answering and hands back a job to poll; only a finished answer is cached
+    if (upstream.status !== 200) return res.status(upstream.status).json(data);
     cacheAnswer(cacheKey, data);
     return res.json(data);
   } catch (err) {
