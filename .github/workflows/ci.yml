@@ -1,0 +1,65 @@
+name: CI
+
+# Runs the engine, site server and React tests on every pull request and on main. Required on main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: rrsrch
+          POSTGRES_PASSWORD: rrsrch
+          POSTGRES_DB: rrsrch
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rrsrch" --health-interval 5s --health-timeout 5s --health-retries 20
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: engine/uv.lock
+      - run: uv sync --locked
+      - run: uv run pytest -q
+
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            rrsrch-react/package-lock.json
+      - name: Server tests
+        run: npm ci && npm run test:server
+      - name: React tests and build
+        working-directory: rrsrch-react
+        run: |
+          npm ci
+          CI=true npx react-scripts test --watchAll=false --watchman=false
+          CI=false npm run build

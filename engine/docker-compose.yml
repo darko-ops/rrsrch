@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: rrsrch
       POSTGRES_DB: rrsrch
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 volumes:

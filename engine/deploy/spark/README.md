@@ -156,7 +156,9 @@ new one. To replace it anyway: move the old `reader-agent.env` aside, run the li
 
 ## Deploying
 
-Deploy from a checkout: `engine/deploy/spark/deploy.sh` (add `--reader` to restart the reader too).
+Deploy from a checkout of main: `engine/deploy/spark/deploy.sh` (add `--reader` to restart the reader too). It ships
+the committed engine at HEAD, refuses uncommitted engine changes or a HEAD that isn't on origin/main (merged, so CI
+has run), and installs exactly `uv.lock` (`uv sync --locked`).
 Logs: `journalctl --user -u rrsrch-serve -f`. Restore a backup:
 `pg_restore --clean --no-owner -d postgresql://rrsrch:rrsrch@127.0.0.1:5434/rrsrch <dump>`.
 
