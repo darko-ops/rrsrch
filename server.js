@@ -1,16 +1,22 @@
 const express = require('express');
-const { TwitterApi } = require('twitter-api-v2');
 const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
-const passport = require('passport');
-const session = require('express-session');
 const bcrypt = require('bcrypt');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Security headers (CSP, no framing, nosniff, referrer and permissions policies) on every response. vercel.json is
+// the one copy: Vercel applies it to the static build, and this applies the same set to what Express serves (the
+// server-rendered pages, the API, and everything on a local run).
+const SECURITY_HEADERS = (require('./vercel.json').headers || []).find((h) => h.source === '/(.*)')?.headers || [];
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  for (const { key, value } of SECURITY_HEADERS) res.set(key, value);
+  next();
+});
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
@@ -19,35 +25,8 @@ app.use(cors({
 // Express's 100 KB default. Registered first, so the general parser below leaves these bodies alone.
 app.use('/api/engine/v1/sources/upload', express.json({ limit: '72mb' }));
 app.use(express.json());
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'rrsrch-secret-key-2025',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
-}));
-app.use(passport.initialize());
-app.use(passport.session());
-
-// Initialize Twitter client
-const twitterClient = new TwitterApi(process.env.TWITTER_BEARER_TOKEN);
-
-passport.serializeUser((user, done) => {
-  done(null, user);
-});
-
-passport.deserializeUser((user, done) => {
-  done(null, user);
-});
-
-// --- Posts storage ---
-// On Vercel the filesystem is read-only, so persist posts in Vercel Blob when a
-// BLOB_READ_WRITE_TOKEN is present. Locally (dev) fall back to a JSON file on disk.
-const POSTS_FILE = path.join(__dirname, 'posts.json');
-const BLOB_KEY = 'posts.json';
+// Accounts persist in Vercel Blob when a BLOB_READ_WRITE_TOKEN is present (the filesystem on Vercel is read-only);
+// locally (dev) they fall back to a JSON file on disk.
 const useBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
 // Which persistence the process actually got. Without the blob token this silently
 // falls back to a local file, which on serverless is a read-only empty disk — every
@@ -56,54 +35,7 @@ console.log(useBlob
   ? 'storage: vercel blob'
   : 'storage: LOCAL FILE — BLOB_READ_WRITE_TOKEN is not set in this environment');
 
-async function readPosts() {
-  if (useBlob) {
-    const { list } = require('@vercel/blob');
-    const { blobs } = await list({ prefix: BLOB_KEY });
-    const match = blobs.find((b) => b.pathname === BLOB_KEY);
-    if (!match) return [];
-    const res = await fetch(match.url, { cache: 'no-store' });
-    if (!res.ok) return [];
-    return res.json();
-  }
-  try {
-    const data = await fs.readFile(POSTS_FILE, 'utf8');
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
-}
-
-async function writePosts(posts) {
-  if (useBlob) {
-    const { put } = require('@vercel/blob');
-    await put(BLOB_KEY, JSON.stringify(posts, null, 2), {
-      access: 'public',
-      contentType: 'application/json',
-      addRandomSuffix: false,
-      allowOverwrite: true,
-    });
-    return;
-  }
-  await fs.writeFile(POSTS_FILE, JSON.stringify(posts, null, 2));
-}
-
-// Initialize local posts file if it doesn't exist (dev only; no-op on Vercel)
-async function initPostsFile() {
-  if (useBlob) return;
-  try {
-    await fs.access(POSTS_FILE);
-  } catch {
-    try {
-      await fs.writeFile(POSTS_FILE, JSON.stringify([], null, 2));
-    } catch {
-      // read-only filesystem; reads will just return []
-    }
-  }
-}
-
-const EUROPE_PMC_SEARCH = 'https://www.ebi.ac.uk/europepmc/webservices/rest/search';
-// Local evidence engine (rrsrch serve). Unset = site falls back to demo/PMC.
+// Local evidence engine (rrsrch serve). Unset = the site's engine routes answer 503.
 const ENGINE_URL = (process.env.RRSRCH_ENGINE_URL || '').replace(/\/$/, '');
 
 // Every request the site makes to the engine comes from Vercel, so the engine can't tell visitors apart for its
@@ -117,9 +49,24 @@ function visitorHeaders(req) {
   return ip ? { 'x-rrsrch-proxy-secret': ENGINE_PROXY_SECRET, 'x-rrsrch-client-ip': ip } : {};
 }
 
-// Short-lived answer cache (writer is slow; Cloudflare/Vercel otherwise 524).
+// Short-lived answer cache (writer is slow; Cloudflare/Vercel otherwise 524). Bounded: entries expire after the TTL
+// and the least recently used go first past ENGINE_ANSWER_MAX (a Map keeps insertion order; a hit re-inserts).
 const engineAnswerCache = new Map();
 const ENGINE_ANSWER_TTL_MS = 30 * 60 * 1000;
+const ENGINE_ANSWER_MAX = 200;
+function cachedAnswer(key) {
+  const hit = engineAnswerCache.get(key);
+  if (!hit) return null;
+  engineAnswerCache.delete(key);
+  if (Date.now() - hit.at >= ENGINE_ANSWER_TTL_MS) return null;
+  engineAnswerCache.set(key, hit);
+  return hit.data;
+}
+function cacheAnswer(key, data) {
+  engineAnswerCache.delete(key);
+  engineAnswerCache.set(key, { at: Date.now(), data });
+  while (engineAnswerCache.size > ENGINE_ANSWER_MAX) engineAnswerCache.delete(engineAnswerCache.keys().next().value);
+}
 
 // Evidence-engine answer (proxies to rrsrch serve when RRSRCH_ENGINE_URL is set).
 app.post('/api/engine/answer', async (req, res) => {
@@ -134,10 +81,8 @@ app.post('/api/engine/answer', async (req, res) => {
   if (!question) return res.status(400).json({ ok: false, error: 'question required' });
   if (question.length > 800) return res.status(400).json({ ok: false, error: 'question too long' });
   const cacheKey = question.toLowerCase();
-  const cached = engineAnswerCache.get(cacheKey);
-  if (cached && (Date.now() - cached.at) < ENGINE_ANSWER_TTL_MS) {
-    return res.json({ ...cached.data, cached: true });
-  }
+  const cached = cachedAnswer(cacheKey);
+  if (cached) return res.json({ ...cached, cached: true });
   try {
     const upstream = await fetch(`${ENGINE_URL}/v1/answer`, {
       method: 'POST',
@@ -151,7 +96,7 @@ app.post('/api/engine/answer', async (req, res) => {
         data.error ? data : { ok: false, error: 'engine error' },
       );
     }
-    engineAnswerCache.set(cacheKey, { at: Date.now(), data });
+    cacheAnswer(cacheKey, data);
     return res.json(data);
   } catch (err) {
     console.error('engine answer failed', err);
@@ -280,6 +225,8 @@ const { Marked } = require('marked');
 const SITE = 'https://rrsrch.com';
 const JOIN_INSTRUCTION = `Read ${SITE}/agents.md and follow it to join RRSRCH.`;
 const escapeHtml = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// A link taken from engine or agent data: http(s) only, anything else (javascript:, data:, …) gets the fallback.
+const httpUrl = (u, fallback) => (/^https?:\/\//i.test(String(u || '').trim()) ? String(u).trim() : fallback);
 
 // For operators whose agents live in an MCP client: the hosted server, with the key as a header. Without a key a
 // client gets the read tools only. The key is a placeholder; nothing here is ever filled in from a visitor.
@@ -322,6 +269,9 @@ const DAILY_HTML = `<h2 id="daily">Check in every day</h2>
 // The guide is ours, but raw HTML in Markdown is still shown as text, never passed through.
 const guideMarkdown = new Marked({ renderer: {
   html: (html) => escapeHtml(typeof html === 'string' ? html : html?.text),
+  // links: http(s), site paths and #anchors only; any other scheme is shown as its text
+  link: (href, title, text) => (/^(https?:\/\/|\/(?!\/)|#)/i.test(String(href || '').trim())
+    ? `<a href="${escapeHtml(String(href).trim())}"${title ? ` title="${escapeHtml(title)}"` : ''}>${text}</a>` : text),
   // the page has its own <h1>: the guide's headings move down a level
   heading: (text, level) => `<h${Math.min(level + 1, 6)}>${text}</h${Math.min(level + 1, 6)}>`,
 } });
@@ -485,7 +435,7 @@ function joinPage(signal, guideHtml) {
   <div class="needs">${needItems.map(([v, l]) => `<div class="need"><b>${v}</b><span>${escapeHtml(l)}</span></div>`).join('')}</div>
   ${batch.length ? `<h3>A starter batch to review</h3><p class="muted">RRSRCH’s seed: claims its reader extracted from
     papers, not yet reviewed. Check each against its passage.</p><ul class="questions">${batch.map((c) => `<li><a href="${SITE}/claims/${n(c.id)}">${escapeHtml(c.proposition)}</a></li>`).join('')}</ul>` : ''}
-  ${questions.length ? `<h3>Open questions</h3><ul class="questions">${questions.map((q) => `<li><a href="${escapeHtml(q.url || `${SITE}/#/posts/${n(q.id)}`)}">${escapeHtml(q.title)}</a>${(q.topics || []).length ? ` <span class="muted">${q.topics.map((t) => `#${escapeHtml(t)}`).join(' ')}</span>` : ''}</li>`).join('')}</ul>` : ''}
+  ${questions.length ? `<h3>Open questions</h3><ul class="questions">${questions.map((q) => `<li><a href="${escapeHtml(httpUrl(q.url, `${SITE}/#/posts/${n(q.id)}`))}">${escapeHtml(q.title)}</a>${(q.topics || []).length ? ` <span class="muted">${q.topics.map((t) => `#${escapeHtml(t)}`).join(' ')}</span>` : ''}</li>`).join('')}</ul>` : ''}
   <p class="muted">Live from <a href="/signal.json">rrsrch.com/signal.json</a>.</p>` : ''}
   ${arenaHtml(signal?.arena)}
   <h2>How joining works</h2>
@@ -616,1337 +566,9 @@ app.all('/api/engine/v1/*', async (req, res) => {
   }
 });
 
-// Open-web search (Comet-like layer). Prefer Brave, then Serper. Not the evidence ledger.
-function hostnameOf(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return null; }
-}
-
-function faviconFor(url, source) {
-  const host = source || hostnameOf(url);
-  if (!host) return null;
-  return `https://icons.duckduckgo.com/ip3/${host}.ico`;
-}
-
-/** Classify open-web hostnames into trust buckets for the Web tab. */
-function classifyWebKind(url, source) {
-  const host = String(source || hostnameOf(url) || '').toLowerCase();
-  if (!host) return 'clinic';
-  if (
-    /\.gov(\.|$)/.test(host)
-    || /(fda|cdc|nih|who\.int|ema\.europa|nhs\.uk|nice\.org|health\.gov)/.test(host)
-  ) return 'authority';
-  if (
-    /(reddit\.com|quora\.com|stackoverflow\.com|discourse\.|forum\.|patient\.info|healthunlocked)/.test(host)
-  ) return 'forum';
-  if (
-    /(nytimes|washingtonpost|bbc\.|cnn\.|reuters|bloomberg|statnews|fiercebiotech|nature\.com\/news|sciencedaily|theguardian|forbes|wsj\.|npr\.org|webmd\.com\/news)/.test(host)
-  ) return 'news';
-  if (
-    /(harvard\.edu|stanford\.edu|mayoclinic|clevelandclinic|hopkinsmedicine|nejm\.org|thelancet|bmj\.com|cochrane|pubmed|nih\.gov|nature\.com|science\.org|cell\.com|lancet|medscape|uptodate|aafp\.org|acr\.org)/.test(host)
-    || /\.edu(\.|$)/.test(host)
-  ) return 'medical';
-  if (/(clinic|regen|stem.?cell|orthop|sports.?med|wellness|aesthetic)/.test(host)) return 'clinic';
-  return 'clinic';
-}
-
-function enrichWebResult(r) {
-  const url = r.url || null;
-  const source = r.source || hostnameOf(url);
-  return {
-    ...r,
-    source,
-    kind: r.kind || classifyWebKind(url, source),
-    favicon: r.favicon || faviconFor(url, source),
-    thumbnail: r.thumbnail || null,
-  };
-}
-
-async function searchBrave(q, count) {
-  const key = process.env.BRAVE_SEARCH_API_KEY;
-  if (!key) return null;
-  const params = new URLSearchParams({ q, count: String(count) });
-  const upstream = await fetch(`https://api.search.brave.com/res/v1/web/search?${params}`, {
-    headers: { Accept: 'application/json', 'X-Subscription-Token': key },
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!upstream.ok) throw new Error(`Brave search HTTP ${upstream.status}`);
-  const data = await upstream.json();
-  const results = (data.web?.results || []).map((r) => enrichWebResult({
-    title: r.title || 'Untitled',
-    url: r.url || null,
-    snippet: r.description || '',
-    source: (() => { try { return new URL(r.url).hostname.replace(/^www\./, ''); } catch { return null; } })(),
-    thumbnail: r.thumbnail?.src || r.thumbnail?.url || null,
-    favicon: r.meta_url?.favicon || null,
-  }));
-  return { provider: 'brave', results };
-}
-
-async function searchSerper(q, count) {
-  const key = process.env.SERPER_API_KEY;
-  if (!key) return null;
-  const upstream = await fetch('https://google.serper.dev/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-API-KEY': key },
-    body: JSON.stringify({ q, num: count }),
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!upstream.ok) throw new Error(`Serper HTTP ${upstream.status}`);
-  const data = await upstream.json();
-  const results = (data.organic || []).map((r) => enrichWebResult({
-    title: r.title || 'Untitled',
-    url: r.link || null,
-    snippet: r.snippet || '',
-    source: (() => { try { return new URL(r.link).hostname.replace(/^www\./, ''); } catch { return null; } })(),
-    thumbnail: r.imageUrl || null,
-  }));
-  return { provider: 'serper', results };
-}
-
-/** Zero-config fallback when Brave/Serper keys are absent. */
-async function searchDuckDuckGo(q, count) {
-  const params = new URLSearchParams({ q });
-  const upstream = await fetch(`https://html.duckduckgo.com/html/?${params}`, {
-    headers: {
-      Accept: 'text/html',
-      'User-Agent': 'rrsrch-web-search/1.0 (+https://rrsrch.com)',
-    },
-    signal: AbortSignal.timeout(20000),
-    redirect: 'follow',
-  });
-  if (!upstream.ok) throw new Error(`DuckDuckGo HTTP ${upstream.status}`);
-  const html = await upstream.text();
-  const results = [];
-  // result__a links; uddg= is the real destination when present
-  const linkRe = /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-  const snippetRe = /class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|td|div)>/gi;
-  const snippets = [];
-  let sm;
-  while ((sm = snippetRe.exec(html)) !== null) {
-    snippets.push(sm[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
-  }
-  let m;
-  let i = 0;
-  while ((m = linkRe.exec(html)) !== null && results.length < count) {
-    let href = m[1].replace(/&amp;/g, '&');
-    try {
-      const u = new URL(href, 'https://duckduckgo.com');
-      if (u.searchParams.get('uddg')) href = u.searchParams.get('uddg');
-    } catch { /* keep href */ }
-    if (!href || href.startsWith('/') || href.includes('duckduckgo.com')) continue;
-    const title = m[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() || 'Untitled';
-    let source = null;
-    try { source = new URL(href).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
-    results.push(enrichWebResult({
-      title,
-      url: href,
-      snippet: snippets[i] || '',
-      source,
-    }));
-    i += 1;
-  }
-  return { provider: 'duckduckgo', results };
-}
-
-/**
- * Heuristic "by argument" clustering for the Web tab.
- * Clusters snippets into claim themes and assigns yes/no sides by polarity.
- * Ledger verdict/note come from the optional client-provided report summary.
- */
-function buildWebArguments(query, results = [], ledger = {}) {
-  const themes = [
-    {
-      id: 'pain-benefit',
-      title: 'MSCs lower knee pain versus control',
-      match: /pain|vas|analges/i,
-      yes: /lower|reduc|improv|relie|benefit|effective|significant/i,
-      no: /no (significant )?difference|not (superior|better)|failed|no benefit|unclear|inconclusive/i,
-      defaultVerdict: 'benefit',
-      defaultNote: 'Pain outcomes favour MSCs in several trials; effect sizes vary.',
-    },
-    {
-      id: 'function',
-      title: 'MSCs improve knee function, not just pain',
-      match: /function|womac|ikdc|koos|mobility|stiff/i,
-      yes: /improv|better|increas|restor|gain/i,
-      no: /no (significant )?difference|did not|fail|unclear|mixed|not follow/i,
-      defaultVerdict: 'contested',
-      defaultNote: 'Function is less consistent than pain across the ledger.',
-    },
-    {
-      id: 'durability',
-      title: 'Any benefit lasts beyond 12–24 months',
-      match: /24 month|long[- ]?term|durab|sustain|lasts?/i,
-      yes: /last|sustain|maintain|durable|at 24/i,
-      no: /stop at 12|short[- ]?term|unclear|unknown|no data|not followed/i,
-      defaultVerdict: 'uncertain',
-      defaultNote: 'Most included trials stop at 12 months; longer follow-up is thin.',
-    },
-    {
-      id: 'vs-standard',
-      title: 'MSCs beat hyaluronic acid or placebo',
-      match: /hyaluronic|placebo|saline|control|compar/i,
-      yes: /better than|superior|outperform|favou?rs? msc/i,
-      no: /no better|equivalent|similar to|not superior/i,
-      defaultVerdict: 'mixed',
-      defaultNote: 'Comparators matter: HA and placebo are harder bars than usual care.',
-    },
-    {
-      id: 'safety',
-      title: 'MSC injections are safe for knee OA',
-      match: /safe|adverse|side effect|complicat|risk/i,
-      yes: /safe|well[- ]tolerat|no serious|low risk/i,
-      no: /adverse|risk|complicat|infection|caution/i,
-      defaultVerdict: 'mixed',
-      defaultNote: 'Serious events look uncommon in trials; reporting quality varies.',
-    },
-  ];
-
-  const ledgerVerdict = ledger.verdict || null;
-  const ledgerNote = ledger.note || null;
-  const args = [];
-
-  for (const theme of themes) {
-    const yes = [];
-    const no = [];
-    for (const r of results) {
-      const blob = `${r.title || ''} ${r.snippet || ''}`;
-      if (!theme.match.test(blob)) continue;
-      const quote = String(r.snippet || r.title || '').replace(/\s+/g, ' ').trim().slice(0, 220);
-      const entry = {
-        url: r.url,
-        quote: quote || (r.title || ''),
-        title: r.title,
-        source: r.source,
-        kind: r.kind,
-        favicon: r.favicon,
-        thumbnail: r.thumbnail,
-      };
-      const yesHit = theme.yes.test(blob);
-      const noHit = theme.no.test(blob);
-      if (yesHit && !noHit) yes.push(entry);
-      else if (noHit && !yesHit) no.push(entry);
-      else if (yesHit && noHit) {
-        // Mixed language on the page — put with pushback if "no" wins the end of the snippet
-        if (/however|but|although|despite/i.test(blob)) no.push(entry);
-        else yes.push(entry);
-      } else {
-        // Matched theme keywords only — lean yes for clinic/news, no for authority hedging
-        if (r.kind === 'authority' || r.kind === 'medical') no.push(entry);
-        else yes.push(entry);
-      }
-    }
-    if (!yes.length && !no.length) continue;
-    let verdict = theme.defaultVerdict;
-    let note = theme.defaultNote;
-    if (ledgerVerdict && /pain|function|mixed/i.test(theme.id + theme.title)) {
-      // Prefer live ledger summary when present
-      if (theme.id === 'pain-benefit' && (ledgerVerdict === 'benefit' || ledgerVerdict === 'mixed')) {
-        verdict = ledgerVerdict === 'mixed' ? 'benefit' : ledgerVerdict;
-      }
-      if (theme.id === 'function' && (ledgerVerdict === 'contested' || ledgerVerdict === 'mixed' || ledgerVerdict === 'no_difference')) {
-        verdict = ledgerVerdict === 'mixed' ? 'contested' : ledgerVerdict;
-      }
-      if (ledgerNote && (theme.id === 'pain-benefit' || theme.id === 'function')) {
-        note = ledgerNote;
-      }
-    }
-    if (!yes.length && !no.length) continue;
-    args.push({
-      id: theme.id,
-      title: theme.title,
-      ledger: {
-        verdict: verdict || 'none',
-        note: note || 'Not covered by the claim ledger yet.',
-      },
-      yes,
-      no,
-    });
-  }
-
-  // If nothing matched, fall back to a single "open web claims" bucket
-  if (!args.length && results.length) {
-    args.push({
-      id: 'general',
-      title: String(query || 'What the open web claims').slice(0, 120),
-      ledger: {
-        verdict: ledgerVerdict || 'none',
-        note: ledgerNote || 'Not covered by the claim ledger yet.',
-      },
-      yes: results.slice(0, 4).map((r) => ({
-        url: r.url,
-        quote: String(r.snippet || r.title || '').slice(0, 220),
-        title: r.title,
-        source: r.source,
-        kind: r.kind,
-        favicon: r.favicon,
-        thumbnail: r.thumbnail,
-      })),
-      no: results.slice(4, 8).map((r) => ({
-        url: r.url,
-        quote: String(r.snippet || r.title || '').slice(0, 220),
-        title: r.title,
-        source: r.source,
-        kind: r.kind,
-        favicon: r.favicon,
-        thumbnail: r.thumbnail,
-      })),
-    });
-  }
-
-  return args.slice(0, 6);
-}
-
-app.get('/api/web/search', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  if (!q) return res.status(400).json({ error: 'query required' });
-  if (q.length > 500) return res.status(400).json({ error: 'query too long (500 characters max)' });
-  const count = Math.min(Math.max(parseInt(req.query.limit, 10) || 8, 1), 20);
-  try {
-    let packed = null;
-    let lastErr = null;
-    for (const fn of [searchBrave, searchSerper, searchDuckDuckGo]) {
-      try {
-        packed = await fn(q, count);
-        if (packed) break;
-      } catch (err) {
-        lastErr = err;
-        console.error('web search provider failed', err.message || err);
-      }
-    }
-    if (!packed) {
-      return res.status(503).json({
-        error: 'open web search unavailable',
-        detail: lastErr
-          ? String(lastErr.message || lastErr)
-          : 'Set BRAVE_SEARCH_API_KEY or SERPER_API_KEY for reliable results.',
-        configured: !!(process.env.BRAVE_SEARCH_API_KEY || process.env.SERPER_API_KEY),
-      });
-    }
-    return res.json({
-      query: q,
-      provider: packed.provider,
-      results: (packed.results || []).map(enrichWebResult),
-      note: 'Open web — not gated ledger evidence. Research tool only, not medical advice.',
-    });
-  } catch (err) {
-    console.error('web search failed', err);
-    return res.status(500).json({ error: 'search failed' });
-  }
-});
-
-/** Cluster open-web results by argument for the Web tab "By argument" view. */
-app.post('/api/web/arguments', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const q = String(body.query || body.q || '').trim();
-    const results = Array.isArray(body.results) ? body.results : [];
-    if (!results.length) {
-      return res.status(400).json({ error: 'results required' });
-    }
-    const ledger = body.ledger && typeof body.ledger === 'object' ? body.ledger : {};
-    const enriched = results.map(enrichWebResult);
-    const arguments_ = buildWebArguments(q, enriched, ledger);
-    return res.json({
-      query: q,
-      arguments: arguments_,
-      note: 'Heuristic clustering from titles/snippets — not a full page read.',
-    });
-  } catch (err) {
-    console.error('web arguments failed', err);
-    return res.status(500).json({ error: 'arguments failed' });
-  }
-});
-
-/** Suggested deeper / adjacent searches (Claude-style routes of thought). */
-function buildFollowUps(query, history = [], profile = {}) {
-  const q = String(query || '').trim();
-  const lower = q.toLowerCase();
-  const prior = (history || []).map((h) => String(h || '').toLowerCase()).filter(Boolean);
-  const interest = String(profile.interest || profile.focus || '').toLowerCase();
-  const seen = new Set([lower, ...prior]);
-  const out = [];
-
-  const push = (item) => {
-    const text = String(item.q || '').trim();
-    if (!text || seen.has(text.toLowerCase())) return;
-    seen.add(text.toLowerCase());
-    out.push({
-      id: item.id || `fu-${out.length + 1}`,
-      q: text,
-      why: item.why || 'Deeper angle',
-      kind: item.kind || 'deeper',
-      v: item.v || null,
-      claims: item.claims != null ? item.claims : null,
-      answer: item.answer || null,
-    });
-  };
-
-  const isMsc = /msc|mesenchymal|stem cell/i.test(q);
-  const isKnee = /knee|osteoarthritis|oa\b|womac|ikdc/i.test(q);
-  const mentionsPain = /pain|vas/i.test(q);
-  const mentionsFunction = /function|womac|ikdc|koos/i.test(q);
-  const mentionsTime = /6 month|12 month|24 month|long[- ]?term|durab/i.test(q);
-  const mentionsCompare = /vs\.?|versus|compar|better than|hyaluronic|placebo|prp/i.test(q);
-
-  if (isMsc && isKnee) {
-    if (!mentionsPain) {
-      push({
-        id: 'pain-effect',
-        kind: 'benefit',
-        why: 'Highest-signal clinical outcome',
-        v: 'benefit',
-        claims: 11,
-        answer: 'Yes. Every pooled 6-month pain estimate favours MSCs.',
-        q: 'Is knee pain lower with MSCs than with control at 6 months?',
-      });
-    }
-    if (!mentionsFunction) {
-      push({
-        id: 'function-gap',
-        kind: 'conflict',
-        why: 'Where trials often disagree',
-        v: 'contested',
-        claims: 12,
-        answer: 'Studies disagree. Function improves less consistently than pain.',
-        q: 'Do MSCs improve knee function at 12 months compared with control?',
-      });
-    }
-    if (!mentionsCompare) {
-      push({
-        id: 'vs-ha',
-        kind: 'compare',
-        why: 'Common clinical alternative',
-        v: 'benefit',
-        claims: 9,
-        answer: 'Probably, for pain: about 1.5 to 2 points lower on a 10-point scale at 12 months.',
-        q: 'Are MSCs better than hyaluronic acid for knee osteoarthritis?',
-      });
-      push({
-        id: 'vs-placebo',
-        kind: 'compare',
-        why: 'Hardest control to beat',
-        v: 'mixed',
-        claims: 7,
-        answer: 'Pain slightly lower (about 1 of 10 points), WOMAC no different.',
-        q: 'How do MSCs compare with placebo injection for knee OA?',
-      });
-    }
-    if (!mentionsTime) {
-      push({
-        id: 'durability',
-        kind: 'gap',
-        why: 'What usually isn\'t answered',
-        v: 'uncertain',
-        claims: 3,
-        answer: 'Unclear. Most trials stop at 12 months.',
-        q: 'Does the benefit of MSC injection last to 24 months?',
-      });
-    }
-    push({
-      id: 'womac-12m',
-      kind: 'conflict',
-      why: 'Where totals conflict',
-      v: 'contested',
-      claims: 10,
-      answer: 'Studies disagree: three found better totals, three found no difference.',
-      q: 'Is the total WOMAC score better with MSCs than with control at 12 months?',
-    });
-    push({
-      id: 'dose-source',
-      kind: 'mechanism',
-      why: 'Protocol detail that changes results',
-      v: 'uncertain',
-      claims: 4,
-      answer: 'Dose and cell source vary widely; the ledger does not yet settle which protocol wins.',
-      q: 'Does MSC dose or cell source (bone marrow vs adipose) change outcomes in knee OA?',
-    });
-    push({
-      id: 'safety',
-      kind: 'safety',
-      why: 'Decision-critical',
-      v: 'mixed',
-      claims: 6,
-      answer: 'Serious adverse events are uncommon in the included trials; reporting quality varies.',
-      q: 'What adverse events are reported after MSC injection for knee osteoarthritis?',
-    });
-  }
-
-  // Generic intrigue routes from the query itself
-  push({
-    id: 'contradict',
-    kind: 'conflict',
-    why: 'Find the disagreement',
-    q: `Where do studies disagree about: ${q}?`,
-  });
-  push({
-    id: 'strongest',
-    kind: 'evidence',
-    why: 'Quality filter',
-    q: `What is the strongest randomized evidence on: ${q}?`,
-  });
-  push({
-    id: 'limits',
-    kind: 'gap',
-    why: 'Know what is missing',
-    q: `What remains unproven about: ${q}?`,
-  });
-
-  if (interest.includes('clinic') || interest.includes('patient')) {
-    push({
-      id: 'practice',
-      kind: 'practice',
-      why: 'Matches your focus',
-      q: `What would a cautious clinician tell a patient about: ${q}?`,
-    });
-  }
-  if (interest.includes('invest') || interest.includes('market')) {
-    push({
-      id: 'market',
-      kind: 'market',
-      why: 'Matches your focus',
-      q: `What commercial or trial pipeline signals matter for: ${q}?`,
-    });
-  }
-
-  // Prefer questions not already asked; cap at 6
-  return out.slice(0, 6);
-}
-
-app.post('/api/search/followups', async (req, res) => {
-  try {
-    const body = req.body || {};
-    const q = String(body.query || body.q || '').trim();
-    if (!q) return res.status(400).json({ error: 'query required' });
-    const history = Array.isArray(body.history) ? body.history.slice(0, 20) : [];
-    const profile = body.profile && typeof body.profile === 'object' ? body.profile : {};
-    const suggestions = buildFollowUps(q, history, profile);
-    return res.json({ query: q, suggestions });
-  } catch (err) {
-    console.error('followups failed', err);
-    return res.status(500).json({ error: 'followups failed' });
-  }
-});
-
-function clipAbstract(text, max = 2400) {
-  const s = String(text || '').trim();
-  if (!s) return '';
-  return s.length > max ? `${s.slice(0, max)}…` : s;
-}
-
-function normalizeDoi(doi) {
-  if (!doi) return null;
-  return String(doi).replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').trim().toLowerCase() || null;
-}
-
-function paperKey(p) {
-  if (p.doi) return `doi:${normalizeDoi(p.doi)}`;
-  if (p.pmid) return `pmid:${p.pmid}`;
-  if (p.nctId) return `nct:${String(p.nctId).toUpperCase()}`;
-  const t = String(p.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  return t ? `title:${t.slice(0, 120)}` : null;
-}
-
-function classifyStudyType(paper) {
-  if (paper.kind === 'trial' || paper.nctId) return 'trial';
-  const types = (paper.pubTypes || []).map((t) => String(t).toLowerCase());
-  const title = String(paper.title || '');
-  if (
-    types.some((t) => /systematic.?review|meta.?analysis|review/.test(t))
-    || /meta-?analysis|systematic review|umbrella review|network meta/i.test(title)
-  ) return 'review';
-  if (
-    types.some((t) => /randomi[sz]ed|clinical trial|controlled trial/.test(t))
-    || /randomi[sz]ed|placebo-controlled|\bRCT\b/i.test(title)
-  ) return 'rct';
-  return 'other';
-}
-
-/** Corpus PMIDs from the evidence-engine manifest (in-ledger papers). */
-function loadCorpusPmidSet() {
-  try {
-    const path = require('path');
-    const fs = require('fs');
-    const file = path.join(__dirname, 'engine', 'corpus', 'manifest.yaml');
-    const text = fs.readFileSync(file, 'utf8');
-    const set = new Set();
-    for (const m of text.matchAll(/^- id: (?:MED:)?(\d+)/gm)) set.add(m[1]);
-    for (const m of text.matchAll(/^\s*- pmid: ['"]?(\d+)/gm)) set.add(m[1]);
-    return set;
-  } catch (err) {
-    console.warn('corpus manifest not loaded', err.message || err);
-    return new Set();
-  }
-}
-const CORPUS_PMIDS = loadCorpusPmidSet();
-
-/** Deterministic placeholder claim split until live engine claim counts are wired. */
-function ledgerForPaper(pmid) {
-  const id = String(pmid || '').replace(/^MED:/, '');
-  if (!id || !CORPUS_PMIDS.has(id)) return null;
-  let h = 0;
-  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  const benefit = 1 + (h % 3);
-  const noDiff = h % 2;
-  const contested = (h >> 3) % 2;
-  const findings = benefit + noDiff + contested;
-  const byVerdict = {};
-  if (benefit) byVerdict.benefit = benefit;
-  if (noDiff) byVerdict.no_difference = noDiff;
-  if (contested) byVerdict.contested = contested;
-  return { findings, byVerdict };
-}
-
-const LIT_SOURCE_HOST = {
-  'Europe PMC': 'europepmc.org',
-  OpenAlex: 'openalex.org',
-  'Semantic Scholar': 'semanticscholar.org',
-  'ClinicalTrials.gov': 'clinicaltrials.gov',
-};
-
-const LIT_REDIRECTOR_HOST = /^(doi\.org|dx\.doi\.org|europepmc\.org|ncbi\.nlm\.nih\.gov|pubmed\.ncbi\.nlm\.nih\.gov|semanticscholar\.org|openalex\.org|api\.semanticscholar\.org|clinicaltrials\.gov)$/i;
-
-/** Common publishers → site host for logos when OpenAlex omits homepage_url. */
-const LIT_PUBLISHER_HOST = [
-  [/mdpi|multidisciplinary digital publishing/i, 'mdpi.com'],
-  [/wiley/i, 'wiley.com'],
-  [/elsevier|sciencedirect/i, 'sciencedirect.com'],
-  [/springer|bmc|biomed central/i, 'springer.com'],
-  [/nature portfolio|^nature$/i, 'nature.com'],
-  [/frontiers/i, 'frontiersin.org'],
-  [/\bplos\b/i, 'plos.org'],
-  [/sage/i, 'sagepub.com'],
-  [/oxford|oup/i, 'oup.com'],
-  [/taylor|informa/i, 'tandfonline.com'],
-  [/wolters kluwer|lippincott|\blww\b/i, 'lww.com'],
-  [/cell press|^cell$/i, 'cell.com'],
-  [/\bbmj\b/i, 'bmj.com'],
-  [/lancet/i, 'thelancet.com'],
-  [/\bnejm\b|new england journal/i, 'nejm.org'],
-  [/karger/i, 'karger.com'],
-  [/thieme/i, 'thieme-connect.com'],
-  [/ieee/i, 'ieee.org'],
-  [/\bacs\b|american chemical/i, 'acs.org'],
-  [/hindawi/i, 'hindawi.com'],
-  [/de gruyter/i, 'degruyter.com'],
-  [/cambridge univ/i, 'cambridge.org'],
-];
-
-function litLogoForHost(host) {
-  if (!host) return null;
-  const h = String(host).replace(/^www\./, '').toLowerCase();
-  if (!h || LIT_REDIRECTOR_HOST.test(h)) return null;
-  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(h)}&sz=128`;
-}
-
-function litSourceHost(sourceLabel) {
-  const label = String(sourceLabel || '').split('·')[0].trim();
-  return LIT_SOURCE_HOST[label] || null;
-}
-
-function litHostFromPublisherName(name) {
-  if (!name) return null;
-  for (const [re, host] of LIT_PUBLISHER_HOST) {
-    if (re.test(name)) return host;
-  }
-  return null;
-}
-
-function litHostFromUrl(url) {
-  const host = hostnameOf(url);
-  if (!host || LIT_REDIRECTOR_HOST.test(host)) return null;
-  return host;
-}
-
-function enrichLiteraturePaper(r) {
-  const studyType = r.studyType || classifyStudyType(r);
-  const ledger = r.ledger != null ? r.ledger : ledgerForPaper(r.pmid);
-  let image = r.image || null;
-  if (!image) {
-    const host = r.publisherHost
-      || litHostFromUrl(r.publisherUrl)
-      || litHostFromPublisherName(r.publisher)
-      || litHostFromUrl(r.oaUrl)
-      || litHostFromUrl(r.url);
-    image = litLogoForHost(host);
-  }
-  // Fall back to the literature source site logo (Europe PMC, OpenAlex, …)
-  if (!image) {
-    const primary = (r.sources && r.sources[0]) || String(r.source || '').split('·')[0].trim();
-    const sourceHost = litSourceHost(primary);
-    if (sourceHost) {
-      image = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(sourceHost)}&sz=128`;
-    }
-  }
-  return { ...r, studyType, ledger, image };
-}
-
-async function searchEuropePmc(q, pageSize) {
-  const params = new URLSearchParams({
-    query: q,
-    format: 'json',
-    pageSize: String(pageSize),
-    resultType: 'core',
-  });
-  const upstream = await fetch(`${EUROPE_PMC_SEARCH}?${params}`, {
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!upstream.ok) throw new Error(`Europe PMC HTTP ${upstream.status}`);
-  const data = await upstream.json();
-  const raw = data.resultList?.result || [];
-  const hitCount = parseInt(data.hitCount, 10) || raw.length;
-  const results = raw.map((r) => {
-    const pmcid = r.pmcid ? String(r.pmcid).replace(/^PMC/i, '') : null;
-    let url = null;
-    if (r.pmid) url = `https://europepmc.org/article/MED/${r.pmid}`;
-    else if (pmcid) url = `https://europepmc.org/article/PMC/${pmcid}`;
-    else if (r.doi) url = `https://doi.org/${r.doi}`;
-    const pubTypes = [];
-    const pt = r.pubTypeList?.pubType;
-    if (Array.isArray(pt)) pubTypes.push(...pt);
-    else if (pt) pubTypes.push(pt);
-    return {
-      source: 'Europe PMC',
-      kind: 'paper',
-      pmid: r.pmid || null,
-      pmcid: pmcid ? `PMC${pmcid}` : null,
-      doi: r.doi || null,
-      title: r.title || 'Untitled',
-      authors: r.authorString || null,
-      journal: r.journalTitle || null,
-      year: r.pubYear || null,
-      abstract: clipAbstract(r.abstractText),
-      openAccess: r.isOpenAccess === 'Y',
-      url,
-      citations: null,
-      pubTypes,
-    };
-  });
-  return { source: 'Europe PMC', hitCount, results };
-}
-
-async function searchOpenAlex(q, pageSize) {
-  const params = new URLSearchParams({
-    search: q,
-    per_page: String(pageSize),
-    mailto: process.env.OPENALEX_MAILTO || 'research@rrsrch.com',
-  });
-  const upstream = await fetch(`https://api.openalex.org/works?${params}`, {
-    headers: { Accept: 'application/json' },
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!upstream.ok) throw new Error(`OpenAlex HTTP ${upstream.status}`);
-  const data = await upstream.json();
-  const raw = data.results || [];
-  const results = raw.map((w) => {
-    const doi = normalizeDoi(w.doi);
-    const authors = (w.authorships || [])
-      .map((a) => a.author?.display_name)
-      .filter(Boolean)
-      .slice(0, 8)
-      .join(', ');
-    const abstract = w.abstract_inverted_index
-      ? (() => {
-          // Reconstruct from inverted index
-          const pairs = [];
-          for (const [word, positions] of Object.entries(w.abstract_inverted_index)) {
-            for (const pos of positions) pairs.push([pos, word]);
-          }
-          pairs.sort((a, b) => a[0] - b[0]);
-          return pairs.map((p) => p[1]).join(' ');
-        })()
-      : '';
-    const type = String(w.type || '').toLowerCase();
-    const pubTypes = type ? [type.replace(/^https?:\/\/openalex\.org\//, '')] : [];
-    const src = w.primary_location?.source || {};
-    const publisher = src.host_organization_name || src.display_name || null;
-    const publisherUrl = src.homepage_url || null;
-    const oaUrl = w.open_access?.oa_url || w.best_oa_location?.pdf_url || null;
-    const landing = w.primary_location?.landing_page_url || null;
-    const publisherHost = litHostFromUrl(publisherUrl)
-      || litHostFromPublisherName(publisher)
-      || litHostFromUrl(oaUrl)
-      || litHostFromUrl(landing);
-    return {
-      source: 'OpenAlex',
-      kind: 'paper',
-      pmid: null,
-      pmcid: null,
-      doi,
-      title: w.display_name || w.title || 'Untitled',
-      authors: authors || null,
-      journal: src.display_name || null,
-      year: w.publication_year ? String(w.publication_year) : null,
-      abstract: clipAbstract(abstract),
-      openAccess: !!w.open_access?.is_oa,
-      url: landing || (doi ? `https://doi.org/${doi}` : w.id) || null,
-      citations: typeof w.cited_by_count === 'number' ? w.cited_by_count : null,
-      pubTypes,
-      publisher,
-      publisherUrl,
-      publisherHost,
-      oaUrl,
-    };
-  });
-  return {
-    source: 'OpenAlex',
-    hitCount: data.meta?.count ?? results.length,
-    results,
-  };
-}
-
-async function searchSemanticScholar(q, pageSize) {
-  const params = new URLSearchParams({
-    query: q,
-    limit: String(pageSize),
-    fields: 'title,abstract,year,authors,venue,externalIds,url,citationCount,openAccessPdf',
-  });
-  const headers = { Accept: 'application/json' };
-  if (process.env.SEMANTIC_SCHOLAR_API_KEY) {
-    headers['x-api-key'] = process.env.SEMANTIC_SCHOLAR_API_KEY;
-  }
-  const upstream = await fetch(`https://api.semanticscholar.org/graph/v1/paper/search?${params}`, {
-    headers,
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!upstream.ok) throw new Error(`Semantic Scholar HTTP ${upstream.status}`);
-  const data = await upstream.json();
-  const raw = data.data || [];
-  const results = raw.map((p) => {
-    const doi = normalizeDoi(p.externalIds?.DOI);
-    const pmid = p.externalIds?.PubMed || null;
-    const authors = (p.authors || []).map((a) => a.name).filter(Boolean).slice(0, 8).join(', ');
-    return {
-      source: 'Semantic Scholar',
-      kind: 'paper',
-      pmid,
-      pmcid: p.externalIds?.PubMedCentral ? `PMC${p.externalIds.PubMedCentral}` : null,
-      doi,
-      title: p.title || 'Untitled',
-      authors: authors || null,
-      journal: p.venue || null,
-      year: p.year ? String(p.year) : null,
-      abstract: clipAbstract(p.abstract),
-      openAccess: !!p.openAccessPdf?.url,
-      url: p.url || p.openAccessPdf?.url || (doi ? `https://doi.org/${doi}` : null),
-      citations: typeof p.citationCount === 'number' ? p.citationCount : null,
-    };
-  });
-  return {
-    source: 'Semantic Scholar',
-    hitCount: data.total ?? results.length,
-    results,
-  };
-}
-
-async function searchClinicalTrials(q, pageSize) {
-  const params = new URLSearchParams({
-    'query.term': q,
-    pageSize: String(Math.min(pageSize, 10)),
-    format: 'json',
-    fields: 'NCTId,BriefTitle,OfficialTitle,OverallStatus,Phase,StartDate,Condition,InterventionName,BriefSummary',
-  });
-  const upstream = await fetch(`https://clinicaltrials.gov/api/v2/studies?${params}`, {
-    headers: { Accept: 'application/json' },
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!upstream.ok) throw new Error(`ClinicalTrials.gov HTTP ${upstream.status}`);
-  const data = await upstream.json();
-  const raw = data.studies || [];
-  const results = raw.map((s) => {
-    const proto = s.protocolSection || {};
-    const id = proto.identificationModule || {};
-    const status = proto.statusModule || {};
-    const design = proto.designModule || {};
-    const cond = proto.conditionsModule || {};
-    const inter = proto.armsInterventionsModule || {};
-    const desc = proto.descriptionModule || {};
-    const nctId = id.nctId || null;
-    const phases = (design.phases || []).join(', ');
-    const interventions = (inter.interventions || [])
-      .map((i) => i.name)
-      .filter(Boolean)
-      .slice(0, 4)
-      .join(', ');
-    return {
-      source: 'ClinicalTrials.gov',
-      kind: 'trial',
-      pmid: null,
-      pmcid: null,
-      doi: null,
-      nctId,
-      title: id.briefTitle || id.officialTitle || 'Untitled trial',
-      authors: null,
-      journal: [status.overallStatus, phases].filter(Boolean).join(' · ') || 'Clinical trial',
-      year: (status.startDateStruct?.date || status.startDate || '').slice(0, 4) || null,
-      abstract: clipAbstract([
-        desc.briefSummary,
-        cond.conditions?.length ? `Conditions: ${cond.conditions.join(', ')}` : null,
-        interventions ? `Interventions: ${interventions}` : null,
-      ].filter(Boolean).join('\n\n')),
-      openAccess: true,
-      url: nctId ? `https://clinicaltrials.gov/study/${nctId}` : null,
-      citations: null,
-    };
-  });
-  return {
-    source: 'ClinicalTrials.gov',
-    hitCount: data.totalCount ?? results.length,
-    results,
-  };
-}
-
-function mergeLiteratureResults(packs, limit) {
-  const byKey = new Map();
-  const sourceHits = {};
-  const used = [];
-  for (const pack of packs) {
-    if (!pack) continue;
-    sourceHits[pack.source] = pack.hitCount ?? pack.results?.length ?? 0;
-    used.push(pack.source);
-    for (const r of pack.results || []) {
-      const key = paperKey(r);
-      if (!key) continue;
-      const existing = byKey.get(key);
-      if (!existing) {
-        byKey.set(key, { ...r, sources: [r.source] });
-        continue;
-      }
-      // Prefer richer abstract / OA / citation counts; keep multi-source label
-      if (!existing.sources.includes(r.source)) existing.sources.push(r.source);
-      if ((!existing.abstract || existing.abstract.length < 80) && r.abstract) {
-        existing.abstract = r.abstract;
-      }
-      if (!existing.url && r.url) existing.url = r.url;
-      if (!existing.doi && r.doi) existing.doi = r.doi;
-      if (!existing.pmid && r.pmid) existing.pmid = r.pmid;
-      if (!existing.openAccess && r.openAccess) existing.openAccess = true;
-      if ((existing.citations == null) && r.citations != null) existing.citations = r.citations;
-      if (!existing.authors && r.authors) existing.authors = r.authors;
-      if (!existing.journal && r.journal) existing.journal = r.journal;
-      if ((!existing.pubTypes || !existing.pubTypes.length) && r.pubTypes?.length) {
-        existing.pubTypes = r.pubTypes;
-      } else if (existing.pubTypes && r.pubTypes?.length) {
-        existing.pubTypes = [...new Set([...existing.pubTypes, ...r.pubTypes])];
-      }
-      if (!existing.publisherHost && r.publisherHost) existing.publisherHost = r.publisherHost;
-      if (!existing.publisherUrl && r.publisherUrl) existing.publisherUrl = r.publisherUrl;
-      if (!existing.publisher && r.publisher) existing.publisher = r.publisher;
-      if (!existing.oaUrl && r.oaUrl) existing.oaUrl = r.oaUrl;
-    }
-  }
-  const rankPaper = (a, b) => {
-    const ca = a.citations ?? -1;
-    const cb = b.citations ?? -1;
-    if (cb !== ca) return cb - ca;
-    const ya = parseInt(a.year, 10) || 0;
-    const yb = parseInt(b.year, 10) || 0;
-    return yb - ya;
-  };
-  const all = Array.from(byKey.values());
-  const trials = all.filter((r) => r.kind === 'trial' || r.nctId).sort(rankPaper);
-  const papers = all.filter((r) => !(r.kind === 'trial' || r.nctId)).sort(rankPaper);
-  // Keep room for registered trials so the Literature tab can group them
-  const trialSlots = Math.min(trials.length, Math.max(2, Math.min(4, Math.floor(limit / 4))));
-  const paperSlots = Math.max(0, limit - trialSlots);
-  const picked = [...papers.slice(0, paperSlots), ...trials.slice(0, trialSlots)];
-  const results = picked.map((r) => enrichLiteraturePaper({
-    ...r,
-    source: (r.sources && r.sources.length > 1) ? r.sources.join(' · ') : r.source,
-  }));
-  const hitCount = Object.values(sourceHits).reduce((a, b) => a + (Number(b) || 0), 0);
-  return { results, hitCount, sourceHits, sources: used };
-}
-
-// Multi-source literature: Europe PMC + OpenAlex + Semantic Scholar + ClinicalTrials.gov
-app.get('/api/literature/search', async (req, res) => {
-  const q = String(req.query.q || '').trim();
-  if (!q) {
-    return res.status(400).json({ error: 'query required' });
-  }
-  if (q.length > 500) {
-    return res.status(400).json({ error: 'query too long (500 characters max)' });
-  }
-  const pageSize = Math.min(Math.max(parseInt(req.query.limit, 10) || 12, 1), 25);
-  const perSource = Math.min(Math.max(pageSize, 8), 15);
-  try {
-    const settled = await Promise.allSettled([
-      searchEuropePmc(q, perSource),
-      searchOpenAlex(q, perSource),
-      searchSemanticScholar(q, perSource),
-      searchClinicalTrials(q, Math.min(perSource, 8)),
-    ]);
-    const packs = [];
-    const errors = {};
-    for (const s of settled) {
-      if (s.status === 'fulfilled') packs.push(s.value);
-      else {
-        const msg = String(s.reason?.message || s.reason || 'failed');
-        console.error('literature source failed', msg);
-        // Infer source name from error prefix when possible
-        const m = msg.match(/^(Europe PMC|OpenAlex|Semantic Scholar|ClinicalTrials\.gov)/);
-        errors[m ? m[1] : 'unknown'] = msg;
-      }
-    }
-    if (!packs.length) {
-      return res.status(502).json({
-        error: 'literature sources unavailable',
-        detail: Object.values(errors).join('; ') || 'all providers failed',
-      });
-    }
-    const merged = mergeLiteratureResults(packs, pageSize);
-    res.json({
-      query: q,
-      hitCount: merged.hitCount,
-      results: merged.results,
-      sources: merged.sources,
-      sourceHits: merged.sourceHits,
-      errors: Object.keys(errors).length ? errors : undefined,
-      note: 'Multi-source research (papers + trials). Not gated ledger evidence.',
-    });
-  } catch (err) {
-    console.error('literature search failed', err);
-    res.status(500).json({ error: 'search failed' });
-  }
-});
-
-// API endpoint to fetch market indices
-app.get('/api/markets', async (req, res) => {
-  try {
-    // Use ETFs and proxy stocks for market data (Finnhub compatible)
-    const indices = [
-      { symbol: 'SPY', name: 'S&P 500' },
-      { symbol: 'DIA', name: 'Dow Jones' },
-      { symbol: 'QQQ', name: 'NASDAQ' },
-      { symbol: 'IWM', name: 'Russell 2000' },
-      { symbol: 'VXX', name: 'VIX (Volatility)' },
-      { symbol: 'GLD', name: 'Gold' },
-      { symbol: 'USO', name: 'Crude Oil' },
-      { symbol: 'TLT', name: '10Y Treasury' }
-    ];
-
-    const API_KEY = process.env.FINNHUB_API_KEY;
-
-    if (!API_KEY) {
-      return res.status(500).json({ error: 'Finnhub API key not configured' });
-    }
-
-    const marketPromises = indices.map(async ({ symbol, name }) => {
-      try {
-        const quoteResponse = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${API_KEY}`);
-        const quoteData = await quoteResponse.json();
-
-        const change = quoteData.c && quoteData.pc ? ((quoteData.c - quoteData.pc) / quoteData.pc) * 100 : 0;
-
-        return {
-          symbol: name,
-          name,
-          price: quoteData.c || 0,
-          change: change,
-          previousClose: quoteData.pc || 0,
-          high: quoteData.h || 0,
-          low: quoteData.l || 0
-        };
-      } catch (err) {
-        console.error(`Error fetching ${symbol}:`, err);
-        return {
-          symbol: name,
-          name,
-          price: 0,
-          change: 0,
-          previousClose: 0,
-          high: 0,
-          low: 0
-        };
-      }
-    });
-
-    const markets = await Promise.all(marketPromises);
-    res.json({ markets });
-  } catch (error) {
-    console.error('Error fetching market data:', error);
-    res.status(500).json({ error: 'Failed to fetch market data', details: error.message });
-  }
-});
-
-// API endpoint to fetch individual stock quote from Finnhub
-app.get('/api/stock/:symbol', async (req, res) => {
-  try {
-    const { symbol } = req.params;
-    const API_KEY = process.env.FINNHUB_API_KEY;
-
-    if (!API_KEY) {
-      return res.status(500).json({ error: 'Finnhub API key not configured' });
-    }
-
-    const quoteResponse = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol.toUpperCase()}&token=${API_KEY}`);
-    const quoteData = await quoteResponse.json();
-
-    // Calculate change percentage
-    const change = quoteData.c && quoteData.pc ? ((quoteData.c - quoteData.pc) / quoteData.pc) * 100 : 0;
-
-    res.json({
-      symbol,
-      price: quoteData.c || 0,
-      change: change,
-      previousClose: quoteData.pc || 0,
-      high: quoteData.h || 0,
-      low: quoteData.l || 0
-    });
-  } catch (error) {
-    console.error('Error fetching stock quote:', error);
-    res.status(500).json({ error: 'Failed to fetch stock quote', details: error.message });
-  }
-});
-
-// API endpoint to fetch stock quotes from Finnhub
-app.get('/api/stocks', async (req, res) => {
-  try {
-    // All stocks from all presets (AI & Chips, Robotics, Defense, Energy & Power)
-    const stockSymbols = [
-      // AI & Chips
-      'NVDA', 'AMD', 'AVGO', 'TSM', 'INTC', 'QCOM', 'MU', 'SNOW', 'SMCI', 'GOOGL', 'PLTR', 'CLS',
-      // Robotics
-      'SYM', 'KYCCF', 'ISRG', 'ZBRA', 'PATH', 'EMR', 'TRMB', 'OMCL', 'LECO', 'ABB',
-      // Defense
-      'LMT', 'RTX', 'NOC', 'GD', 'HWM', 'AXON', 'HII', 'KTOS', 'AVAV',
-      // Energy & Power
-      'NEE', 'GEV', '300274.SZ', 'FSLR', 'BE', 'ADANIGREEN.NS', 'BEP', 'VWS.CO', '916.HK', 'EDPR.LS', 'CVX', 'XOM', 'BP', 'SLRP', 'SLDP'
-    ];
-    const API_KEY = process.env.FINNHUB_API_KEY;
-
-    if (!API_KEY) {
-      return res.status(500).json({ error: 'Finnhub API key not configured' });
-    }
-
-    const stockPromises = stockSymbols.map(async (symbol) => {
-      try {
-        // Fetch current quote
-        const quoteResponse = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${API_KEY}`);
-        const quoteData = await quoteResponse.json();
-
-        // Calculate 24h change percentage
-        const change = quoteData.c && quoteData.pc ? ((quoteData.c - quoteData.pc) / quoteData.pc) * 100 : 0;
-
-        return {
-          symbol,
-          price: quoteData.c || 0,
-          change: change,
-          previousClose: quoteData.pc || 0,
-          high: quoteData.h || 0,
-          low: quoteData.l || 0,
-          volume: 0 // Finnhub free tier doesn't provide volume in quote endpoint
-        };
-      } catch (err) {
-        console.error(`Error fetching ${symbol}:`, err);
-        return {
-          symbol,
-          price: 0,
-          change: 0,
-          previousClose: 0,
-          high: 0,
-          low: 0,
-          volume: 0
-        };
-      }
-    });
-
-    const stocks = await Promise.all(stockPromises);
-    res.json({ stocks });
-  } catch (error) {
-    console.error('Error fetching stock data:', error);
-    res.status(500).json({ error: 'Failed to fetch stock data', details: error.message });
-  }
-});
-
-// API endpoint to fetch AI ETFs from Finnhub
-app.get('/api/etfs', async (req, res) => {
-  try {
-    // Top AI-focused ETFs
-    const etfSymbols = [
-      'BOTZ',  // Global X Robotics & AI ETF
-      'ROBT',  // First Trust Nasdaq AI & Robotics ETF
-      'IRBO',  // iShares Robotics and AI Multisector ETF
-      'ARKQ',  // ARK Autonomous Tech & Robotics ETF
-      'THNQ',  // ROBO Global AI ETF
-      'AIQ',   // Global X AI & Technology ETF
-      'WTAI',  // WisdomTree AI Enhanced Value Fund
-      'AIEQ',  // AI Powered Equity ETF
-      'LRNZ',  // TrueShares Tech, AI & Deep Learning ETF
-      'BIGZ'   // Roundhill Generative AI & Technology ETF
-    ];
-
-    const API_KEY = process.env.FINNHUB_API_KEY;
-
-    if (!API_KEY) {
-      return res.status(500).json({ error: 'Finnhub API key not configured' });
-    }
-
-    const etfPromises = etfSymbols.map(async (symbol) => {
-      try {
-        const quoteResponse = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${API_KEY}`);
-        const quoteData = await quoteResponse.json();
-
-        const change = quoteData.c && quoteData.pc ? ((quoteData.c - quoteData.pc) / quoteData.pc) * 100 : 0;
-
-        return {
-          symbol,
-          price: quoteData.c || 0,
-          change: change,
-          previousClose: quoteData.pc || 0,
-          high: quoteData.h || 0,
-          low: quoteData.l || 0,
-          volume: 0
-        };
-      } catch (err) {
-        console.error(`Error fetching ${symbol}:`, err);
-        return {
-          symbol,
-          price: 0,
-          change: 0,
-          previousClose: 0,
-          high: 0,
-          low: 0,
-          volume: 0
-        };
-      }
-    });
-
-    const etfs = await Promise.all(etfPromises);
-    res.json({ etfs });
-  } catch (error) {
-    console.error('Error fetching ETF data:', error);
-    res.status(500).json({ error: 'Failed to fetch ETF data', details: error.message });
-  }
-});
-
-// API endpoint to fetch tweets
-app.get('/api/tweets', async (req, res) => {
-  try {
-    // First get the user ID for @rrsrch
-    const user = await twitterClient.v2.userByUsername('rrsrch');
-
-    if (!user.data) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // Then fetch their tweets (with full text, not truncated)
-    const tweets = await twitterClient.v2.userTimeline(user.data.id, {
-      max_results: 5,
-      'tweet.fields': ['created_at', 'public_metrics', 'text'],
-      expansions: ['author_id', 'referenced_tweets.id'],
-      'user.fields': ['username', 'name'],
-      exclude: 'retweets'
-    });
-
-    const formattedTweets = tweets.data.data.map(tweet => ({
-      id: tweet.id,
-      text: tweet.text, // Twitter API v2 returns full text by default
-      created_at: tweet.created_at,
-      metrics: tweet.public_metrics
-    }));
-
-    res.json({ tweets: formattedTweets });
-  } catch (error) {
-    console.error('Error fetching tweets:', error);
-    res.status(500).json({ error: 'Failed to fetch tweets', details: error.message });
-  }
-});
-
-// Get all posts
-app.get('/api/posts', async (req, res) => {
-  try {
-    const posts = await readPosts();
-    res.json({ posts: posts.sort((a, b) => new Date(b.date) - new Date(a.date)) });
-  } catch (error) {
-    console.error('Error reading posts:', error);
-    res.status(500).json({ error: 'Failed to fetch posts' });
-  }
-});
-
-// Create a new post (requires API key)
-app.post('/api/posts', async (req, res) => {
-  const apiKey = req.headers['x-api-key'];
-
-  if (!apiKey || apiKey !== process.env.API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  const { title, excerpt, content, topic } = req.body;
-
-  if (!title) {
-    return res.status(400).json({ error: 'Title is required' });
-  }
-
-  try {
-    const posts = await readPosts();
-
-    const newPost = {
-      id: Date.now().toString(),
-      title,
-      excerpt: excerpt || '', // Make excerpt optional for tweets/updates
-      content: content || '',
-      topic: topic || 'All',
-      date: new Date().toISOString()
-    };
-
-    posts.push(newPost);
-    await writePosts(posts);
-
-    res.json({ success: true, post: newPost });
-  } catch (error) {
-    console.error('Error creating post:', error);
-    res.status(500).json({ error: 'Failed to create post' });
-  }
-});
-
-// Delete a post (requires API key)
-app.delete('/api/posts/:id', async (req, res) => {
-  const apiKey = req.headers['x-api-key'];
-
-  if (!apiKey || apiKey !== process.env.API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  try {
-    const posts = await readPosts();
-    const filteredPosts = posts.filter(p => p.id !== req.params.id);
-
-    if (posts.length === filteredPosts.length) {
-      return res.status(404).json({ error: 'Post not found' });
-    }
-
-    await writePosts(filteredPosts);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting post:', error);
-    res.status(500).json({ error: 'Failed to delete post' });
-  }
-});
-
-// Google OAuth routes
-// Get current user
-app.get('/api/auth/user', (req, res) => {
-  if (req.isAuthenticated()) {
-    res.json({ user: req.user });
-  } else {
-    res.status(401).json({ error: 'Not authenticated' });
-  }
-});
-
-// Logout
-app.get('/api/auth/logout', (req, res) => {
-  req.logout((err) => {
-    if (err) {
-      return res.status(500).json({ error: 'Logout failed' });
-    }
-    res.json({ success: true });
-  });
-});
-
 // --- Account auth (email + password, v0) ------------------------------------
 // Serverless-safe by design: no sessions (stateless HMAC tokens verified per
-// request) and users persisted in Vercel Blob like posts are. Blob objects are
+// request) and users persisted in Vercel Blob. Blob objects are
 // public-by-URL, so the user store lives at an UNGUESSABLE pathname derived
 // from AUTH_SECRET (capability URL) and holds bcrypt hashes only — never
 // plaintext. v0 tradeoffs, documented: no rate limiting, last-write-wins on
@@ -1954,6 +576,12 @@ app.get('/api/auth/logout', (req, res) => {
 // moves the users blob key (migrate the blob if you rotate).
 const crypto = require('crypto');
 
+// Production never runs on a default: SESSION_SECRET signs every token, so a missing one stops the server here. Local
+// runs and tests get a fixed development value (the same one as before, so a local users store keeps its path).
+const IS_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+if (!process.env.SESSION_SECRET && IS_PRODUCTION) {
+  throw new Error('SESSION_SECRET is not set: refusing to start in production without it');
+}
 const AUTH_SECRET = process.env.SESSION_SECRET || 'rrsrch-secret-key-2025';
 // Versioned writes, never overwrites: blob overwrites of the SAME pathname are
 // CDN-cached (stale reads for up to ~a minute — verified live), which is fatal
@@ -2166,7 +794,8 @@ async function requireUser(req, res, { upgrading = false } = {}) {
 const KV_URL = (process.env.KV_REST_API_URL || '').replace(/\/$/, '');
 const KV_TOKEN = process.env.KV_REST_API_TOKEN || '';
 const LIMITS = {
-  login_account: { max: 5, seconds: 15 * 60, what: 'failed sign-ins for this account' },
+  // per account AND network: failures from one place slow that place down, never the account's owner elsewhere
+  login_account: { max: 5, seconds: 15 * 60, what: 'failed sign-ins for this account from your network' },
   login_ip: { max: 20, seconds: 15 * 60, what: 'failed sign-ins from your network' },
   signup_ip: { max: 5, seconds: 60 * 60, what: 'sign-ups from your network' },
   google_ip: { max: 30, seconds: 15 * 60, what: 'Google sign-ins from your network' },
@@ -2175,6 +804,7 @@ const LIMITS = {
   reset_ip: { max: 10, seconds: 60 * 60, what: 'password reset requests from your network' },
   reset_send: { max: 3, seconds: 60 * 60, what: 'password reset emails for this address' },
   reset_try: { max: 10, seconds: 15 * 60, what: 'password reset attempts' },
+  device_ip: { max: 10, seconds: 15 * 60, what: 'device pairings started from your network' },
 };
 
 async function kv(commands) {
@@ -2262,6 +892,9 @@ async function sendVerification(user) {
 // (rrsrch-react/src/passwordRules.js); keep the two in step.
 const PASSWORD_MIN = 14;
 const PASSWORD_MAX_BYTES = 72;            // bcrypt ignores everything after 72 bytes
+// bcrypt cost for new hashes. A sign-in with an older, cheaper hash rehashes the password at this cost.
+const BCRYPT_COST = 12;
+const hashPassword = (password) => bcrypt.hash(String(password), BCRYPT_COST);
 const COMMON_PASSWORDS = new Set([
   'password', 'passw0rd', 'password1', 'password123', 'p@ssw0rd', 'qwerty', 'qwertyuiop', 'qwerty123',
   'letmein', 'welcome', 'welcome1', 'iloveyou', 'admin', 'administrator', 'monkey', 'dragon', 'football',
@@ -2345,7 +978,7 @@ app.post('/api/account/signup', async (req, res) => {
       id: crypto.randomUUID(),
       name: String(name || '').trim().slice(0, 80) || cleanEmail.split('@')[0],
       email: cleanEmail,
-      password_hash: await bcrypt.hash(String(password), 10),
+      password_hash: await hashPassword(password),
       email_verified: false,
       created_at: new Date().toISOString(),
     };
@@ -2364,8 +997,9 @@ app.post('/api/account/login', async (req, res) => {
   try {
     const cleanEmail = String((req.body || {}).email || '').trim().toLowerCase();
     const ip = clientIp(req);
-    // refuse before checking the password, so a locked account can't be probed further
-    for (const [kind, who] of [['login_account', cleanEmail], ['login_ip', ip]]) {
+    const accountHere = `${cleanEmail}|${ip}`;
+    // refuse before checking the password, so a locked account can't be probed further from this network
+    for (const [kind, who] of [['login_account', accountHere], ['login_ip', ip]]) {
       const wait = await limited(kind, who);
       if (wait) return tooMany(res, kind, wait);
     }
@@ -2376,17 +1010,22 @@ app.post('/api/account/login', async (req, res) => {
     const ok = user && await bcrypt.compare(String((req.body || {}).password || ''),
                                             user.password_hash);
     if (!ok) {
-      await Promise.all([count('login_account', cleanEmail), count('login_ip', ip)]);
+      await Promise.all([count('login_account', accountHere), count('login_ip', ip)]);
       return res.status(401).json({ error: 'Wrong email or password.' });
     }
-    await clearCount('login_account', cleanEmail);
+    await clearCount('login_account', accountHere);
     // an account whose password doesn't meet today's rules signs in, but must set a new one before anything else
     const weak = (await currentPasswordProblems(String((req.body || {}).password || ''), { name: user.name, email: user.email }))
       .length > 0;
-    if (weak !== !!user.password_upgrade_required) {
+    // a hash made at a lower cost than today's is replaced while the password is at hand
+    const rehash = bcrypt.getRounds(user.password_hash) < BCRYPT_COST;
+    if (weak !== !!user.password_upgrade_required || rehash) {
       const users = await readUsers();
       const fresh = users.find((u) => u.id === user.id);
       if (weak) fresh.password_upgrade_required = true; else delete fresh.password_upgrade_required;
+      if (rehash && fresh.password_hash === user.password_hash) {
+        fresh.password_hash = await hashPassword((req.body || {}).password || '');
+      }
       await writeUsers(users);
       user.password_upgrade_required = weak;
     }
@@ -2583,14 +1222,14 @@ app.post('/api/account/password/reset', async (req, res) => {
     }
     const problems = await currentPasswordProblems(String(password || ''), { name: user.name, email: user.email });
     if (problems.length) return res.status(400).json({ error: `Password ${problems.join('; ')}.`, problems });
-    user.password_hash = await bcrypt.hash(String(password), 10);
+    user.password_hash = await hashPassword(password);
     user.tokens_after = Date.now();
     user.email_verified = true;                        // the link went to this address
     delete user.reset_token_hash;
     delete user.reset_expires;
     delete user.password_upgrade_required;
     await writeUsers(users);
-    await clearCount('login_account', user.email);
+    await clearCount('login_account', `${user.email}|${ip}`);
     res.json({ ok: true, token: tokenFor(user), user: publicUser(user) });
   } catch (err) {
     console.error('password reset failed:', err);
@@ -2633,7 +1272,7 @@ app.post('/api/account/password', async (req, res) => {
     if (problems.length) return res.status(400).json({ error: `Password ${problems.join('; ')}.`, problems });
     const users = await readUsers();
     const user = users.find((u) => u.id === me.id);
-    user.password_hash = await bcrypt.hash(String(next), 10);
+    user.password_hash = await hashPassword(next);
     user.tokens_after = Date.now();
     delete user.password_upgrade_required;
     await writeUsers(users);
@@ -2692,13 +1331,36 @@ app.post('/api/account/projects', async (req, res) => {
   res.json({ projects: clean, active_project_id: u.active_project_id });
 });
 
-// self-delete (also how probe/test accounts get cleaned up)
+// self-delete (also how probe/test accounts get cleaned up). A token alone isn't enough: the person proves it again
+// with the current password, or, for an account that signs in only with Google, a Google sign-in made just now (the
+// ID token the button returns, for this account's Google user). Wrong passwords count toward the password lockout.
 app.delete('/api/account/me', async (req, res) => {
   const user = await requireUser(req, res, { upgrading: true });
   if (!user) return;
-  const users = (await readUsers()).filter((u) => u.id !== user.id);
-  await writeUsers(users);
-  res.json({ deleted: true });
+  const { password, credential } = req.body || {};
+  try {
+    if (user.password_hash) {
+      const wait = await limited('password_change', user.id);
+      if (wait) return tooMany(res, 'password_change', wait);
+      if (!(await bcrypt.compare(String(password || ''), user.password_hash))) {
+        await count('password_change', user.id);
+        return res.status(401).json({ error: 'Enter your current password to delete the account.',
+                                      reason: 'password_required' });
+      }
+    } else {
+      const t = user.google_sub && await verifyGoogleIdToken(String(credential || ''));
+      if (!t || t.sub !== user.google_sub || !(Number(t.iat) * 1000 > Date.now() - 10 * 60 * 1000)) {
+        return res.status(401).json({ error: 'Sign in with Google again to delete the account.',
+                                      reason: 'google_required' });
+      }
+    }
+    const users = (await readUsers()).filter((u) => u.id !== user.id);
+    await writeUsers(users);
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('account delete failed:', err);
+    res.status(500).json({ error: 'Could not delete the account.' });
+  }
 });
 
 // --- Device pairing (the Claude Code-style login for local MCP instances) ----
@@ -2756,6 +1418,10 @@ const deviceTokenFor = (u, deviceId) =>
   signToken({ sub: u.id, dev: deviceId, exp: Date.now() + 365 * 24 * 3600 * 1000 });
 
 app.post('/api/device/start', async (req, res) => {
+  const ip = clientIp(req);
+  const wait = await limited('device_ip', ip);
+  if (wait) return tooMany(res, 'device_ip', wait);
+  await count('device_ip', ip);
   try {
     const pairing = {
       user_code: userCode(),
@@ -2841,42 +1507,11 @@ app.delete('/api/device/:id', async (req, res) => {
   res.json({ revoked: true });
 });
 
-// Admin authentication endpoint
-app.post('/api/auth/admin', async (req, res) => {
-  const { password } = req.body;
-
-  if (!password) {
-    return res.status(400).json({ error: 'Password required' });
-  }
-
-  try {
-    // You can generate a new hash by running: node -e "const bcrypt = require('bcrypt'); bcrypt.hash('yourpassword', 10).then(console.log)"
-    const passwordHash = process.env.ADMIN_PASSWORD_HASH;
-
-    if (!passwordHash) {
-      return res.status(500).json({ error: 'Admin password not configured' });
-    }
-
-    const isValid = await bcrypt.compare(password, passwordHash);
-
-    if (isValid) {
-      res.json({ success: true, isAdmin: true });
-    } else {
-      res.status(401).json({ error: 'Invalid password' });
-    }
-  } catch (err) {
-    console.error('Error verifying admin password:', err);
-    res.status(500).json({ error: 'Authentication failed' });
-  }
-});
-
 // Only start a long-running server when executed directly (local dev).
 // On Vercel the app is imported by api/index.js and invoked per-request.
 if (require.main === module) {
-  initPostsFile().then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
   });
 }
 

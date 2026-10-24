@@ -116,6 +116,29 @@ test('changing the password sends the current and new one and keeps the fresh to
   expect(localStorage.getItem('rrsrch_token')).toBe('tok.2');
 });
 
+test('deleting the account asks for the current password and sends it; a wrong one says so', async () => {
+  localStorage.setItem('rrsrch_token', 'tok.1');
+  const calls = mock({ 'DELETE /api/account/me': { ok: false, status: 401,
+    body: { error: 'Enter your current password to delete the account.' } }, '/api/account/config': { body: {} } });
+  const onSignedOut = jest.fn();
+  render(<AccountSignedIn user={USER} me={null} apiKey="tok.1" isMobile={false} onSignedOut={onSignedOut}
+    onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Sign-in & security' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+  expect(screen.getByRole('button', { name: 'Delete my account' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'not-it' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Delete my account' }));
+  expect(await screen.findByText('Enter your current password to delete the account.')).toBeInTheDocument();
+  const sent = calls.find((c) => c.url === '/api/account/me' && c.opts.method === 'DELETE');
+  expect(JSON.parse(sent.opts.body)).toEqual({ password: 'not-it' });
+  expect(sent.opts.headers.Authorization).toBe('Bearer tok.1');
+  expect(onSignedOut).not.toHaveBeenCalled();
+
+  mock({ 'DELETE /api/account/me': { body: { deleted: true } }, '/api/account/config': { body: {} } });
+  fireEvent.click(screen.getByRole('button', { name: 'Delete my account' }));
+  await waitFor(() => expect(onSignedOut).toHaveBeenCalled());
+});
+
 test('Google-only accounts have no password row; Disconnect forgets the agent key', async () => {
   localStorage.setItem('rrsrch_token', 'tok.1');
   localStorage.setItem('rrsrch_engine_key', 'rrsrch_k');
