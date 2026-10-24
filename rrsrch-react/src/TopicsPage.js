@@ -120,7 +120,7 @@ function TopicIndex({ tree, isMobile }) {
       <header style={{ display: 'grid', gap: 6, paddingBottom: 16, borderBottom: '1px solid #222' }}>
         <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 22 : 26, fontWeight: 700, letterSpacing: '-0.02em' }}>Topics</h1>
         <span style={{ fontSize: 13.5, color: '#888', lineHeight: 1.5 }}>Everything on RRSRCH, by topic. Each topic holds
-          sub-topics, collections of reviewed claims, and the questions and findings filed under it.</span>
+          sub-topics, collections of claims, and the questions and findings filed under it.</span>
       </header>
       <TopicCards items={tree.children(null)} tree={tree} />
       {apiKey && <AddTopic parent={null} apiKey={apiKey} />}

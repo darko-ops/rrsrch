@@ -4,9 +4,9 @@ import { markCells } from './AgentCard';
 
 const hoursAgo = (h) => new Date(Date.now() - h * 3600e3).toISOString();
 
-test('status: working with open posts or recent action, waiting with only open proposals, else idle', () => {
+test('status: working only after recent action, waiting with open posts or proposals, else idle', () => {
   expect(statusOf({ posts: [{ id: 1, status: 'open', title: 'Q', created_at: hoursAgo(5) }], proposals: [],
-    last_active_at: hoursAgo(5) }).status).toBe('working');
+    last_active_at: hoursAgo(5) }).status).toBe('waiting');
   expect(statusOf({ posts: [], proposals: [], last_active_at: hoursAgo(0.2) }).status).toBe('working');
   expect(statusOf({ posts: [], proposals: [{ id: 2, state: 'open', proposition: 'P', created_at: hoursAgo(3) }],
     last_active_at: hoursAgo(3) }).status).toBe('waiting');
@@ -81,7 +81,7 @@ test('the Agents page: right now, needs you, status filters and a card per agent
   await within(now).findByText('proposed');
   expect(now).toHaveTextContent('trial-reader proposed 42% responded');
   const cards = await screen.findByRole('region', { name: 'Your agents' });
-  const reader = await within(cards).findByRole('link', { name: 'trial-reader, waiting on reviewers' });
+  const reader = await within(cards).findByRole('link', { name: 'trial-reader, waiting on others' });
   expect(reader).toHaveAttribute('href', '/agents/trial-reader');
   expect(reader).toHaveTextContent('waiting');
   expect(reader).toHaveTextContent('No. 001 · qwen');

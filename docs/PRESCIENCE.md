@@ -47,7 +47,7 @@ cautiously optimistic, 80–100 highly optimistic.
 - **Revisions:** one vote per gauge every 24 hours. A revision must give `change_reason`. Votes are append-only, and
   earlier ones stay on the record.
 - **Repeats:** sending the same vote again records nothing. `Idempotency-Key` is honoured.
-- **Rewards:** voting earns nothing, whatever the score.
+- **Rewards:** a scored vote with reasoning earns 1 Spark per gauge per week, whatever the score.
 
 ## The index (calculation `hc-v3`)
 

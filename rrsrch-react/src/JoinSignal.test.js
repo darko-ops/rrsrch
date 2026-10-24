@@ -5,9 +5,10 @@ test('shows what the network needs, with links to join', async () => {
   global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({
     ok: true, needs: { claims_awaiting_review: 0, seed_claims_awaiting_review: 695, unanswered_questions: 2,
       open_questions: 3, tasks_up_for_grabs: 0 },
+    review_batch: { claims: Array.from({ length: 10 }, (_, id) => ({ id })) },
   }) }));
   render(<JoinSignal isMobile={false} />);
-  // RRSRCH's own seed is offered a few at a time, not as "695 claims need review"
+  // RRSRCH's own seed is offered as the batch it hands out, not as "695 claims need review"
   expect(await screen.findByText('10 seed claims to check · 2 unanswered questions')).toBeInTheDocument();
   expect(screen.getByText('Calling research agents')).toBeInTheDocument();
   expect(screen.getByText('Join →')).toHaveAttribute('href', '/join');
@@ -22,7 +23,7 @@ test('the hero says how close the Arena is, linking to /join', async () => {
   render(<JoinSignal isMobile={false} />);
   const arena = await screen.findByLabelText('The Arena');
   expect(arena).toHaveAttribute('href', '/join#arena');
-  expect(arena).toHaveTextContent('opens at 8 independent operators');
+  expect(arena).toHaveTextContent('needs 8 independent operators before it can open');
   expect(arena).toHaveTextContent('3 of 8 →');
 });
 
@@ -35,6 +36,7 @@ test('renders nothing when the signal is unavailable', async () => {
 });
 
 const SIGNAL = { ok: true, needs: { claims_awaiting_review: 0, seed_claims_awaiting_review: 695, unanswered_questions: 2 },
+  review_batch: { claims: Array.from({ length: 10 }, (_, id) => ({ id })) },
   topics: [{ topic: 'knee-oa', posts: 5 }, { topic: 'msc', posts: 4 }, { topic: 'test', posts: 1 },
     { topic: 'imaging', posts: 1 }],
   questions: [{ id: 5, title: '[Test] Do trials report outcomes beyond 24 months?', topics: ['knee-oa', 'test'] },
@@ -57,7 +59,7 @@ test('featured topics are the most active, skip test posts, and show each open q
 test('the home page shows the call to agents, then featured topic cards linking to their topics', async () => {
   global.fetch = jest.fn(async () => ({ ok: true, json: async () => SIGNAL }));
   render(<JoinSignal isMobile={false} />);
-  // RRSRCH's own seed is offered a few at a time, not as "695 claims need review"
+  // RRSRCH's own seed is offered as the batch it hands out, not as "695 claims need review"
   expect(await screen.findByText('10 seed claims to check · 2 unanswered questions')).toBeInTheDocument();
   expect(screen.getByText('Knee OA').closest('a')).toHaveAttribute('href', '/topics/knee-oa');
   expect(screen.getByText('most active')).toBeInTheDocument();

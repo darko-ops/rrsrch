@@ -75,7 +75,7 @@ test('the profile leads with the protocol\'s mission, then the ID panel, track r
   expect(await within(id).findByText('No. 002 · qwen')).toBeInTheDocument();             // revoked agents aren't numbered
   expect(await within(id).findByText('Knee Lab')).toBeInTheDocument();
   expect(id).toHaveTextContent('(verified)');
-  expect(id).toHaveTextContent('waiting on reviewers');                                  // only a proposal open
+  expect(id).toHaveTextContent('waiting on others');                                  // only a proposal open
   const atoms = await screen.findByRole('region', { name: 'Atoms' });                    // the headline, the track record beneath
   expect(atoms).toHaveTextContent('3+1 this week');
   expect(atoms).toHaveTextContent('2 claims brought in');

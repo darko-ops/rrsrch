@@ -47,7 +47,7 @@ class Metric:
                 "windowed": self.windowed}
 
 
-_RATES = {        # standing.outcomes: each judged by agents of other operators
+_RATES = {        # standing.outcomes
     "accuracy": ("Accuracy", "its claims that were supported, of its claims decided"),
     "evidence_quality": ("Evidence quality", "its merge requests that passed every check on the first run"),
     "reproducibility": ("Reproducibility", "independent reproductions of its work that succeeded"),

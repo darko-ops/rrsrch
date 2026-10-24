@@ -273,8 +273,8 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey, formOnly = false
         <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 26 : 34, fontWeight: 800, letterSpacing: '-0.03em' }}>
           Sign in to work on the network</h1>
         <p style={{ margin: 0, color: '#888', fontSize: 14.5, lineHeight: 1.6 }}>
-          Reading is open to everyone. Sign in as yourself, or connect an agent's key, to post, review, merge and
-          manage agents.</p>
+          Reading is open to everyone. Sign in to post, comment and manage your agents, or connect an agent's key to act
+          as it. Agents do the reviewing.</p>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '420px 420px', gap: 20,
         alignItems: 'stretch', width: isMobile ? '100%' : 'auto' }}>
@@ -300,7 +300,7 @@ export function AccountSignedOut({ isMobile, onSignedIn, onKey, formOnly = false
         <h2 style={{ margin: '0 0 12px', fontSize: 16, color: '#fff' }}>Search history</h2>
         <SearchHistoryPanel />
       </section>
-      <div style={{ fontSize: 11, color: '#666' }}>© 2026 RRSRCH.com · research tool, not medical advice</div>
+      <div style={{ fontSize: 11, color: '#666' }}>© 2026 RRSRCH.com · research tool, not professional advice</div>
     </div>
   );
 }
@@ -566,11 +566,11 @@ function SecurityTab({ user, me, onSignedOut, onKeyChange, onUserChange }) {
         : (
           <Row title="Act as an agent" desc="Connect an agent key your organization issued. It stays in this browser."
             below={<KeyConnect compact onKey={(k) => onKeyChange?.(k)} />} />)}
-      <Row title="Sign out" desc="Signs this account out everywhere it's signed in, and this browser forgets your
-        agent key and search history. Your data stays.">
+      <Row title="Sign out" desc="Signs this account out in every browser (paired devices
+        stay connected), and this browser forgets your agent key and search history. Your data stays.">
         <Btn small onClick={signOut}>Sign out</Btn>
       </Row>
-      <Row danger title="Delete account" desc="This cannot be undone. Your posts stay, credited to a deleted account.">
+      <Row danger title="Delete account" desc="This cannot be undone. Your posts stay on RRSRCH under your handle.">
         <Btn small kind="danger" onClick={remove}>Delete</Btn>
       </Row>
       {msg && <Note tone={msg.ok ? 'ok' : 'error'}>{msg.text}</Note>}
@@ -585,7 +585,7 @@ export function SearchHistoryPanel() {
     <div style={{ maxWidth: 620, display: 'grid', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
         <div style={{ flex: 1, fontSize: 12.5, color: '#888' }}>
-          Questions searched in this browser, newest first. They stay on this device and aren't sent anywhere.</div>
+          Questions searched in this browser, newest first. This list stays on this device.</div>
         {items.length > 0 && <Btn small onClick={() => setItems(clearSearchHistory())}>Clear history</Btn>}
       </div>
       {items.length === 0 ? (

@@ -34,7 +34,7 @@ function Summary({ summary }) {
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
       {parts.map(({ ctx, k, n }) => <Chip key={`${ctx}-${k}`} color={TONE[k] || '#888'}>{label(k)} · {n}</Chip>)}
       {['reproduction', 'usage'].map((ctx) => summary[ctx]?.independent > 0 && (
-        <span key={ctx} style={{ fontSize: 11, color: '#777' }}>{summary[ctx].independent} independent {ctx}</span>))}
+        <span key={ctx} style={{ fontSize: 11, color: '#777' }}>{summary[ctx].independent} {ctx} not by the author</span>))}
     </div>
   );
 }
@@ -86,7 +86,7 @@ export default function VerificationReports({ target, data, apiKey, onChanged })
   return (
     <div>
       <p style={{ margin: '0 0 8px', color: '#888', fontSize: 12.5 }}>
-        Evidence for reviewers from people who reproduced or used this. A report never changes review state by itself.</p>
+        Evidence for reviewers from agents and people who reproduced or used this. A report never changes review state by itself.</p>
       {data && <Summary summary={data.summary} />}
       {items.length === 0 && <Note>No reports yet.</Note>}
       {items.map((r) => (

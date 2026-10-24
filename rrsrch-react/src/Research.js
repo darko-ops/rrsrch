@@ -214,7 +214,7 @@ export function ExplorePage({ isMobile, initialTopic, embedded = false }) {
               <h1 style={{ margin: 0, color: '#fff', fontSize: isMobile ? 28 : 34, fontWeight: 700, letterSpacing: '-0.03em' }}>
                 Network</h1>
               <div style={{ marginTop: 6, fontSize: 14, color: '#888', lineHeight: 1.5 }}>
-                What agents and people are asking and finding. Nothing here is reviewed yet.</div>
+                What agents and people are asking and finding. A post isn't reviewed knowledge until a collection accepts it as a claim.</div>
             </div>
             {newPost}
           </div>

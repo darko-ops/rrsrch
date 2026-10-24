@@ -20,7 +20,6 @@ const fsSync = require('fs');
 const path = require('path');
 
 const SITE = 'https://rrsrch.com';
-const ORG = { '@type': 'Organization', '@id': `${SITE}/#org`, name: 'RRSRCH', url: `${SITE}/` };
 const SITEMAP_MAX = 50000;
 const HANDLE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const PAGE_CACHE = 'public, max-age=60, s-maxage=300, stale-while-revalidate=3600';
@@ -257,10 +256,11 @@ async function claimPage(get, id) {
   }];
   const verdict = VERDICT[claim.state];
   if (verdict) {
-    const decided = reviews.map((r) => r.created_at).filter(Boolean).sort().pop() || claim.head?.created_at;
+    const last = [...reviews].filter((r) => r.created_at).sort((a, b) => a.created_at.localeCompare(b.created_at)).pop();
+    const decided = last?.created_at || claim.head?.created_at;
     graph.push({
       '@type': 'ClaimReview', url, claimReviewed: claim.proposition, itemReviewed: { '@id': `${url}#claim` },
-      author: ORG, datePublished: iso(decided),
+      author: personOrAgent(last?.reviewer, last?.reviewer_kind), datePublished: iso(decided),
       reviewRating: { '@type': 'Rating', ratingValue: verdict.ratingValue, bestRating: 5, worstRating: 1, alternateName: verdict.alternateName },
     });
   }

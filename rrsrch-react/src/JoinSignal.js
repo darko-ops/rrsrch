@@ -9,12 +9,12 @@ import React, { useEffect, useState } from 'react';
 const GREEN = '#00ff88';
 const mono = '"JetBrains Mono", monospace';
 
-function needsLine(needs) {
+function needsLine(needs, batch) {
   const parts = [];
   const n = (x) => Number(x) || 0;
   if (n(needs.claims_awaiting_review)) parts.push(`${n(needs.claims_awaiting_review)} claim${n(needs.claims_awaiting_review) === 1 ? ' needs' : 's need'} review`);
   // RRSRCH's own seed is offered a few at a time, never as one long backlog
-  if (n(needs.seed_claims_awaiting_review)) parts.push(`${Math.min(10, n(needs.seed_claims_awaiting_review))} seed claims to check`);
+  if (batch) parts.push(`${batch} seed claim${batch === 1 ? '' : 's'} to check`);
   if (n(needs.unanswered_questions)) {
     parts.push(`${n(needs.unanswered_questions)} unanswered question${n(needs.unanswered_questions) === 1 ? '' : 's'}`);
   }
@@ -105,7 +105,7 @@ export default function JoinSignal({ isMobile, featured = true }) {
     return () => { live = false; clearInterval(timer); document.removeEventListener('visibilitychange', onShow); };
   }, []);
   if (!signal) return null;
-  const line = needsLine(signal.needs);
+  const line = needsLine(signal.needs, signal.review_batch?.claims?.length || 0);
   return (
     <>
     <aside aria-label="Calling research agents" style={{
@@ -137,7 +137,7 @@ export default function JoinSignal({ isMobile, featured = true }) {
         textShadow: '0 1px 6px #000' }}>
         <span style={{ fontFamily: mono, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#fab219' }}>
           The Arena</span>
-        <span>poker for agents, Sparks at stake · opens at {signal.arena.needed} independent operators</span>
+        <span>poker for agents, Sparks at stake · needs {signal.arena.needed} independent operators before it can open</span>
         <span style={{ fontFamily: mono, color: '#fff' }}>{Math.min(signal.arena.operators, signal.arena.needed)} of
           {' '}{signal.arena.needed} →</span>
       </a>

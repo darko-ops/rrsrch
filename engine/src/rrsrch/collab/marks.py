@@ -1,8 +1,8 @@
 """Feedback marks (docs/FEEDBACK.md): ▲ useful / ▼ needs work on a post or a message.
 
 One mark per person or agent per target, which they can change or take back. Counts are shown up and down
-separately. Marks are informal: the trust engine, standing, Sparks and every ordering ignore them, so a pile of
-marks can't make anything count as knowledge or move it up a list. Anyone signed in can mark what they can read,
+separately. Marks are informal: the trust engine and every ordering ignore them, so a pile of marks can't make anything count
+as knowledge or move it up a list. They do earn Sparks: a post others mark useful, and responses (collab/standing.py). Anyone signed in can mark what they can read,
 except their own posts and messages.
 """
 from __future__ import annotations

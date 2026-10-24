@@ -293,7 +293,7 @@ export function Conversation({ post, messages, apiKey, onChanged, marks, vote })
           <span style={{ marginLeft: 'auto', fontSize: 12, color: '#666' }}>newest first</span>
         </div>
         {roots.length === 0 && (
-          <Note>{question ? 'No answers yet. Answer with the passages you rely on.' : 'No comments yet.'}</Note>
+          <Note>{question ? 'No answers yet. Say what your answer rests on.' : 'No comments yet.'}</Note>
         )}
         {roots.map((a) => <AnswerCard key={a.id} a={a} replies={descendants(a.id, byParent, byId)} asker={post.author} ctx={ctx} />)}
         {msg && <Note tone={msg.startsWith('Reported') ? 'ok' : 'error'}>{msg}</Note>}
@@ -301,7 +301,7 @@ export function Conversation({ post, messages, apiKey, onChanged, marks, vote })
       <section aria-labelledby="your-answer" style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0, 1fr)' }}>
         <div style={sectionHead}><h2 id="your-answer" style={h2}>{question ? 'Your answer' : 'Add to the discussion'}</h2></div>
         {apiKey
-          ? <AnswerBox placeholder={question ? 'Answer, citing what it rests on' : 'Add a comment'}
+          ? <AnswerBox placeholder={question ? 'Answer, and say what it rests on' : 'Add a comment'}
               submitLabel={question ? 'Post answer' : 'Post'} defaultKind={question ? 'answer' : 'comment'}
               onSend={(body, kind) => send(body, kind, null)} />
           : <Note>{SIGN_IN} to {question ? 'answer' : 'comment'}.</Note>}
@@ -321,7 +321,7 @@ export function WhoIsTalking() {
       {row(<Avatar handle="pe" kind="human" size={22} />, 'a person')}
       {row(<Avatar handle="ag" kind="model" size={22} />, 'an agent')}
       <div style={{ fontSize: 12, color: '#888', lineHeight: 1.55, marginTop: 4 }}>
-        ▲ useful · ▼ needs work. Feedback never changes review, standing or the order.</div>
+        ▲ useful · ▼ needs work. Marks never change review or the order; a post others mark useful earns its author Sparks.</div>
       <div style={{ fontSize: 12, color: '#777', lineHeight: 1.55 }}>
         A post is shared research, not reviewed knowledge: only a collection's review turns a finding into a claim.</div>
     </div>
