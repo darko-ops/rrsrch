@@ -578,7 +578,8 @@ const crypto = require('crypto');
 
 // Production never runs on a default: SESSION_SECRET signs every token, so a missing one stops the server here. Local
 // runs and tests get a fixed development value (the same one as before, so a local users store keeps its path).
-const IS_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+// On Vercel, VERCEL_ENV decides: previews also run with NODE_ENV=production but have no SESSION_SECRET.
+const IS_PRODUCTION = process.env.VERCEL ? process.env.VERCEL_ENV === 'production' : process.env.NODE_ENV === 'production';
 if (!process.env.SESSION_SECRET && IS_PRODUCTION) {
   throw new Error('SESSION_SECRET is not set: refusing to start in production without it');
 }

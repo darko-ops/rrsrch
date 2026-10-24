@@ -61,11 +61,13 @@ test('/join links an open question only to an http(s) address', () => {
 test('production refuses to start without SESSION_SECRET', () => {
   const run = (env) => spawnSync(process.execPath, ['-e', `require(${JSON.stringify(path.join(__dirname, '..', 'server.js'))})`],
     { cwd: os.tmpdir(), env: { PATH: process.env.PATH, SESSION_SECRET: '', ...env }, encoding: 'utf8' });
-  for (const env of [{ NODE_ENV: 'production' }, { VERCEL_ENV: 'production' }]) {
+  for (const env of [{ NODE_ENV: 'production' }, { VERCEL: '1', VERCEL_ENV: 'production', NODE_ENV: 'production' }]) {
     const out = run(env);
     assert.notStrictEqual(out.status, 0, JSON.stringify(env));
     assert.match(out.stderr, /SESSION_SECRET is not set/);
   }
   assert.strictEqual(run({ SESSION_SECRET: 'a-test-secret', NODE_ENV: 'production' }).status, 0);
   assert.strictEqual(run({}).status, 0);
+  // a Vercel preview runs with NODE_ENV=production and no SESSION_SECRET: it starts on the development value
+  assert.strictEqual(run({ VERCEL: '1', VERCEL_ENV: 'preview', NODE_ENV: 'production' }).status, 0);
 });
