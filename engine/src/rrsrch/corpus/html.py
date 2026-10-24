@@ -7,14 +7,25 @@ Blocks (paragraphs, headings, list items, table rows, ...) each become one line 
 in document order. A table row's cells are joined with " | ", because figures like capex and revenue live in
 tables. Scripts, styles, navigation and inline XBRL's hidden header are left out. Whitespace inside a block is
 collapsed to single spaces.
+
+A document is untrusted input, and the standard library's parser can be made to take far longer than its size
+suggests, so documents agents bring are converted in a child process with a time limit and a memory cap
+(to_text_isolated), as PDFs are.
 """
 from __future__ import annotations
 
+import json
+import os
 import re
+import subprocess
+import sys
 from html import unescape
 from html.parser import HTMLParser
 
 VERSION = "html-v1"
+TIMEOUT = 5.0                           # seconds, plus TIMEOUT_PER_MB for each MB of input
+TIMEOUT_PER_MB = 2.0                    # ordinary HTML converts at several MB a second
+MEMORY = 2 * 1024 ** 3                  # bytes of address space for the child (where the OS supports the limit)
 
 _BLOCK = {"p", "div", "section", "article", "header", "main", "aside", "blockquote", "pre", "li", "dt", "dd",
           "h1", "h2", "h3", "h4", "h5", "h6", "tr", "caption", "figcaption", "address", "table", "ul", "ol", "dl",
@@ -109,6 +120,36 @@ def to_text(html: str) -> tuple[str, str]:
     return title, "\n\n".join(p.blocks)
 
 
+class HTMLRefused(Exception):
+    """The HTML can't be converted in the time or memory allowed; the message says why."""
+
+
+def time_limit(size: int) -> float:
+    """Seconds allowed to convert `size` characters of HTML."""
+    return TIMEOUT + TIMEOUT_PER_MB * size / (1024 * 1024)
+
+
+def to_text_isolated(html: str) -> tuple[str, str]:
+    """to_text in a child process with a time limit and a memory cap, the same output. Raises HTMLRefused."""
+    limit = time_limit(len(html))
+    try:
+        done = subprocess.run([sys.executable, "-m", "rrsrch.corpus.html"], input=html.encode("utf-8", "surrogatepass"),
+                              capture_output=True, timeout=limit,
+                              env={"PYTHONPATH": os.pathsep.join(p for p in sys.path if p),
+                                   "PATH": os.environ.get("PATH", "")})
+    except subprocess.TimeoutExpired as e:
+        raise HTMLRefused(f"converting the document took longer than {limit:.0f} seconds") from e
+    try:
+        out = json.loads(done.stdout or b"{}")
+    except ValueError:
+        out = {}
+    if "error" in out:
+        raise HTMLRefused(out["error"])
+    if done.returncode != 0 or "body" not in out:
+        raise HTMLRefused("the document couldn't be converted")
+    return out["title"], out["body"]
+
+
 def plain(text: str) -> str:
     """Plain text with line endings normalised and trailing spaces trimmed; paragraphs kept."""
     lines = [ln.rstrip() for ln in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
@@ -124,3 +165,21 @@ def decode(body: bytes, charset: str | None) -> str:
             except (LookupError, UnicodeDecodeError):
                 continue
     return body.decode("utf-8", errors="replace")
+
+
+def _main() -> int:
+    from .pdf import _limit_memory
+    _limit_memory(MEMORY)                               # set in the child itself, as for PDFs
+    html = sys.stdin.buffer.read().decode("utf-8", "surrogatepass")
+    try:
+        title, body = to_text(html)
+        sys.stdout.write(json.dumps({"title": title, "body": body}))
+    except MemoryError:
+        sys.stdout.write(json.dumps({"error": "converting the document needed too much memory"}))
+    except Exception as e:  # noqa: BLE001
+        sys.stdout.write(json.dumps({"error": f"the document couldn't be converted ({type(e).__name__})"}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

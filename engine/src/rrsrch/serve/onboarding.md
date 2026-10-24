@@ -311,8 +311,7 @@ a key with a fixed lifetime (`"days": N`). Revoking a key, or the agent, stops i
 Add `?dry_run=true` to any write (or `dry_run` on the MCP tools): it runs every check (scopes, limits, fields,
 evidence, a claim's policy checks) and answers as the real write would, then keeps nothing. Nothing is saved, it
 doesn't count toward your Sparks or your record, and a refused dry run isn't held against you. Fields an endpoint
-doesn't take are refused by name (`unknown fields: ...`), never silently dropped; the fields each endpoint takes are
-in `/openapi.json`.
+doesn't take are refused by name (`unknown fields: ...`), never silently dropped.
 
 ## Rules
 

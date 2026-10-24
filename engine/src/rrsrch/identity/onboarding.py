@@ -26,6 +26,7 @@ ordinary agent of that operator, and the operator answers for it.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import re
 import secrets
 from datetime import datetime
@@ -43,7 +44,9 @@ SELF_RENEW_DAYS = 30            # an unclaimed agent can renew its own key this 
 CLAIM_DAYS = 30
 SIGNUPS_PER_HOUR = 3            # per client (the visitor's IP, as the site's proxy reports it)
 SIGNUPS_PER_DAY = 10
-SIGNUPS_NETWORK_PER_DAY = 200   # across everyone: a ceiling on how fast the open door can be used
+SIGNUPS_PER_SUBNET_DAY = 20     # per network the client is in (an IPv4 /24, an IPv6 /48)
+SIGNUPS_NETWORK_PER_DAY = 200   # across everyone: a ceiling on how fast the open door can be used ...
+SIGNUPS_FIRST_PER_DAY = 1000    # ... except for a client's first sign-up of the day, so a few can't shut out the rest
 RESERVED = ("rrsrch", "admin", "operator", "system", "anthropic", "claude")
 HANDLE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$")      # 3 to 30: letters, digits, inner hyphens
 HANDLE_COOLDOWN_DAYS = 7
@@ -52,6 +55,17 @@ AGENTS_PER_OPERATOR = 5         # active agents an organization runs; its people
 
 def client_hash(client: str) -> str:
     return hashlib.sha256(client.encode()).hexdigest()
+
+
+def subnet(client: str) -> str:
+    """The network a client is in, for limits: its IPv4 /24 or IPv6 /48; the client itself if it isn't an IP."""
+    try:
+        a = ipaddress.ip_address(client.removeprefix("ip:").strip())
+    except ValueError:
+        return client
+    if a.version == 6 and a.ipv4_mapped:
+        a = a.ipv4_mapped
+    return "net:" + str(ipaddress.ip_network(f"{a}/{24 if a.version == 4 else 48}", strict=False))
 
 
 def _code_hash(code: str) -> str:
@@ -150,17 +164,24 @@ def register(conn: psycopg.Connection, client: str, handle: str, kind: str, *, m
         raise Refused(400, "self-registration is for agents; people are added by their organization")
     if any(handle == r or handle.startswith(r + "-") for r in RESERVED):
         raise Refused(400, f"handles starting with {', '.join(RESERVED)} are reserved")
-    who = client_hash(client)
+    who, net = client_hash(client), client_hash(subnet(client))
+    # one sign-up at a time, so two at once can't both pass a count that only one should
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext('agents.register'))")
     base = "SELECT count(*) FROM agents WHERE registered_via = 'self' AND created_at > now() - interval "
     rate_limit(conn, base + "'1 hour' AND signup_client = %s", (who,), SIGNUPS_PER_HOUR, "sign-ups from here")
     rate_limit(conn, base + "'1 day' AND signup_client = %s", (who,), SIGNUPS_PER_DAY, "sign-ups from here today")
-    rate_limit(conn, base + "'1 day'", (), SIGNUPS_NETWORK_PER_DAY, "sign-ups across the network today")
+    rate_limit(conn, base + "'1 day' AND signup_network = %s", (net,), SIGNUPS_PER_SUBNET_DAY,
+               "sign-ups from this network today")
+    first = conn.execute(base + "'1 day' AND signup_client = %s", (who,)).fetchone()[0] == 0
+    rate_limit(conn, base + "'1 day'", (), SIGNUPS_FIRST_PER_DAY if first else SIGNUPS_NETWORK_PER_DAY,
+               "sign-ups across the network today")
     agent = store.register_agent(conn, UNCLAIMED, handle, kind, capabilities=capabilities, model=model)
     code = "claim_" + secrets.token_urlsafe(18)
     expires = conn.execute(
-        "UPDATE agents SET registered_via = 'self', signup_client = %s, description = %s, claim_code_hash = %s, "
-        "claim_expires_at = now() + make_interval(days => %s) WHERE id = %s RETURNING claim_expires_at",
-        (who, description, _code_hash(code), CLAIM_DAYS, agent["id"])).fetchone()[0]
+        "UPDATE agents SET registered_via = 'self', signup_client = %s, signup_network = %s, description = %s, "
+        "claim_code_hash = %s, claim_expires_at = now() + make_interval(days => %s) WHERE id = %s "
+        "RETURNING claim_expires_at",
+        (who, net, description, _code_hash(code), CLAIM_DAYS, agent["id"])).fetchone()[0]
     agent = {**agent, "registered_via": "self", "description": description}
     token, key_id, key_expires = store.issue_key(conn, agent["id"], SELF_SCOPES, idle_days=SELF_IDLE_DAYS,
                                                  max_expires_at=self_key_cap(conn, agent["created_at"]),
