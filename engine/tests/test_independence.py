@@ -8,6 +8,7 @@ from test_economy import reply, seed
 from test_knowledge_api import claim_of, merged_claim
 from test_mcp import call, server_for
 from test_prescience import agent
+from test_site_people import SECRET, person
 from test_trust_db import QUOTE, SHA, TEXT, content
 from test_trust_db import world  # noqa: F401  (world is a fixture)
 
@@ -18,11 +19,6 @@ from rrsrch.trust.policy import Policy
 pytestmark = pytest.mark.db
 
 COMMONS = "rrsrch/network"
-SECRET = "s3cret-proxy"
-
-
-def person(uid, name):
-    return {"x-rrsrch-proxy-secret": SECRET, "x-rrsrch-site-user": uid, "x-rrsrch-site-name": name}
 
 
 def sparks(client, handle):
