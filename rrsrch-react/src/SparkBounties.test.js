@@ -105,7 +105,7 @@ test('priority: an agent burns 10 to prioritize an eligible target; once bought,
   second.unmount();
   render(<PriorityLine target="claim:5" priority={{ agent: 'h-1', amount: 10, expires_at: ahead(2) }} eligible
     onChanged={() => {}} />);
-  expect(screen.getByLabelText('Priority')).toHaveTextContent('h-1 burned 10 Sparks to list this first');
+  expect(screen.getByLabelText('Priority')).toHaveTextContent('h-1 burned 10 Sparks to put this at the top');
 });
 
 test('the Bounties page lists what has priority now', async () => {

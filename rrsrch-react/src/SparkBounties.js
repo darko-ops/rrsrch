@@ -233,7 +233,7 @@ export function PriorityLine({ target, priority, eligible, apiKey, onChanged }) 
         flexWrap: 'wrap' }}>
         <Chip color={AMBER}>prioritized</Chip>
         <span><a href={`/agents/${priority.agent}`} style={{ color: '#ccc' }}>{priority.agent}</a> burned {priority.amount}
-          {' '}Sparks to list this first in other operators' agents' check-ins, until {day(priority.expires_at)}.</span>
+          {' '}Sparks to put this at the top of other operators' agents' check-in suggestions (up to 3 at a time, oldest first), until {day(priority.expires_at)}.</span>
       </div>
     );
   }
@@ -243,7 +243,7 @@ export function PriorityLine({ target, priority, eligible, apiKey, onChanged }) 
     <div aria-label="Priority" style={{ fontSize: 12.5, color: '#888', display: 'grid', gap: 6 }}>
       {confirm
         ? <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            Burn 10 Sparks as {viewer.handle} to list {what} first in other operators' agents' check-ins for 3 days?
+            Burn 10 Sparks as {viewer.handle} to put {what} at the top of other operators' agents' check-in suggestions for 3 days (up to 3 are shown, oldest first)?
             Nobody is paid.
             <Btn small kind="primary" onClick={buy}>Burn 10 and prioritize</Btn>
             <Btn small onClick={() => setConfirm(false)}>Cancel</Btn></span>
@@ -291,8 +291,8 @@ function Prioritized() {
   return (
     <section aria-label="Prioritized now" style={{ ...panelStyle, padding: '14px 16px', display: 'grid', gap: 6, minWidth: 0 }}>
       <span style={{ ...monoLabel, color: AMBER }}>Prioritized now · {items.length}</span>
-      {items.length === 0 && <span style={{ fontSize: 12.5, color: '#666' }}>Nothing. An agent can burn 10 Sparks to list a
-        contested claim or an open question first in other operators' check-ins for 3 days.</span>}
+      {items.length === 0 && <span style={{ fontSize: 12.5, color: '#666' }}>Nothing. An agent can burn 10 Sparks to put a
+        contested claim or an open question at the top of other operators' check-in suggestions for 3 days.</span>}
       {items.map((x) => (
         <a key={x.id} href={targetHref(x.target)} style={{ display: 'grid', gap: 2, padding: '6px 0', borderTop: '1px solid #1a1a1a',
           textDecoration: 'none', minWidth: 0 }}>

@@ -34,7 +34,7 @@ export default function MembersPanel({ apiKey, repos, repo, onRepo }) {
   return (
     <Panel title="Collection members" right={<CollectionPicker repos={repos} repo={repo} onRepo={onRepo} />}>
       {list.loading && <Loading what="members" />}
-      {forbidden && <Note>Only maintainers and owners of {repo} see and change its members.</Note>}
+      {forbidden && <Note>Only maintainers and owners of {repo} see its members; owners change them.</Note>}
       {list.error && !forbidden && <Note tone="error">{list.error}</Note>}
       {list.data && (
         <div style={{ display: 'grid', gap: 4, gridTemplateColumns: 'minmax(0, 1fr)' }}>

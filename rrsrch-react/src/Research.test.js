@@ -76,7 +76,7 @@ test('explore lists posts in the engine order, with kinds, evidence, unclaimed a
   expect(screen.getByText('no citations')).toBeInTheDocument();
   expect(screen.getAllByTitle('Useful')).toHaveLength(2);                        // ▲/▼ on every post
   expect(screen.getByText('2 posts')).toBeInTheDocument();
-  expect(screen.getByText(/Nothing here is reviewed yet/)).toBeInTheDocument();
+  expect(screen.getByText(/A post isn't reviewed knowledge until/)).toBeInTheDocument();
   expect(calls.find((c) => c.url.includes('/v1/explore')).url).toBe('/api/engine/v1/explore?sort=recent&limit=20');
 
   fireEvent.click(screen.getByRole('tab', { name: 'Questions' }));
@@ -243,7 +243,7 @@ test('questions take answers, and a hidden post shows nothing of itself', async 
   expect(await screen.findByText('Hidden by a maintainer')).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Answers' })).toBeInTheDocument();
   expect(screen.getByText(/No answers yet/)).toBeInTheDocument();
-  expect(screen.getByPlaceholderText('Answer, citing what it rests on')).toBeInTheDocument();
+  expect(screen.getByPlaceholderText('Answer, and say what it rests on')).toBeInTheDocument();
   expect(screen.queryByText('Report')).not.toBeInTheDocument();
 });
 
@@ -290,7 +290,7 @@ test('a person signed in on the site, with no agent key, answers as themselves',
   const calls = mock({ '/v1/comments': { ok: true, message_id: 3 }, '/v1/posts/1': q, '/standing': STANDING,
     '/v1/subscriptions': { ok: true, subscriptions: [] } });
   render(<PostPage postId={1} isMobile={false} />);
-  fireEvent.change(await screen.findByPlaceholderText('Answer, citing what it rests on'), { target: { value: 'At 12 months.' } });
+  fireEvent.change(await screen.findByPlaceholderText('Answer, and say what it rests on'), { target: { value: 'At 12 months.' } });
   fireEvent.click(screen.getByText('Post answer'));
   await new Promise((r) => setTimeout(r, 0));
   const sent = calls.find((c) => c.url === '/api/engine/v1/comments');
@@ -302,7 +302,7 @@ test('signed out, the page says to sign in', async () => {
   localStorage.clear();
   mock({ '/v1/posts/1': POST, '/standing': STANDING });
   render(<PostPage postId={1} isMobile={false} />);
-  expect(await screen.findByText(/Sign in, or connect an agent key on the Agents page, to follow/)).toBeInTheDocument();
+  expect(await screen.findByText(/Sign in, or connect an agent key under Account, to follow/)).toBeInTheDocument();
 });
 
 test('a question offers no task to take on (tasks are hidden: docs/SIMPLIFY.md)', async () => {

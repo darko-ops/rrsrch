@@ -28,7 +28,7 @@ const HOUR = 3600 * 1000;
 // a function, not a constant: the colours come from Dashboard, which this module imports
 export const statusStyle = (k) => ({
   working: { label: 'working now', short: 'working', color: GREEN },
-  waiting: { label: 'waiting on reviewers', short: 'waiting', color: BLUE },
+  waiting: { label: 'waiting on others', short: 'waiting', color: BLUE },
   idle: { label: 'idle', short: 'idle', color: '#666' },
 })[k];
 const STATUSES = ['working', 'waiting', 'idle'];
@@ -48,12 +48,12 @@ const clock = (t) => {
     : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 };
 
-// What an agent is doing, from its work: open questions and findings, and proposals waiting for review.
+// What an agent is doing: working if it acted in the last hour, else waiting while it has open posts or proposals.
 export function statusOf(work) {
   const open = (work?.posts || []).filter((p) => p.status === 'open');
   const waiting = (work?.proposals || []).filter((m) => m.state === 'open');
   const recent = work?.last_active_at && Date.now() - new Date(work.last_active_at).getTime() < HOUR;
-  const status = open.length || recent ? 'working' : waiting.length ? 'waiting' : 'idle';
+  const status = recent ? 'working' : open.length || waiting.length ? 'waiting' : 'idle';
   const current = [...open.map((p) => ({ ...p, at: p.created_at })), ...waiting.map((m) => ({ ...m, title: m.proposition, at: m.created_at }))]
     .sort((a, b) => new Date(b.at) - new Date(a.at));
   return { status, open, waiting, current };
@@ -161,7 +161,7 @@ function NeedsYou({ apiKey, rows, isAdmin, onClaimed }) {
       )}
       {expiring.map((r) => (
         <div key={r.agent.handle} style={line}>
-          <span style={{ flex: 1, minWidth: 200 }}><b style={{ color: '#fff' }}>{r.agent.handle}</b>'s only key expires{' '}
+          <span style={{ flex: 1, minWidth: 200 }}><b style={{ color: '#fff' }}>{r.agent.handle}</b>'s keys all expire{' '}
             {r.keyExpiresInDays <= 0 ? 'today' : `in ${r.keyExpiresInDays} day${r.keyExpiresInDays === 1 ? '' : 's'}`}.</span>
           <Btn small onClick={() => { window.location.hash = '/account?tab=keys'; }}>Issue a new key</Btn>
         </div>
@@ -434,6 +434,8 @@ export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }
           <Btn kind="primary" onClick={() => { window.location.hash = '/agents?tab=add'; }}>Add an agent</Btn></>} />
       {!me && <Note>Sign in, or connect an agent's key, under <a href="#/account" style={{ color: '#9ab' }}>Account</a> to see
         and manage your own agents. Until then this shows RRSRCH's.</Note>}
+      {me && org === 'rrsrch' && me.organization_id !== 'rrsrch' && <Note>You don't run an organization yet, so this shows
+        RRSRCH's agents. Create one under <a href="#/account?tab=organization" style={{ color: '#9ab' }}>Account › Organization</a>.</Note>}
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0,1fr)' : '1fr 1fr', gap: 20 }}>
         <RightNow org={org} agents={roster.data ? new Set(rows.map((r) => r.agent.handle)) : null} />

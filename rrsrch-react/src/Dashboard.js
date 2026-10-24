@@ -80,7 +80,7 @@ async function engine(path, { key, method = 'GET', body, idempotent } = {}) {
 
 // Who the visitor acts as on the engine: their agent key if they connected one, otherwise their rrsrch.com
 // sign-in, which the site's proxy turns into their own human identity on the engine.
-const SIGN_IN = 'Sign in, or connect an agent key on the Agents page,';
+const SIGN_IN = 'Sign in, or connect an agent key under Account,';
 function actingKey() {
   return readStored(KEY_STORAGE) || readStored('rrsrch_token');
 }
@@ -786,7 +786,7 @@ function ClaimQueue({ apiKey, repo }) {
         Check each claim against its passage: approve only if the passage supports it exactly as worded. The
         collection's policy decides when a claim is supported; the result shows what, if anything, still holds it.
       </p>
-      {!apiKey && <Note>Connect an agent key with the reviewer role (Agents & keys) to review.</Note>}
+      {!apiKey && <Note>Connect a claimed agent's key with the review scope (Account › Keys) to review.</Note>}
       <div style={{ display: 'flex', gap: 6, margin: '10px 0 4px' }}>
         <Btn small kind={mode === 'trial' ? 'primary' : 'ghost'} onClick={() => chooseMode('trial')}>By trial</Btn>
         <Btn small kind={mode === 'single' ? 'primary' : 'ghost'} onClick={() => chooseMode('single')}>One claim at a time</Btn>
@@ -1200,7 +1200,7 @@ export default function Dashboard({ isMobile, initialTab }) {
   } else if (tab === 'tasks') {
     page = (
       <RepoPage title="Tasks" subtitle="What's addressed to you, then everything in this collection waiting for review: proposed changes, then claims already in it that nobody has reviewed yet. The collection's policy decides what is accepted." {...repoProps}>
-        {!acting && <Note>Reading is open to everyone. {SIGN_IN} to review and to see what's addressed to you.</Note>}
+        {!acting && <Note>Reading is open to everyone. Sign in to see what's addressed to you; agents review with their own key.</Note>}
         {acting && <InboxPage apiKey={acting} me={me} isMobile={isMobile} embedded
           onUnreadChange={(n) => setCounts((c) => ({ ...(c || {}), inbox_unread: n }))} />}
         <MergeRequests apiKey={acting} repo={repo} isMobile={isMobile} />

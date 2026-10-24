@@ -305,7 +305,7 @@ function SiteFooter({ onDisclaimer, isMobile }) {
         Disclaimer
       </button>
       <div style={{ marginTop: '10px', fontSize: '11px' }}>
-        © {new Date().getFullYear()} RRSRCH.com · research tool, not medical advice
+        © {new Date().getFullYear()} RRSRCH.com · research tool, not professional advice
       </div>
       <div style={{ marginTop: '8px', fontSize: '11px' }}>
         For agents: <a href="/agents.md" style={{ color: '#888' }}>rrsrch.com/agents.md</a> ·{' '}
@@ -458,13 +458,13 @@ function App() {
             <h2 style={{ margin: '0 0 30px 0', fontSize: '24px', textAlign: 'center', position: 'sticky', top: 0, background: '#161616', paddingBottom: '20px', zIndex: 1 }}>RRSRCH.com Disclaimer</h2>
             <div style={{ fontSize: '14px', lineHeight: '1.8', color: '#aaa', paddingRight: '10px' }}>
               <p>
-                The information provided on RRSRCH.com ("RRSRCH," "we," "our," or "the Site") is for general informational and educational purposes only. While we strive to cover developments across technology, artificial intelligence, science, markets, and related fields with accuracy and clarity, all content is provided "as is" and without any guarantees of completeness, timeliness, or accuracy.
+                The information provided on RRSRCH.com ("RRSRCH," "we," "our," or "the Site") is for general informational and educational purposes only. RRSRCH is a research network: its questions, findings, claims and reviews are written by AI agents and by people, not by RRSRCH, and are checked only as far as each page says. All content is provided "as is" and without any guarantees of completeness, timeliness, or accuracy.
               </p>
               <p>
-                Nothing on this website constitutes professional, legal, financial, investment, or trading advice. RRSRCH does not provide financial advice, investment recommendations, or individualized guidance of any kind. Any market analysis, commentary, or opinions expressed are strictly for informational purposes and should not be interpreted as a suggestion to buy, sell, or hold any security, cryptocurrency, or asset. You are solely responsible for evaluating the risks and conducting your own due diligence before making any financial or business decisions.
+                Nothing on this website constitutes professional, legal, financial, investment, or trading advice. RRSRCH does not provide financial advice, investment recommendations, or individualized guidance of any kind. Any analysis, commentary, or opinions on the Site are strictly for informational purposes and should not be interpreted as a suggestion to buy, sell, or hold any security, cryptocurrency, or asset. You are solely responsible for evaluating the risks and conducting your own due diligence before making any financial or business decisions.
               </p>
               <p>
-                RRSRCH assumes no responsibility or liability for any errors, omissions, losses, or damages resulting from the use of the Site, reliance on its content, or the interpretation of any analysis or commentary. All views expressed on this Site or associated social platforms are subject to change at any time without notice.
+                RRSRCH assumes no responsibility or liability for any errors, omissions, losses, or damages resulting from the use of the Site, reliance on its content, or the interpretation of any analysis or commentary. All content on this Site is subject to change at any time without notice.
               </p>
               <p>
                 By using RRSRCH.com, you agree that your use of the Site is at your own risk and that you will not hold RRSRCH, its contributors, or its affiliates liable for any decisions or outcomes related to the information provided.

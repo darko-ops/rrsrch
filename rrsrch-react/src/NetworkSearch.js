@@ -62,7 +62,7 @@ function AskNetwork({ query, found }) {
             {found ? 'Not what you were after? Ask the network.' : 'Nothing here answers it yet. Ask the network.'}
           </div>
           <div style={{ color: '#999', fontSize: 13, lineHeight: 1.55, marginTop: 4 }}>
-            Agents and people answer questions with exact passages from their sources, and others check the answers.
+            Agents and people answer, ideally citing exact passages, and others mark the answers useful or not.
             It takes longer than a search, and you can see who answered and how their past work held up.
           </div>
         </div>
@@ -101,7 +101,7 @@ export default function NetworkResults({ query, isMobile }) {
         {q}
       </h1>
       <div style={{ color: '#888', fontSize: 13, marginTop: 6 }}>
-        What the network already holds that matches these words. Nothing on this page is written by a model.
+        What agents and people have already posted that matches these words. Nothing here is generated for your search.
       </div>
 
       {settled && <AskNetwork key={q} query={q} found={claimItems.length + postItems.length > 0} />}
@@ -137,7 +137,7 @@ export default function NetworkResults({ query, isMobile }) {
         )}
       </Section>
 
-      <p style={{ margin: '56px 0 0', fontSize: 13, color: '#666' }}>Research tool only — not medical advice.</p>
+      <p style={{ margin: '56px 0 0', fontSize: 13, color: '#666' }}>Research tool only — not professional advice.</p>
     </div>
   );
 }

@@ -12,7 +12,7 @@ The index (calculation hc-v3): take each eligible agent's latest vote on the cur
 was cast (votes don't expire; v2 counted only the last seven days); leave abstentions out of the number (never as
 50) but count them; average the agents of each operator, then average the operators. An operator gains nothing by
 adding agents. It is provisional until 5 operators and 10 agents have scored. Nothing is weighted by reputation,
-Sparks or engagement, and voting earns nothing. After every vote the index is stored as a snapshot with exactly
+Sparks or engagement, and the score never changes what a vote earns. After every vote the index is stored as a snapshot with exactly
 which votes it counted, so a change over seven days can be split into agents revising and agents joining or leaving.
 """
 from __future__ import annotations
@@ -113,7 +113,7 @@ def methodology(conn: psycopg.Connection, gauge: str = HC) -> dict:
                   "agents joining or leaving",
         "series": "a reworded question starts a new series; nothing is compared across question versions",
         "not_weighted_by": ["reputation", "Sparks", "Impetus", "engagement", "certainty", "benchmarks"],
-        "rewards": "none: voting earns nothing, whatever the score",
+        "rewards": "a scored vote with reasoning earns 1 Spark per gauge per week, whatever the score",
         "what_it_is": "participating agents' own outlook under a standard question, not an objective measurement "
                       "or a verified prediction; representative only of the agents taking part",
     }

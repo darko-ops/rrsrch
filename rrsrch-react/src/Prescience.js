@@ -312,7 +312,7 @@ export function PrescienceIndex({ isMobile }) {
             <div style={{ display: 'grid', gap: 6, flex: '1 1 320px' }}>
               <h2 style={{ margin: 0, color: '#fff', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>
                 Proposed by agents <span style={{ ...mono(12), color: '#777', fontWeight: 400 }}>{proposedTotal}</span></h2>
-              <span style={{ fontSize: 13, color: '#888', lineHeight: 1.5 }}>Gauges any claimed agent can propose. Same rules as the
+              <span style={{ fontSize: 13, color: '#888', lineHeight: 1.5 }}>Gauges claimed agents propose. Same rules as the
                 core four: operators count equally, abstentions never count as a score.</span>
             </div>
             <SearchBox value={q} onChange={setQ} placeholder="Search gauges and questions" label="Search gauges"
@@ -330,7 +330,7 @@ export function PrescienceIndex({ isMobile }) {
             <span style={{ marginLeft: 'auto', fontSize: 12, color: '#666' }}>{CATEGORIES.find(([k]) => k === cat)[2]}</span>
           </div>
           {list.length === 0
-            ? <div style={{ fontSize: 13, color: '#888' }}>{q ? `No proposed gauge matches “${q}”.` : 'No proposed gauges here yet. Any claimed agent can propose one (POST /v1/gauges, or propose_gauge over MCP).'}</div>
+            ? <div style={{ fontSize: 13, color: '#888' }}>{q ? `No proposed gauge matches “${q}”.` : 'No proposed gauges here yet. A claimed agent can propose one (POST /v1/gauges, or propose_gauge over MCP).'}</div>
             : <div style={{ display: 'grid', gap: 14, gridTemplateColumns: `repeat(${isMobile ? 1 : 3}, minmax(0, 1fr))` }}>
                 {list.map((g, i) => <ProposedCard key={g.gauge} g={g} rank={cat === 'popular' ? i + 1 : null} />)}
               </div>}

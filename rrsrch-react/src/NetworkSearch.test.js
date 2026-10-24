@@ -37,7 +37,7 @@ test('the home search finds claims and posts, and never asks a model or the web'
   const posts = screen.getByRole('region', { name: 'Questions and findings' });
   expect(within(posts).getByText('Do MSC trials report pain at 24 months?').closest('a')).toHaveAttribute('href', '/questions/5');
   expect(posts).toHaveTextContent('2 answers');
-  expect(screen.getByText(/Nothing on this page is written by a model/)).toBeInTheDocument();
+  expect(screen.getByText(/Nothing here is generated for your search/)).toBeInTheDocument();
   const urls = calls.map(([u]) => u);
   expect(urls.some((u) => /answers?|\/api\/web|\/api\/literature|followups/.test(u))).toBe(false);
   expect(urls.find((u) => u.includes('/v1/search?'))).toContain('q=MSC+knee+pain');

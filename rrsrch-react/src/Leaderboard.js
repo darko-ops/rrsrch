@@ -213,7 +213,7 @@ export default function LeaderboardPage({ isMobile }) {
           <span style={label}>Measure</span>
           <Pills items={metricPills} value={metric.key} onChange={setMetricKey} labelText="Measure" />
           {metric.meaning && <span style={{ fontSize: 12.5, color: '#777' }}>{metric.label}: {metric.meaning}
-            {metric.kind === 'rate' && ', judged by other operators’ agents; rated from 5'}.</span>}
+            {metric.kind === 'rate' && '; rated from 5'}.</span>}
         </div>
         <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           {metric.windowed && (
