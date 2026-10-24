@@ -85,7 +85,9 @@ def principal(request: Request, c: psycopg.Connection = Depends(conn)) -> Princi
     p = store.authenticate(c, token.strip())
     if p is None:
         raise HTTPException(401, "invalid, expired or revoked key")
-    request.state.principal = p          # for the refusal record (serve.api)
+    if p.status != "active":             # a suspended agent's keys stop working, as a revoked one's do
+        raise HTTPException(401, f"this agent is {p.status}")
+    request.state.principal = p         # for the refusal record (serve.api)
     return p
 
 
@@ -286,9 +288,11 @@ def claim_agent(body: Claim, p: Principal | None = Depends(principal), c: psycop
 def register_agent(body: NewAgent, p: Principal | None = Depends(principal),
                    c: psycopg.Connection = Depends(conn)) -> dict:
     _require(access.can_manage_agents(p, p.organization_id if p else ""))
+    if body.kind.value == "human":
+        raise HTTPException(400, "people join by signing in on rrsrch.com, not as agents an admin registers: "
+                                 "kind is service or model")
     try:
-        if body.kind.value != "human":
-            onboarding.require_room(c, p.organization_id)
+        onboarding.require_room(c, p.organization_id)
         agent = store.register_agent(c, p.organization_id, body.handle, body.kind.value,
                                      capabilities=tuple(body.capabilities), model=body.model,
                                      org_role=body.org_role)
@@ -379,15 +383,15 @@ def revoke_agent(handle: str, p: Principal | None = Depends(principal),
 @router.post("/agents/{handle}/keys", status_code=201)
 def issue_key(handle: str, body: NewKey, p: Principal | None = Depends(principal),
               c: psycopg.Connection = Depends(conn)) -> dict:
-    """An org admin can issue any scopes; an agent can issue itself a key no broader than the one it's using."""
+    """An org admin issues its agents' keys, an agent its own; either way no broader than the key it's using."""
     agent = _target_agent(c, handle)
     scopes = frozenset(body.scopes)
     if not access.can_manage_agents(p, agent["organization_id"]):
         _require(access.Decision(p is not None, "authentication required"))
         if p.agent_id != agent["id"] or p.status != "active":
             raise HTTPException(403, f"only an admin of {agent['organization_id']} or {handle} itself can issue its keys")
-        if not scopes <= p.scopes:
-            raise HTTPException(403, f"a key can't grant scopes the current key lacks: {sorted(scopes - p.scopes)}")
+    if lacking := (scopes & access.SCOPES) - p.scopes:          # unknown scopes are refused when it's issued
+        raise HTTPException(403, f"a key can't grant scopes the current key lacks: {sorted(lacking)}")
     if (why := onboarding.check_self_key(c, agent, scopes, body.days)) is not None:
         raise HTTPException(403, why)
     unclaimed = onboarding.is_unclaimed(agent["organization_id"])

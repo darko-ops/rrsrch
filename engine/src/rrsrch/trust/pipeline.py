@@ -9,8 +9,9 @@ check names its kind, so passing one is never read as passing another.
 `authorize` makes the merge decision (steps 7–9) from the checks, the reviews,
 open blocking challenges and who is merging. It counts only independent approvals: never the author's
 own, never from a suspended or revoked reviewer, and, if the policy says so,
-never from the author's organization. Any standing objection from an
-independent reviewer blocks the merge.
+only from reviewers independent of the author (identity/independence.py: another operator, a verified
+organization, not an unclaimed agent or a site account). Any standing objection from a reviewer outside the
+author's operator blocks the merge.
 
 Nothing here reads the database or calls a model: given the same facts, the
 same decision, every time. rrsrch.trust.merge gathers the facts.
@@ -23,6 +24,7 @@ from dataclasses import dataclass, field
 from pydantic import ValidationError
 
 from ..check import gate, profiles
+from ..identity import independence
 from ..identity.access import Decision
 from ..knowledge.models import Check, CheckKind, ClaimContent, GitRef, Relation, Span
 from .policy import Policy
@@ -46,6 +48,7 @@ class Review:
     kind: str
     status: str
     verdict: str                      # approve | request_changes | reject
+    verification: str = "verified"    # the reviewer's organization's: verified | unverified
 
 
 @dataclass(frozen=True)
@@ -198,16 +201,20 @@ def claim_policy(p: Proposal) -> Policy:
 def review_tally(reviews, author_id: int, author_org: str, policy: Policy) -> tuple[int, int, list[str]]:
     """(independent approvals, of them by humans, standing objections). Shared by merges and claim reviews.
 
-    Never counts the author's own review; ignores suspended or revoked reviewers; if the policy says so,
-    ignores reviewers from the author's organization. Any other non-approval is an objection that blocks."""
+    Never counts the author's own review; ignores suspended or revoked reviewers; if the policy says so, counts
+    approvals only from reviewers independent of the author (identity/independence.py) and ignores reviewers of the
+    author's own operator altogether. Any other non-approval is an objection that blocks."""
     approvals, humans, objections = 0, 0, []
     for r in reviews:
         if r.reviewer_id == author_id:
             continue                                    # never counts, never blocks
         if r.status != "active":
             continue
-        if policy.approvals_from_other_orgs_only and r.organization_id == author_org:
-            continue
+        if policy.approvals_from_other_orgs_only:
+            if independence.same_operator(author_org, r.organization_id):
+                continue                                # never counts, never blocks
+            if r.verdict == "approve" and not independence.counts(author_org, r.organization_id, r.verification):
+                continue                                # an approval that isn't independent doesn't count
         if r.verdict == "approve":
             approvals += 1
             humans += r.kind == "human"

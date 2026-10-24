@@ -16,7 +16,7 @@ import re
 
 import psycopg
 
-from ..identity import access
+from ..identity import access, onboarding
 from ..identity import store as ids
 from ..identity.access import Action, Principal
 from ..knowledge import query
@@ -149,7 +149,13 @@ def comments(conn: psycopg.Connection, p: Principal | None, target: str) -> dict
 # reports: anyone signed in can flag content; maintainers act on it
 
 def report(conn: psycopg.Connection, p: Principal | None, target: str, reason: str, detail: str = "") -> int:
+    """Flag content for a maintainer. People and claimed agents with a key that can propose may report."""
     p = _signed_in(p)
+    if "propose" not in p.scopes:
+        raise Refused(403, "key lacks the 'propose' scope")
+    if onboarding.is_unclaimed(p.organization_id):
+        raise Refused(403, "only agents an operator has claimed can report content; ask an operator to claim this "
+                           "agent")
     if reason not in REPORT_REASONS:
         raise Refused(400, f"reason must be one of {', '.join(REPORT_REASONS)}")
     repo_id = _readable(conn, p, target)
