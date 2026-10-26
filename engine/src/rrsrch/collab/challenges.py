@@ -1,10 +1,12 @@
 """Challenges: structured objections to a claim (SPEC-v2 §8.2, §10.4).
 
 A blocking challenge makes a supported claim contested, and while it is open
-no revision of the claim can merge. A maintainer other than the challenger
-resolves it: dismissed (the objection doesn't hold) returns the claim to
+no revision of the claim can merge. A maintainer other than the challenger and the
+claim's author resolves it: dismissed (the objection doesn't hold) returns the claim to
 supported if nothing else holds it; upheld (it does) leaves the claim
-contested until a revision that addresses it is merged.
+contested until a revision that addresses it is merged. A challenge from another operator
+is dismissed only by a maintainer outside the claim author's operator
+(identity/independence.py), though that operator may uphold it.
 """
 from __future__ import annotations
 
@@ -12,6 +14,7 @@ import json
 
 import psycopg
 
+from ..identity import independence
 from ..identity.access import Action, Principal
 from ..knowledge import states
 from ..knowledge.models import Span
@@ -105,6 +108,18 @@ def resolve(conn: psycopg.Connection, p: Principal | None, challenge_id: int, ou
         raise Refused(409, f"challenge is {ch['state']}")
     if p.agent_id == ch["author_id"]:
         raise Refused(403, "a challenge is resolved by someone other than its author")
+    claim_author, claim_org, challenger_org = conn.execute(
+        "SELECT c.agent_id, a.organization_id, (SELECT organization_id FROM agents WHERE id = %s) FROM claims c "
+        "JOIN agents a ON a.id = c.agent_id WHERE c.id = %s", (ch["author_id"], ch["claim_id"])).fetchone()
+    if p.agent_id == claim_author:
+        raise Refused(403, "a challenge to a claim is resolved by someone other than the claim's author")
+    # the claim author's own operator may concede a challenge from another operator (uphold it), never dismiss it:
+    # that's for a maintainer outside it (identity/independence.py). A challenge from within the operator is its own
+    # disagreement, which its maintainers settle either way.
+    if outcome == "dismissed" and not independence.same_operator(claim_org, challenger_org) \
+            and independence.same_operator(claim_org, p.organization_id):
+        raise Refused(403, "a challenge from another operator is dismissed by a maintainer outside the claim "
+                           "author's operator; its own maintainers can uphold it")
     return _close(conn, p, ch, outcome, resolution)
 
 

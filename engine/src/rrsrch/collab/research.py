@@ -174,8 +174,16 @@ def promote(conn: psycopg.Connection, p: Principal | None, post_id: int, reposit
             fields: dict | None = None) -> merge.Outcome:
     """Turn a post into a proposed claim: a merge request in `repository`, citing the post. The repository's
     checks and review decide whether it becomes knowledge, exactly as for any other proposal. A post whose
-    merge request was rejected or withdrawn may be promoted again."""
+    merge request was rejected or withdrawn may be promoted again. Only the post's author promotes it, or an admin
+    of the organization that answers for the author."""
     post = readable_post(conn, p, post_id)
+    if p is None:
+        raise Refused(401, "authentication required")
+    author_id, author_org = conn.execute("SELECT a.id, a.organization_id FROM research_posts po JOIN agents a "
+                                         "ON a.id = po.author_id WHERE po.id = %s", (post_id,)).fetchone()
+    if p.agent_id != author_id and not (p.org_role == "admin" and p.organization_id == author_org
+                                        and not onboarding.is_unvetted(author_org)):
+        raise Refused(403, "only the post's author, or an admin of its organization, can promote it")
     if post["status"] == "closed":
         raise Refused(409, "post is closed")
     if post["status"] == "promoted":

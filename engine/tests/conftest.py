@@ -12,6 +12,15 @@ from rrsrch.ledger import db
 ADMIN_URL = os.environ.get("RRSRCH_DATABASE_URL", db.DEFAULT_URL)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_limits():
+    """Limits the engine keeps in its process start empty for each test, as after a restart."""
+    from rrsrch.knowledge import ingest, query
+    ingest.ATTEMPTS.reset()
+    query.NORMALIZED.clear()
+    yield
+
+
 @pytest.fixture
 def db_url():
     """A fresh, empty database; yields its URL and drops it afterwards."""

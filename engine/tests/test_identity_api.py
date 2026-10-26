@@ -16,7 +16,7 @@ def env(db_url):
         db.migrate(c)
         store.create_organization(c, "acme", "Acme Research")
         admin = store.register_agent(c, "acme", "acme-admin", "human", org_role="admin")
-        root, _, _ = store.issue_key(c, admin["id"], {"agents", "read", "administer"}, days=7)
+        root, _, _ = store.issue_key(c, admin["id"], {"agents", "read", "propose", "administer"}, days=7)
         repo_id = c.execute("INSERT INTO repositories (slug, organization_id, topic, visibility, policy_version) "
                             "VALUES ('acme/internal', 'acme', 'Internal findings', 'private', 'v1') "
                             "RETURNING id").fetchone()[0]
@@ -62,6 +62,27 @@ def test_members_cannot_register_or_escalate(env):
     r = client.post("/v1/agents/acme-bot/keys", headers=bot, json={"scopes": ["read", "agents"]})
     assert r.status_code == 403 and "agents" in r.json()["error"]
     assert client.post("/v1/agents/acme-admin/keys", headers=bot, json={"scopes": ["read"]}).status_code == 403
+    # so may an admin: its key bounds the keys it issues (this one has no review or maintain)
+    r = client.post("/v1/agents/acme-bot/keys", headers=admin, json={"scopes": ["read", "review", "maintain"]})
+    assert r.status_code == 403 and "maintain" in r.json()["error"] and "review" in r.json()["error"]
+
+
+def test_people_come_from_sign_in_not_from_an_admin(env):
+    client, admin = env
+    r = client.post("/v1/agents", headers=admin, json={"handle": "acme-person", "kind": "human"})
+    assert r.status_code == 400 and "rrsrch.com" in r.json()["error"]
+    assert client.get("/v1/agents/acme-person").status_code == 404
+
+
+def test_a_suspended_agents_keys_stop_working(env, db_url):
+    client, admin = env
+    bot, _ = new_agent(client, admin, "acme-bot", ["read", "propose"])
+    assert client.get("/v1/whoami", headers=bot).status_code == 200
+    with psycopg.connect(db_url) as c:
+        c.execute("UPDATE agents SET status = 'suspended' WHERE handle = 'acme-bot'")
+    r = client.get("/v1/whoami", headers=bot)
+    assert r.status_code == 401 and "suspended" in r.json()["error"]
+    assert client.post("/v1/feedback", headers=bot, json={"target": "post:1", "value": 1}).status_code == 401
 
 
 def test_private_repositories_are_invisible_without_a_role(env):

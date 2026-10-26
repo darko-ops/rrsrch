@@ -11,14 +11,23 @@ instead of a new one: the cache and the de-duplication are the same rule.
 The queue is bounded, so a burst of questions is refused rather than piling
 up hours of work. Anonymous visitors (identified by IP) may start a few new
 answers per window and fill only part of the queue, so agents with keys
-always find room. Reused and cached answers never count against a limit.
+always find room; agents anyone could have signed up (unvetted) count as
+visitors. Reused and cached answers never count against a limit.
+
+The one-shot POST /v1/answer waits for its answer on a server thread, so only
+a few requests may wait at once (and one per client), each for at most WAIT
+seconds; past that the caller gets the job to poll. A failed answer records
+a plain message; what went wrong is logged, not shown.
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
+import threading
 import time
 import uuid
+from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
@@ -27,6 +36,12 @@ import psycopg
 from ..ledger import db
 
 COLS = ("id", "question", "status", "stage", "result", "error", "created_at", "started_at", "finished_at")
+WAIT = 240                      # seconds POST /v1/answer waits before handing back the job to poll
+MAX_WAITERS = 8                 # requests waiting for an answer at once, everyone together
+WAITERS_PER_CLIENT = 1
+FAILED = "the answer couldn't be written; ask again"
+RESTARTED = "the engine restarted while answering; ask again"
+log = logging.getLogger(__name__)
 
 
 class QueueFull(Exception):
@@ -50,11 +65,15 @@ def workers_from_env() -> int:
 class AnswerJobs:
     def __init__(self, connect: Callable[[], psycopg.Connection], make_llm: Callable, answer: Callable, *,
                  fresh_for: int = 1800, max_waiting: int = 20, workers: int | None = None,
-                 anonymous_waiting: int = 10, per_client: int = 3, window: int = 600):
+                 anonymous_waiting: int = 10, per_client: int = 3, window: int = 600,
+                 max_waiters: int = MAX_WAITERS, waiters_per_client: int = WAITERS_PER_CLIENT):
         self.connect, self.make_llm, self.answer = connect, make_llm, answer
         self.fresh_for, self.max_waiting = fresh_for, max_waiting
         self.anonymous_waiting, self.per_client, self.window = anonymous_waiting, per_client, window
+        self.max_waiters, self.waiters_per_client = max_waiters, waiters_per_client
         self.poll = 2.0                         # how often wait() looks
+        self._lock = threading.Lock()
+        self._waiters: Counter = Counter()      # client -> requests waiting in wait()
         self.workers = workers or workers_from_env()
         self.pool = ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="answer")
 
@@ -100,14 +119,26 @@ class AnswerJobs:
         with self.connect() as conn:
             return self._row(conn, job_id)
 
-    def wait(self, job_id, timeout: float = 1800) -> dict:
-        """Block until a job is done or failed (for the one-shot POST /v1/answer)."""
-        end = time.monotonic() + timeout
-        while True:
-            job = self.get(job_id)
-            if job["status"] in ("done", "failed") or time.monotonic() > end:
-                return job
-            time.sleep(self.poll)
+    def wait(self, job_id, client: str | None = None, timeout: float | None = None) -> dict | None:
+        """Block until a job is done or failed, or `timeout` passes (for the one-shot POST /v1/answer). None, at
+        once, when MAX_WAITERS requests are already waiting, or this client already has one waiting."""
+        key = client or "unknown"
+        with self._lock:
+            if sum(self._waiters.values()) >= self.max_waiters or self._waiters[key] >= self.waiters_per_client:
+                return None
+            self._waiters[key] += 1
+        try:
+            end = time.monotonic() + (WAIT if timeout is None else timeout)
+            while True:
+                job = self.get(job_id)
+                if job["status"] in ("done", "failed") or time.monotonic() > end:
+                    return job
+                time.sleep(self.poll)
+        finally:
+            with self._lock:
+                self._waiters[key] -= 1
+                if not self._waiters[key]:
+                    del self._waiters[key]
 
     def _stage(self, job_id, stage: str) -> None:
         with self.connect() as conn:
@@ -126,17 +157,18 @@ class AnswerJobs:
             with self.connect() as conn:
                 conn.execute("UPDATE answer_jobs SET status = 'done', stage = 'done', result = %s, finished_at = now() "
                              "WHERE id = %s", (json.dumps(result, default=str), job_id))
-        except Exception as e:  # noqa: BLE001  a failed answer is a recorded outcome, not a crash
+        except Exception:  # noqa: BLE001  a failed answer is a recorded outcome, not a crash
+            log.exception("answer job %s failed", job_id)       # the detail can name hosts and paths: logged only
             with self.connect() as conn:
                 conn.execute("UPDATE answer_jobs SET status = 'failed', stage = 'failed', error = %s, "
-                             "finished_at = now() WHERE id = %s", (str(e)[:400], job_id))
+                             "finished_at = now() WHERE id = %s", (FAILED, job_id))
 
     def recover(self) -> int:
         """After a restart: a job that was running is lost (failed); waiting jobs are started again."""
         with self.connect() as conn:
             db.migrate(conn)
             conn.execute("UPDATE answer_jobs SET status = 'failed', stage = 'failed', finished_at = now(), "
-                         "error = 'the engine restarted while answering; ask again' WHERE status = 'running'")
+                         "error = %s WHERE status = 'running'", (RESTARTED,))
             waiting = [r[0] for r in conn.execute("SELECT id FROM answer_jobs WHERE status = 'queued' ORDER BY created_at")]
         for job_id in waiting:
             self.pool.submit(self._run, job_id)

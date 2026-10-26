@@ -3,12 +3,15 @@
 An agent names a URL; the engine fetches it. Since the engine runs inside a private network, a URL must not be able
 to reach anything internal: only https on the standard port, only hosts whose every address is public, checked
 before connecting and again for the address actually connected to (so a DNS answer that changes in between can't
-slip past), at most 3 redirects, each checked the same way, a timeout and a size cap (10 MB, or 50 MB for a PDF).
+slip past), at most 3 redirects, each checked the same way, a timeout on each read, a deadline for the whole fetch
+(DEADLINE, redirects included) and a size cap (10 MB, or 50 MB for a PDF). Proxy settings in the environment are
+ignored: the checks are only true of a direct connection.
 """
 from __future__ import annotations
 
 import ipaddress
 import socket
+import time
 from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -17,7 +20,8 @@ import httpx
 
 MAX_BYTES = 10 * 1024 * 1024             # HTML and plain text
 PDF_MAX_BYTES = 50 * 1024 * 1024         # PDFs: annual reports and filings run large
-TIMEOUT = 20.0
+TIMEOUT = 20.0                           # seconds for any one connect or read
+DEADLINE = 120.0                         # seconds for the whole fetch: a 50 MB PDF at well under 1 MB/s
 MAX_REDIRECTS = 3
 TEXT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
 PDF_TYPES = ("application/pdf", "application/x-pdf")
@@ -83,13 +87,20 @@ def _peer(response: httpx.Response) -> str | None:
 
 def fetch(url: str, *, user_agent: str, client: httpx.Client | None = None, resolve: Callable = socket.getaddrinfo,
           max_bytes: int = MAX_BYTES, types: tuple[str, ...] = TEXT_TYPES,
-          pdf_max_bytes: int = PDF_MAX_BYTES) -> Fetched:
+          pdf_max_bytes: int = PDF_MAX_BYTES, deadline: float = DEADLINE) -> Fetched:
     """Fetch a public document. Raises FetchRefused with a reason an agent can act on."""
     own = client is None
-    client = client or httpx.Client(timeout=TIMEOUT, follow_redirects=False)
+    client = client or httpx.Client(timeout=TIMEOUT, follow_redirects=False, trust_env=False)
+    end = time.monotonic() + deadline
+
+    def in_time() -> None:
+        if time.monotonic() > end:
+            raise FetchRefused(f"fetching the document took longer than {deadline:.0f} seconds")
+
     try:
         current = canonical(url)
         for _ in range(MAX_REDIRECTS + 1):
+            in_time()
             check_host(urlsplit(current).hostname, resolve)
             try:
                 with client.stream("GET", current, headers={"User-Agent": user_agent, "Accept": ", ".join(types)}) as r:
@@ -110,6 +121,7 @@ def fetch(url: str, *, user_agent: str, client: httpx.Client | None = None, reso
                         raise FetchRefused(f"the document is larger than {cap // (1024 * 1024)} MB")
                     body = bytearray()
                     for chunk in r.iter_bytes():
+                        in_time()
                         body += chunk
                         if len(body) > cap:
                             raise FetchRefused(f"the document is larger than {cap // (1024 * 1024)} MB")

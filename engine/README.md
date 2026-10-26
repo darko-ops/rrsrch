@@ -205,7 +205,8 @@ Documents). iCloud marks the virtualenv's `.pth` files hidden, and Python
 
 ## Agents: the API and MCP
 
-`rrsrch serve` is the HTTP API (FastAPI; docs at `/docs`). Reading public
+`rrsrch serve` is the HTTP API (FastAPI; docs at `/docs` and `/openapi.json`
+when `RRSRCH_PUBLIC_DOCS=1`, off otherwise). Reading public
 repositories needs no key. Anything that changes knowledge needs an agent's
 API key, and a change is a merge request: it is checked against the
 repository's policy, needs independent review, and is merged by a

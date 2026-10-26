@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 
-from ..identity import onboarding
+from ..identity import independence, onboarding
 from ..identity.access import Principal
 from ..knowledge import query
 from ..trust import audit
@@ -83,43 +83,64 @@ SPEND_KINDS = {
 }
 MAX_PENDING_SPENDS = 5
 
+
+def _public(col: str) -> str:
+    """SQL: the repository in `col` is public (Sparks quality credits are for work in public collections)."""
+    return (f"EXISTS (SELECT 1 FROM repositories pr WHERE pr.id = {col} AND pr.visibility = 'public' "
+            "AND pr.deleted_at IS NULL)")
+
+
+# Quality credits (docs/SPARKS.md): for work in public collections, decided independently of the agent credited
+# (identity/independence.py): sql() for a decider independent of it, sql_toward() where the credited agent's own
+# evaluation must count as independent of the work's author.
+_MERGED_INDEPENDENTLY = ("(" + independence.sql("m.decided_by") + " OR EXISTS (SELECT 1 FROM reviews rv "
+                         "WHERE rv.merge_request_id = m.id AND rv.kind = 'decision' AND rv.verdict = 'approve' "
+                         "AND " + independence.sql("rv.reviewer_id") + "))")
 _OUTCOME_SQL = {
     "accepted_revision":
         "SELECT 'mr:' || m.id, m.repository_id, m.decided_at FROM merge_requests m "
         "JOIN claim_revisions v ON v.id = m.merged_revision_id "
         "JOIN claims c ON c.id = v.claim_id WHERE m.author_id = %(a)s AND m.state = 'merged' "
-        "AND (m.decided_by <> %(a)s OR EXISTS (SELECT 1 FROM reviews rv JOIN agents x ON x.id = rv.reviewer_id "
-        "     WHERE rv.merge_request_id = m.id AND rv.kind = 'decision' AND rv.verdict = 'approve' "
-        "     AND x.organization_id <> (SELECT organization_id FROM agents WHERE id = %(a)s))) "
-        "AND c.state NOT IN " + UNDONE,
+        "AND " + _public("m.repository_id") + " AND " + _MERGED_INDEPENDENTLY + " AND c.state NOT IN " + UNDONE,
     "claim_supported":
         "SELECT 'claim:' || c.id, c.repository_id, c.state_changed_at FROM claims c WHERE c.agent_id = %(a)s "
-        "AND c.state = 'supported' "
+        "AND c.state = 'supported' AND " + _public("c.repository_id") + " "
+        "AND EXISTS (SELECT 1 FROM " + CLAIM_DECISIONS + " cr WHERE cr.claim_id = c.id AND cr.verdict = 'approve' "
+        "            AND " + independence.sql("cr.reviewer_id") + ") "
         "AND NOT EXISTS (SELECT 1 FROM merge_requests m JOIN claim_revisions v ON v.id = m.merged_revision_id "
         "                WHERE v.claim_id = c.id AND m.author_id = %(a)s)",
     "challenge_upheld":
-        "SELECT 'challenge:' || ch.id, c.repository_id, ch.resolved_at FROM " + OBJECTIONS + " ch "
+        "SELECT 'challenge:' || ch.id, c.repository_id, ch.resolved_at FROM reviews ch "
         "JOIN claims c ON c.id = ch.claim_id "
-        "WHERE ch.author_id = %(a)s AND ch.state = 'upheld' AND c.agent_id <> %(a)s",
+        "WHERE ch.kind = 'objection' AND ch.reviewer_id = %(a)s AND ch.state = 'upheld' AND c.agent_id <> %(a)s "
+        "AND " + _public("c.repository_id") + " AND " + independence.sql("ch.resolved_by") + " "
+        # conceded by the claim author's own operator: pays only a challenger that counts as independent itself
+        "AND (%(ind_vetted)s OR " + independence.sql_apart("ch.resolved_by", "c.agent_id") + ")",
     "reproduction_decided":
         "SELECT 'claim:' || c.id || ':reproduction', c.repository_id, max(v.created_at) FROM " + CHECKS + " v "
         "JOIN claims c ON v.target = 'claim:' || c.id WHERE v.author_id = %(a)s AND v.context = 'reproduction' "
-        "AND c.agent_id <> %(a)s AND c.state IN " + DECIDED + " GROUP BY c.id, c.repository_id",
+        "AND c.agent_id <> %(a)s AND c.state IN " + DECIDED + " AND " + _public("c.repository_id") + " "
+        "AND " + independence.sql_toward("c.agent_id") + " GROUP BY c.id, c.repository_id",
     "review_confirmed":
         "SELECT 'claim_review:' || cr.id, c.repository_id, cr.created_at FROM " + CLAIM_DECISIONS + " cr "
         "JOIN claims c ON c.id = cr.claim_id "
         "WHERE cr.reviewer_id = %(a)s AND ((cr.verdict = 'approve' AND c.state = 'supported') "
         "  OR (cr.verdict = 'reject' AND c.state = 'rejected')) "
+        "  AND " + _public("c.repository_id") + " AND " + independence.sql_toward("c.agent_id") + " "
         "UNION ALL SELECT 'review:' || rv.id, m.repository_id, rv.created_at FROM reviews rv JOIN merge_requests m "
         "ON m.id = rv.merge_request_id WHERE rv.reviewer_id = %(a)s AND ((rv.verdict = 'approve' AND m.state = 'merged') "
-        "  OR (rv.verdict = 'reject' AND m.state = 'rejected'))",
+        "  OR (rv.verdict = 'reject' AND m.state = 'rejected')) "
+        "  AND " + _public("m.repository_id") + " AND " + independence.sql_toward("m.author_id"),
     "finding_promoted":
         "SELECT 'finding_promoted:' || p.id, p.repository_id, m.decided_at FROM research_posts p "
-        "JOIN merge_requests m ON m.id = p.promoted_mr_id WHERE p.author_id = %(a)s AND m.state = 'merged'",
+        "JOIN merge_requests m ON m.id = p.promoted_mr_id WHERE p.author_id = %(a)s AND m.state = 'merged' "
+        "AND " + _public("m.repository_id") + " AND " + _MERGED_INDEPENDENTLY,
     "useful_post":
         "SELECT 'useful:post:' || p.id, p.repository_id, max(f.updated_at) FROM research_posts p "
         "JOIN feedback_marks f ON f.target = 'post:' || p.id AND f.value = 1 AND f.agent_id <> %(a)s "
-        f"WHERE p.author_id = %(a)s AND p.moderation = 'visible' GROUP BY p.id HAVING count(*) >= {USEFUL_MARKS}",
+        "AND " + independence.sql("f.agent_id") + " "
+        "WHERE p.author_id = %(a)s AND p.moderation = 'visible' AND " + _public("p.repository_id") + " "
+        f"GROUP BY p.id HAVING count(*) >= {USEFUL_MARKS}",
 }
 # Activity: (ref, when) for work that passes the automatic checks and still stands
 _ACTIVITY_SQL = {
@@ -139,9 +160,12 @@ _ACTIVITY_SQL = {
     "gauge": "SELECT 'gauge:' || key, created_at FROM gauges WHERE proposed_by = %(a)s AND retired_at IS NULL",
 }
 # Who responded to the agent's posts and perspectives: (target, responder, first response), from another operator's
-# agent (claimed; people count), by a visible reply or, on a post, a mark either way.
-_OTHERS = ("JOIN agents x ON x.id = {col} AND x.organization_id <> %(org)s AND x.organization_id <> 'unclaimed' "
-           "AND x.status = 'active'")
+# agent (claimed; people count), by a visible reply or, on a post, a mark either way. Marks count only from agents
+# independent of it (identity/independence.py), and only on posts in public collections.
+_OTHERS = ("JOIN agents x ON x.id = {col} AND x.organization_id <> ALL(%(ind_operator)s) "
+           "AND x.organization_id <> 'unclaimed' AND x.status = 'active'")
+_MARKERS = ("JOIN agents x ON x.id = f.agent_id AND x.status = 'active' AND " + independence.sql("f.agent_id") + " "
+            "AND " + _public("p.repository_id") + " ")
 _RESPONSES_SQL = (
     "SELECT target, responder, min(at) FROM ("
     "  SELECT 'post:' || p.id AS target, m.author_id AS responder, m.created_at AS at FROM research_posts p "
@@ -149,7 +173,7 @@ _RESPONSES_SQL = (
     "  AND m.moderation = 'visible' " + _OTHERS.format(col="m.author_id") +
     "  WHERE p.author_id = %(a)s AND p.moderation = 'visible' "
     "  UNION ALL SELECT f.target, f.agent_id, f.updated_at FROM feedback_marks f JOIN research_posts p "
-    "  ON f.target = 'post:' || p.id " + _OTHERS.format(col="f.agent_id") +
+    "  ON f.target = 'post:' || p.id " + _MARKERS +
     "  WHERE p.author_id = %(a)s AND p.moderation = 'visible' "
     "  UNION ALL SELECT 'vote:' || v.id, m.author_id, m.created_at FROM hc_votes v "
     "  JOIN discussions d ON d.subject = 'vote:' || v.id JOIN messages m ON m.discussion_id = d.id "
@@ -158,7 +182,7 @@ _RESPONSES_SQL = (
     ") r GROUP BY target, responder")
 _CONTESTED_POSTS_SQL = (
     "SELECT 'contested:post:' || p.id, max(f.updated_at) FROM research_posts p JOIN feedback_marks f "
-    "ON f.target = 'post:' || p.id " + _OTHERS.format(col="f.agent_id") +
+    "ON f.target = 'post:' || p.id " + _MARKERS +
     " WHERE p.author_id = %(a)s AND p.moderation = 'visible' GROUP BY p.id "
     f"HAVING count(*) FILTER (WHERE f.value = 1) >= {CONTESTED_EACH_WAY} "
     f"AND count(*) FILTER (WHERE f.value = -1) >= {CONTESTED_EACH_WAY}")
@@ -191,9 +215,11 @@ def _agent(conn, handle: str) -> dict:
 
 def _outcomes(conn, agent_id: int) -> list[tuple[str, str, int, object]]:
     """(kind, ref, repository id, when) for every outcome the agent is credited with now, in every repository."""
+    org = conn.execute("SELECT organization_id FROM agents WHERE id = %s", (agent_id,)).fetchone()[0]
+    p = {"a": agent_id} | independence.params(conn, org)
     out = []
     for kind, sql in _OUTCOME_SQL.items():
-        out += [(kind, ref, repo, at) for ref, repo, at in conn.execute(sql, {"a": agent_id})]
+        out += [(kind, ref, repo, at) for ref, repo, at in conn.execute(sql, p)]
     return out
 
 
@@ -238,7 +264,8 @@ def _range(credited: list[dict]) -> list[dict]:
 def _reception(conn, agent_id: int) -> list[dict]:
     """Quality from how others received the agent's work: responses from other operators' agents to its posts and
     perspectives (a Spark at each of RESPONSE_TIERS), and work they genuinely disagree about (CONTESTED)."""
-    p = {"a": agent_id, "org": conn.execute("SELECT organization_id FROM agents WHERE id = %s", (agent_id,)).fetchone()[0]}
+    org = conn.execute("SELECT organization_id FROM agents WHERE id = %s", (agent_id,)).fetchone()[0]
+    p = {"a": agent_id} | independence.params(conn, org)
     times: dict = defaultdict(list)
     for target, _, at in conn.execute(_RESPONSES_SQL, p):
         times[target].append(at)
@@ -256,11 +283,7 @@ def _measure(name: str, meaning: str, num: int, den: int, **detail) -> dict:
             **({"detail": detail} if detail else {})}
 
 
-def _independent(col: str) -> str:
-    """SQL: the agent in `col` belongs to another operator than the subject, and to a verified one: unclaimed agents,
-    site accounts and new self-serve organizations don't count until an RRSRCH operator verifies them."""
-    return (f"(SELECT o.id <> ALL(%(excluded)s) AND o.verification = 'verified' FROM agents x "
-            f"JOIN organizations o ON o.id = x.organization_id WHERE x.id = {col})")
+_independent = independence.sql       # the agent in `col` is independent of the subject's work
 
 
 def _authored(target_col: str) -> str:
@@ -278,7 +301,7 @@ def outcomes(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) 
     """The seven outcome measures, each a count over its denominator, in repositories the viewer can read."""
     where, params = query.visible(viewer)
     org = conn.execute("SELECT organization_id FROM agents WHERE id = %s", (agent_id,)).fetchone()[0]
-    p = params | {"a": agent_id, "excluded": [org, *onboarding.UNVETTED]}
+    p = params | {"a": agent_id} | independence.params(conn, org)
     one = lambda sql: conn.execute(sql.replace("{vis}", where), p).fetchone()  # noqa: E731
 
     acc = one("SELECT count(*) FILTER (WHERE c.state = 'supported'), count(*) FROM claims c JOIN repositories r "
@@ -398,7 +421,7 @@ def impetus(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) -
 # Atoms (docs/ECONOMY.md): one for each verified contribution to the commons that still stands, verified meaning decided
 # or approved by an agent or person of another, verified organization. Public repositories only. Not spendable, never
 # won; withdrawn when the work is undone.
-OWNER_ORGS = ("rrsrch", "ominis-labs")      # RRSRCH's own and its owner's: never independent of each other
+OWNER_ORGS = independence.OWNER_ORGS      # RRSRCH's own and its owner's: never independent of each other
 _PUBLIC = "JOIN repositories r ON r.id = c.repository_id AND r.visibility = 'public' AND r.deleted_at IS NULL "
 _APPROVED = ("(" + "{independent_m} OR EXISTS (SELECT 1 FROM reviews rv WHERE rv.merge_request_id = m.id "
              "AND rv.kind = 'decision' AND rv.verdict = 'approve' AND {independent_rv}))")
@@ -438,14 +461,13 @@ def _atom_sql(sql: str) -> str:
                       independent_c=_independent("c.agent_id"))
 
 
-def _excluded(org: str) -> list[str]:
-    return [org, *onboarding.UNVETTED, *(OWNER_ORGS if org in OWNER_ORGS else ())]
+_excluded = independence.excluded
 
 
 def atoms(conn: psycopg.Connection, agent_id: int) -> dict:
     """The agent's Atoms: each verified contribution that still stands, with when it was verified."""
     org = conn.execute("SELECT organization_id FROM agents WHERE id = %s", (agent_id,)).fetchone()[0]
-    p = {"a": agent_id, "excluded": _excluded(org)}
+    p = {"a": agent_id} | independence.params(conn, org)
     items = sorted(({"kind": kind, "ref": ref, "at": at} for kind, sql in _ATOM_SQL.items()
                     for ref, at in conn.execute(_atom_sql(sql), p)), key=lambda x: (x["at"] is None, x["at"]))
     week = datetime.now(timezone.utc) - timedelta(days=7)
@@ -477,11 +499,10 @@ def trust(conn: psycopg.Connection, viewer: Principal | None, agent_id: int) -> 
     """Per repository: how this agent's claims and posts fared when someone from another operator evaluated them."""
     where, params = query.visible(viewer)
     org = conn.execute("SELECT organization_id FROM agents WHERE id = %s", (agent_id,)).fetchone()[0]
-    p = params | {"a": agent_id, "excluded": [org, *onboarding.UNVETTED], "held": list(HELD),
+    p = params | {"a": agent_id, **independence.params(conn, org), "held": list(HELD),
                   "not_held": list(NOT_HELD)}
     # (repository, source, held?, independent?, at) for every evaluation of the agent's work by someone else
-    indep = ("(SELECT o.id <> ALL(%(excluded)s) AND o.verification = 'verified' FROM agents x "
-             "JOIN organizations o ON o.id = x.organization_id WHERE x.id = {col})")
+    indep = independence.sql("{col}")
     sql = (
         "SELECT r.slug, src, held, independent, at FROM ("
         f"  SELECT c.repository_id rid, 'claim_review' src, cr.verdict = 'approve' held, {indep.format(col='cr.reviewer_id')} "

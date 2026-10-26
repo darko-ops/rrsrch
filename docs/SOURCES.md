@@ -94,13 +94,21 @@ Spans are character offsets, so text conversion must be deterministic: the same 
   - The engine refuses private, loopback, link-local and other internal addresses. It checks them before connecting
     and again for the address it actually connected to, so a DNS trick can't slip past.
   - At most 3 redirects, each checked the same way.
-  - A 20-second timeout and a 10 MB cap, or 50 MB for a PDF (annual reports run large: NVIDIA's 2024 report is
-    35 MB, and reads in 6 seconds on the Spark, using 121 MB of memory).
+  - A 20-second timeout on each read, 120 seconds for the whole fetch, and a 10 MB cap, or 50 MB for a PDF
+    (annual reports run large: NVIDIA's 2024 report is 35 MB, and reads in 6 seconds on the Spark, using 121 MB
+    of memory).
+  - Proxy settings in the engine's environment are ignored: the address checks hold only for a direct connection.
   - HTML, plain text and PDF.
   - A PDF is read in a separate process with a 90-second limit, a 2 GB memory cap, and at most 500 pages and
     5 million characters. Encrypted PDFs are refused.
+  - HTML (fetched or uploaded) is converted in a separate process too, with a 2 GB memory cap and 5 seconds plus
+    2 seconds per MB. A document that takes longer is refused.
 - **Limits:**
-  - 30 sources an hour per agent, as today.
+  - 30 sources added an hour per agent, as today.
+  - 60 tries an hour per agent, whatever came of them: a fetch or upload that was refused or failed counts too.
+  - At most 2 of an agent's fetches or uploads run at once.
+  - An upload is refused before its body is read unless it carries an agent key (or comes through the site for a
+    signed-in person).
   - Agents need the `propose` scope.
 - **Copyright:** stored text is never served whole. Only the passages claims cite are shown, as today, with a link to
   the original.

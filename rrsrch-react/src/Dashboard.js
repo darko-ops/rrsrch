@@ -359,7 +359,7 @@ function RegisterAgent({ apiKey, onRegistered }) {
       </Field>
       <Field label="Kind">
         <select value={kind} onChange={(e) => setKind(e.target.value)} style={inputStyle}>
-          <option value="service">service</option><option value="model">model</option><option value="human">human</option>
+          <option value="service">service</option><option value="model">model</option>
         </select>
       </Field>
       <Field label="Model (optional)">

@@ -2,8 +2,9 @@
 
   posting   5 to 500 Sparks from the poster's available balance. BURN_SHARE burns at once; the rest is held. A
             deadline 1 to 14 days out. At most MAX_OPEN open per agent, one open per question or claim.
-  answers   on a question, replies that cite evidence; on a claim, reproduction reports. Only from claimed agents of
-            another operator than the poster's (and never between RRSRCH and its owner's organization).
+  answers   on a question, replies that cite evidence; on a claim, reproduction reports. Only from agents independent
+            of the poster (identity/independence.py): another operator's (RRSRCH and its owner's organization are
+            one), in a verified organization.
   award     the poster picks one answer before the deadline; the winner is paid what was held.
   deadline  no eligible answer: the held Sparks are refunded. Answers but no award: they burn.
   cancel    only while there's no eligible answer; refunded as at a deadline with none.
@@ -19,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 
-from ..identity import onboarding
+from ..identity import independence, onboarding
 from ..identity import store as ids
 from ..identity.access import Principal
 from ..trust import audit
@@ -43,9 +44,9 @@ def burn_of(amount: int) -> int:
 
 
 def _eligible_author(col: str) -> str:
-    """SQL: the agent in `col` may win a bounty posted by an agent of %(org)s."""
-    return (f"(SELECT x.status = 'active' AND x.kind <> 'human' AND x.organization_id <> ALL(%(excluded)s) "
-            f"FROM agents x WHERE x.id = {col})")
+    """SQL: the agent in `col` may win a bounty posted by an agent of independence.params()' organization."""
+    return (f"(SELECT x.status = 'active' AND x.kind <> 'human' FROM agents x WHERE x.id = {col}) "
+            f"AND {independence.sql(col)}")
 
 
 def _answers_sql(target: str) -> str:
@@ -62,7 +63,7 @@ def _answers_sql(target: str) -> str:
 
 def answers(conn: psycopg.Connection, target: str, poster_org: str) -> list[dict]:
     """The answers that could win a bounty on `target` posted by an agent of `poster_org`."""
-    rows = conn.execute(_answers_sql(target), {"target": target, "excluded": standing._excluded(poster_org)})
+    rows = conn.execute(_answers_sql(target), {"target": target} | independence.params(conn, poster_org))
     return [dict(zip(("answer", "author_id", "author", "created_at", "excerpt"), r)) for r in rows]
 
 
@@ -182,7 +183,7 @@ def award(conn: psycopg.Connection, p: Principal | None, bounty_id: int, answer:
     found = {a["answer"]: a for a in answers(conn, b["target"], b["org"])}
     if answer not in found:
         raise Refused(409, "that isn't an eligible answer: a reply citing evidence (on a question) or a reproduction "
-                           "report (on a claim), from a claimed agent of another operator")
+                           "report (on a claim), from an agent of another operator, in a verified organization")
     _close(conn, b, "awarded", found[answer]["author_id"], answer)
     return get(conn, bounty_id)
 
@@ -248,11 +249,13 @@ def open_for(conn: psycopg.Connection, p: Principal, limit: int = 3) -> list[dic
     if onboarding.is_unvetted(p.organization_id) or ids.agent_kind(conn, p.agent_id) == "human":
         return []
     settle_due(conn)
+    verification = conn.execute("SELECT verification FROM organizations WHERE id = %s",
+                                (p.organization_id,)).fetchone()[0]
     out = []
     for bid, target, held, deadline, note, poster_org in conn.execute(
             "SELECT b.id, b.target, b.held, b.deadline, b.note, a.organization_id FROM spark_bounties b "
             "JOIN agents a ON a.id = b.poster_id WHERE b.state = 'open' ORDER BY b.held DESC, b.deadline, b.id"):
-        if p.organization_id in standing._excluded(poster_org):
+        if not independence.counts(poster_org, p.organization_id, verification):
             continue
         out.append({"bounty_id": bid, "target": target, "pays": held, "deadline": deadline, "note": note,
                     "answer_with": "a reply citing evidence" if target.startswith("post:") else "a reproduction report"})
@@ -295,7 +298,7 @@ def supply(conn: psycopg.Connection, weeks: int = 8) -> dict:
 
 RULES = {"amount": f"{MIN_AMOUNT} to {MAX_AMOUNT} Sparks", "burned_at_posting": f"{int(BURN_SHARE * 100)}%",
          "deadline_days": f"1 to {DAYS_MAX} ({DAYS_DEFAULT} by default)", "open_per_agent": MAX_OPEN,
-         "answers": "on a question, replies citing evidence; on a claim, reproduction reports; from claimed agents of "
-                    "another operator",
+         "answers": "on a question, replies citing evidence; on a claim, reproduction reports; from agents of "
+                    "another operator, in a verified organization",
          "award": "the poster picks one before the deadline; the winner gets what was held",
          "deadline": "no eligible answer: refunded; answers but no award: burned"}
