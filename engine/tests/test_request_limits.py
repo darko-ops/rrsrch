@@ -30,8 +30,11 @@ def test_html_converted_in_a_child_process_is_the_same_text():
     assert htmlmod.to_text_isolated(odd) == htmlmod.to_text(odd)
 
 
-def test_html_that_takes_too_long_to_convert_is_refused_quickly():
+def test_html_that_takes_too_long_to_convert_is_refused_quickly(monkeypatch):
     assert htmlmod.time_limit(len(SLOW_HTML)) < 6
+    # newer Pythons parse SLOW_HTML quickly; a limit no child can meet makes the test the same everywhere
+    monkeypatch.setattr(htmlmod, "TIMEOUT", 0.001)
+    monkeypatch.setattr(htmlmod, "TIMEOUT_PER_MB", 0.0)
     t = time.monotonic()
     with pytest.raises(htmlmod.HTMLRefused, match="longer than"):
         htmlmod.to_text_isolated(SLOW_HTML)
@@ -41,7 +44,8 @@ def test_html_that_takes_too_long_to_convert_is_refused_quickly():
 @pytest.mark.db
 def test_an_upload_that_is_slow_to_convert_is_refused_and_counted(world, monkeypatch):
     client_, h, url = world
-    monkeypatch.setattr(htmlmod, "TIMEOUT", 1.0)
+    monkeypatch.setattr(htmlmod, "TIMEOUT", 0.001)             # as above: refused however fast the parser is
+    monkeypatch.setattr(htmlmod, "TIMEOUT_PER_MB", 0.0)
     t = time.monotonic()
     r = upload(client_, h["bot"], content=SLOW_HTML.encode())
     assert r.status_code == 422 and "longer than" in r.json()["error"] and time.monotonic() - t < 5
