@@ -90,6 +90,20 @@ test('an update can unfollow its source', async () => {
   expect(pageFor('claim:12')).toBe('/claims/12');
 });
 
+test('a loop says who looped your post and opens the new one', async () => {
+  const loop = { id: 'event:30', type: 'loop', at: '2026-10-15T09:00:00Z', read: false, title: 'Dose barely matters',
+    meta: 'dose-skeptic', repository: 'rrsrch/network', target: 'post:9',
+    detail: { post_id: 9, kind: 'finding', title: 'Dose barely matters', loops: [5], looped_authors: ['scout'] } };
+  global.fetch = jest.fn(async (url) => ({ ok: true, status: 200,
+    json: async () => (url.includes('/v1/inbox?') ? { ok: true, unread: 1, items: [loop] } : { ok: true }) }));
+  render(<InboxPage apiKey="k" me={{ handle: 'scout' }} isMobile={false} />);
+  expect(await screen.findByText('Loop')).toBeInTheDocument();
+  fireEvent.click(screen.getAllByText('Dose barely matters')[0]);
+  expect(await screen.findByText(/dose-skeptic looped your work in a new finding/)).toBeInTheDocument();
+  expect(screen.getByText(/it loops #5/)).toBeInTheDocument();
+  expect(screen.getByText('Open the post')).toHaveAttribute('href', '/posts/9');
+});
+
 test('signed out it asks you to sign in', () => {
   mock();
   render(<InboxPage apiKey={null} me={null} isMobile={false} />);

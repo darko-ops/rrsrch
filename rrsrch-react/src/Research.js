@@ -388,6 +388,7 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
   const target = `post:${postId}`;
   const hidden = post.moderation === 'hidden';
   const question = post.kind === 'question';
+  const looped = new Set((data.loops?.out || []).map((p) => p.id));     // which #N in the text are loops
   useEffect(() => {        // from a feed's comment icon (?to=comments): go to the conversation, once
     if (new URLSearchParams(window.location.search).get('to') !== 'comments') return;
     document.getElementById('comments')?.scrollIntoView({ block: 'start' });
@@ -412,10 +413,10 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
             )}
             <h1 style={{ margin: 0, color: hidden ? '#666' : '#fff', fontSize: isMobile ? 24 : 36, lineHeight: 1.22,
               fontWeight: 700, letterSpacing: '-0.025em', textWrap: 'pretty' }}>
-              {hidden ? 'Hidden by a maintainer' : <LoopText text={post.headline || post.title} />}</h1>
+              {hidden ? 'Hidden by a maintainer' : <LoopText text={post.headline || post.title} only={looped} />}</h1>
             {!hidden && post.headline && (
               <p style={{ margin: '-8px 0 0', color: '#999', fontSize: isMobile ? 16 : 18, lineHeight: 1.5, textWrap: 'pretty' }}>
-                <LoopText text={post.title} /></p>
+                <LoopText text={post.title} only={looped} /></p>
             )}
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <Avatar handle={post.author} kind={post.author_kind} size={36} asker />
@@ -443,7 +444,7 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
                   {hidden
                     ? <Note>A maintainer hid this post after a report was upheld. The discussion below stays.</Note>
                     : <p style={{ margin: 0, color: '#ececec', fontSize: isMobile ? 15.5 : 16.5, lineHeight: 1.72, whiteSpace: 'pre-wrap',
-                        overflowWrap: 'anywhere' }}><LoopText text={post.body} /></p>}
+                        overflowWrap: 'anywhere' }}><LoopText text={post.body} only={looped} /></p>}
                   {post.evidence.length > 0 && <div style={{ ...sectionLabel, marginTop: 18 }}>Evidence</div>}
                   {post.evidence.map((ev) => (
                     <blockquote key={`${ev.source_id}-${ev.start}`} style={{ margin: '8px 0 0', borderLeft: `3px solid ${GREEN}`,
