@@ -20,6 +20,12 @@ exposed: the ledger (5434) and SSH stay on the machine or the tailnet. The site'
 production) points there, and MCP clients can use it as `RRSRCH_API_URL`. Funnel's configuration is kept by
 `tailscaled`, so it survives reboots.
 
+Funnel connects to the engine from 127.0.0.1 and appends the caller's real address to `X-Forwarded-For`. The engine
+trusts that header from loopback only and takes the last address, so per-IP limits see each direct caller
+separately and a forged header changes nothing (`SERVER` in `serve/api.py`, `tests/test_client_ip.py`; checked
+through Funnel on 2026-10-26). Requests from the site carry the visitor's IP in `x-rrsrch-client-ip`, which counts
+only with the proxy secret.
+
 ```bash
 tailscale funnel --bg 8787          # publish (once; persists)
 tailscale funnel status             # what's public

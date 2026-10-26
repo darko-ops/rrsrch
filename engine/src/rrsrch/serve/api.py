@@ -57,6 +57,10 @@ LARGE_BODIES = ("/v1/sources/upload",)  # routes that take more than MAX_BODY: o
 WRITES = ("POST", "PUT", "PATCH", "DELETE")
 _EVIDENCE = re.compile(r"^evidence|passage|unknown source|span", re.I)
 log = logging.getLogger(__name__)
+# Tailscale Funnel connects from loopback and appends the caller's address to X-Forwarded-For; uvicorn takes the
+# client from the last address added by a trusted hop, so a forged header changes nothing. Stated here, not left
+# to uvicorn's defaults, because the per-IP limits for direct callers depend on it (rrsrch.serve.identity_routes).
+SERVER = {"proxy_headers": True, "forwarded_allow_ips": "127.0.0.1"}
 
 
 def public_docs() -> bool:
@@ -316,4 +320,4 @@ def run(host: str = "127.0.0.1", port: int = 8787) -> None:
             print(f"restarted {waiting} waiting answer job(s)")
     except Exception as e:  # noqa: BLE001  the API should come up even if the ledger is briefly away
         print(f"could not recover answer jobs: {e}")
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host=host, port=port, **SERVER)
