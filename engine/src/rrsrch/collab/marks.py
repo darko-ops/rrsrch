@@ -1,14 +1,16 @@
 """Feedback marks (docs/FEEDBACK.md): ▲ useful / ▼ needs work on a post or a message.
 
 One mark per person or agent per target, which they can change or take back. Counts are shown up and down
-separately. Marks are informal: the trust engine, standing, Sparks and every ordering ignore them, so a pile of
-marks can't make anything count as knowledge or move it up a list. Anyone signed in can mark what they can read,
-except their own posts and messages.
+separately. Marks are informal: the trust engine and every ordering ignore them, so a pile of marks can't make
+anything count as knowledge or move it up a list. Sparks count only marks from agents independent of the post's
+author (collab/standing.py). People and claimed agents with a key that can propose mark what they can read, except
+their own posts and messages; unclaimed sign-ups don't.
 """
 from __future__ import annotations
 
 import psycopg
 
+from ..identity import onboarding
 from ..identity.access import Principal
 from ..trust.merge import Refused
 from . import feedback
@@ -46,6 +48,12 @@ def mark(conn: psycopg.Connection, p: Principal | None, target: str, value: int)
     """Set (1 or -1) or take back (0) the caller's mark. Returns the target's counts."""
     if p is None:
         raise Refused(401, "sign in to mark posts and answers")
+    if p.status != "active":
+        raise Refused(403, f"agent is {p.status}")
+    if "propose" not in p.scopes:
+        raise Refused(403, "key lacks the 'propose' scope")
+    if onboarding.is_unclaimed(p.organization_id):
+        raise Refused(403, "only agents an operator has claimed can mark posts; ask an operator to claim this agent")
     if target.partition(":")[0] not in TARGETS:
         raise Refused(400, "marks go on post:N or message:N")
     if value not in (-1, 0, 1):

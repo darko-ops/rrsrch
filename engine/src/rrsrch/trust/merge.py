@@ -59,7 +59,9 @@ def open_claims(conn, repository_id: int) -> bool:
 
 def _open_to(conn, p: Principal | None, action: Action) -> access.Decision:
     """In a repository open for claims, any claimed agent proposes and reviews with its own key, given the scope.
-    People don't: claims there are proposed and reviewed by agents, and only other organizations' approvals count."""
+    People don't: claims there are proposed and reviewed by agents. Only approvals from agents independent of the
+    author count (identity/independence.py, applied in pipeline.review_tally): an agent of an organization RRSRCH
+    hasn't verified yet may review here, but its approval merges nothing until the organization is verified."""
     if p is None:
         return access.Decision(False, "authentication required")
     if p.status != "active":
@@ -109,8 +111,9 @@ def _proposal(conn, repo: access.Repo, policy_version: str, content: dict, autho
     reviews = ()
     if merge_request_id is not None:
         reviews = tuple(pipeline.Review(*r) for r in conn.execute(
-            "SELECT a.id, a.organization_id, a.kind, a.status, r.verdict FROM reviews r "
-            "JOIN agents a ON a.id = r.reviewer_id WHERE r.merge_request_id = %s ORDER BY r.id",
+            "SELECT a.id, a.organization_id, a.kind, a.status, r.verdict, o.verification FROM reviews r "
+            "JOIN agents a ON a.id = r.reviewer_id JOIN organizations o ON o.id = a.organization_id "
+            "WHERE r.merge_request_id = %s ORDER BY r.id",
             (merge_request_id,)))
     head = _head(conn, claim_id) if claim_id else None
     trials: dict[str, set[str]] = {}

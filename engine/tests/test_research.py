@@ -5,6 +5,7 @@ import pytest
 from reviewing import notes, object_to, report, reports  # noqa: F401
 from test_claim_review import reader_claim, review, state_of
 from test_knowledge_api import PRIVATE_RULES, claim_of, merged_claim
+from test_prescience import agent
 from test_trust_db import PILOT, QUOTE, SHA, TEXT, world  # noqa: F401  (world is a fixture)
 
 from rrsrch.collab import research, verification
@@ -131,25 +132,36 @@ def test_promoting_a_post_opens_a_merge_request_that_review_decides(world):
     pid = post(client, h["ext"], evidence=[SPAN])
     prop = {"repository": PILOT, "proposition": "At 12 months, WOMAC improved more with MSCs than hyaluronic acid."}
     assert client.post(f"/v1/posts/{pid}/promote", json=prop).status_code == 401
-    r = client.post(f"/v1/posts/{pid}/promote", headers=h["bot"], json=prop)
+    r = client.post(f"/v1/posts/{pid}/promote", headers=h["bot"], json=prop)           # someone else's post
+    assert r.status_code == 403 and "author" in r.json()["error"]
+    r = client.post(f"/v1/posts/{pid}/promote", headers=h["ext"], json=prop)
     assert r.status_code == 201 and r.json()["checks_passed"], r.json()
     mr = r.json()["merge_request_id"]
     got = client.get(f"/v1/posts/{pid}").json()
     assert got["post"]["status"] == "promoted" and got["promoted"] == {
         "merge_request_id": mr, "state": "open", "repository": PILOT, "claim_id": None}
-    assert any(n["action"] == "post.promote" for n in notes(client, h["ext"]))
-    assert client.post(f"/v1/posts/{pid}/promote", headers=h["bot"], json=prop).status_code == 409
+    assert client.post(f"/v1/posts/{pid}/promote", headers=h["ext"], json=prop).status_code == 409
     assert client.patch(f"/v1/posts/{pid}", headers=h["ext"], json={"status": "closed"}).status_code == 409
     with psycopg.connect(url) as c:
         assert c.execute("SELECT source_post_id FROM merge_requests WHERE id = %s", (mr,)).fetchone()[0] == pid
         assert c.execute("SELECT count(*) FROM claims").fetchone()[0] == 0          # nothing merged yet
 
-    client.post("/v1/reviews", headers=h["ext"], json={"target": f"proposal:{mr}", "verdict": "approve"})
+    client.post("/v1/reviews", headers=h["admin"], json={"target": f"proposal:{mr}", "verdict": "approve"})
     assert client.post(f"/v1/merge-requests/{mr}/merge", headers=h["admin"]).status_code == 200
     assert client.get(f"/v1/posts/{pid}").json()["promoted"]["claim_id"] is not None
 
     bare = post(client, h["ext"], title="No evidence")
-    assert client.post(f"/v1/posts/{bare}/promote", headers=h["bot"], json=prop).status_code == 400
+    assert client.post(f"/v1/posts/{bare}/promote", headers=h["ext"], json=prop).status_code == 400
+
+
+def test_an_admin_of_the_authors_organization_promotes_for_it(world):
+    client, h, url = world
+    pid = post(client, h["bot"], evidence=[SPAN])                                      # bot is rrsrch's
+    prop = {"repository": PILOT, "proposition": "At 12 months, WOMAC improved more with MSCs than hyaluronic acid."}
+    assert client.post(f"/v1/posts/{pid}/promote", headers=h["ext"], json=prop).status_code == 403
+    r = client.post(f"/v1/posts/{pid}/promote", headers=h["admin"], json=prop)
+    assert r.status_code == 201, r.json()
+    assert any(n["action"] == "post.promote" for n in notes(client, h["bot"]))
 
 
 def test_a_withdrawn_promotion_can_be_tried_again(world):
@@ -208,13 +220,24 @@ def test_a_policy_can_require_independent_reproductions(world):
     assert r["state"] == "under_review" and r["reasons"] == ["0 independent reproduction(s), policy needs 1"]
 
     rep = {"target": f"claim:{cid}", "context": "reproduction", "observations": "Same result on reanalysis."}
-    report(client, h["admin"], **(rep | {"outcome": "reproduced"}))
+    assert report(client, h["admin"], **(rep | {"outcome": "reproduced"})).status_code == 201
+    r = review(client, h["ext"], cid, "approve").json()                           # the author's own operator: no
+    assert r["state"] == "under_review" and r["reasons"] == ["0 independent reproduction(s), policy needs 1"]
+    uni = agent(url, "uni", "uni-1", verified=True, scopes=("read", "propose", "review"))
+    sock = agent(url, "sock", "sock-1", scopes=("read", "propose", "review"))      # not verified: doesn't count
+    for handle in ("uni-1", "sock-1"):
+        assert client.put(f"/v1/repos/{PILOT}/members/{handle}", headers=h["admin"],
+                          json={"role": "reviewer"}).status_code == 200
+    assert report(client, sock, **(rep | {"outcome": "reproduced"})).status_code == 201
+    assert review(client, h["ext"], cid, "approve").json()["state"] == "under_review"
+    assert report(client, uni, **(rep | {"outcome": "reproduced"})).status_code == 201
     assert state_of(url, cid) == "under_review"                                    # a report alone changes nothing
     assert review(client, h["ext"], cid, "approve").json()["state"] == "supported"
 
     other = reader_claim(url, text=QUOTE + " ")
-    report(client, h["admin"], **(rep | {"target": f"claim:{other}", "outcome": "reproduced"}))
-    report(client, h["bot"], **(rep | {"target": f"claim:{other}", "outcome": "failed"}))
+    report(client, uni, **(rep | {"target": f"claim:{other}", "outcome": "reproduced"}))
+    report(client, h["bot"], **(rep | {"target": f"claim:{other}", "outcome": "failed"}))   # its own operator
+    report(client, sock, **(rep | {"target": f"claim:{other}", "outcome": "failed"}))
     r = review(client, h["ext"], other, "approve").json()
     assert r["state"] == "under_review" and r["reasons"] == ["1 independent reproduction(s) failed"]
 

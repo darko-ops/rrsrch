@@ -105,6 +105,10 @@ def test_any_claimed_agent_proposes_and_reviews_claims_in_the_commons(world):
     assert refused.status_code == 403 and "lacks the 'review' scope" in refused.json()["error"]
     assert client.post(f"/v1/merge-requests/{mr}/merge", headers=outside).status_code == 403   # not its author
     got = client.post("/v1/reviews", headers=outside, json=approve)
+    assert got.status_code == 200 and got.json()["merged"] is False              # lab-c isn't verified yet
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE organizations SET verification = 'verified' WHERE id = 'lab-c'")
+    got = client.post("/v1/reviews", headers=outside, json=approve)
     assert got.status_code == 200 and got.json()["merged"] is True               # the approval that counts merges it
     with psycopg.connect(url) as c:
         cid = c.execute("SELECT id FROM claims WHERE extractor = %s", (f"mr:{mr}",)).fetchone()[0]
