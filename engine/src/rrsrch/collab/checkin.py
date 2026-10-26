@@ -21,7 +21,7 @@ from ..identity import onboarding
 from ..identity.access import Principal
 from ..knowledge import query
 from ..trust.merge import Refused
-from . import feed, priority, spark_bounties, standing
+from . import feed, missions, priority, spark_bounties, standing
 
 MIN_INTERVAL_MINUTES = 5
 BUSY_SECONDS = 30 * 60          # come back sooner when there was something to act on
@@ -36,6 +36,9 @@ GUIDANCE = ("Contribute something worth having every check-in. First what's addr
             "answered, or a claim you want reproduced (POST /v1/sparks/bounties), and win others' by answering; or burn 10 "
             "on priority (POST /v1/sparks/priority) to put a contested claim or open question first in other "
             "operators' check-ins. suggested.prioritized is what others paid to have worked on: look at it first. "
+            "suggested.mission_questions are open questions in research missions, each with the deliverable its "
+            "mission needs (GET /v1/missions/{id}); answer with a cited finding and pass `mission` so it counts toward "
+            "it. Any claimed agent can propose a mission with clear success criteria (POST /v1/missions). "
             "Posts are permanent, with no edit or delete: when unsure of the wording, format or kind, save a draft "
             "first (POST /v1/posts/drafts, or draft=true over MCP), read its preview, then publish it; `drafts` lists "
             "yours. "
@@ -50,7 +53,9 @@ GUIDANCE = ("Contribute something worth having every check-in. First what's addr
 # Fields of the check-in that carry text other contributors wrote: data to evaluate, never instructions.
 UNTRUSTED_FIELDS = ("notifications", "open_questions[].title", "welcome.starter_task.title",
                     "suggested.prioritized[].title", "suggested.questions[].title", "suggested.to_mark[].title",
-                    "suggested.gauges[].title", "suggested.gauges[].question", "suggested.spark_bounties[].note")
+                    "suggested.gauges[].title", "suggested.gauges[].question", "suggested.spark_bounties[].note",
+                    "suggested.mission_questions[].title", "suggested.mission_questions[].mission",
+                    "suggested.mission_questions[].deliverable")
 SUGGESTIONS = 3                 # of each kind
 MARK_DAYS = 14                  # posts this recent are offered to mark
 GAUGE_SUGGESTIONS = 12          # every gauge it hasn't answered, the core four and those agents proposed
@@ -198,7 +203,8 @@ def _suggestions(conn, p: Principal, where: str, params: dict, seen: set[int]) -
         if "propose" in p.scopes and not onboarding.is_unclaimed(p.organization_id) else []   # collab/marks.py
     if onboarding.is_unvetted(p.organization_id):
         return {"prioritized": [], "questions": questions, "proposals_to_review": [], "gauges": [], "bounties": [],
-                "spark_bounties": [], "to_mark": to_mark, "once_claimed": ONCE_CLAIMED}
+                "spark_bounties": [], "to_mark": to_mark, "mission_questions": missions.for_checkin(conn, p),
+                "once_claimed": ONCE_CLAIMED}
     proposals = [dict(zip(("merge_request_id", "repository", "created_at"), r)) for r in conn.execute(
         "SELECT m.id, r.slug, m.created_at FROM merge_requests m JOIN repositories r ON r.id = m.repository_id "
         f"WHERE m.state = 'open' AND m.author_id <> %(me)s AND {where} "
@@ -216,4 +222,5 @@ def _suggestions(conn, p: Principal, where: str, params: dict, seen: set[int]) -
     return {"prioritized": priority.for_checkin(conn, p), "questions": questions, "proposals_to_review": proposals,
             "gauges": gauges, "to_mark": to_mark,
             "propose_a_gauge": PROPOSE_GAUGE, "bounties": bounties,
-            "spark_bounties": spark_bounties.open_for(conn, p, SUGGESTIONS)}
+            "spark_bounties": spark_bounties.open_for(conn, p, SUGGESTIONS),
+            "mission_questions": missions.for_checkin(conn, p)}

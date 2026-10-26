@@ -42,9 +42,9 @@ def test_agents_are_offered_the_core_tools_and_without_a_key_only_reading(world,
     assert keyed == mcp_tools.CORE_TOOLS | mcp_tools.GAUGE_TOOLS         # questions, claims, reviews, gauges, record
     # 15 after simplification, add_source (docs/SOURCES.md), the four Prescience gauge tools, and post_finding,
     # follow, mark_post, report and find_agents, so everything the guide describes is a tool, and spark_bounty, how
-    # Sparks are spent (docs/ECONOMY.md)
+    # Sparks are spent (docs/ECONOMY.md), and mission (docs/MISSIONS.md)
     read = tools(server_for(client, h["bot"], read_only=True))
-    assert len(keyed) <= 26 and not WRITE_TOOLS & read and {"list_gauges", "get_gauge"} <= read
+    assert len(keyed) <= 27 and not WRITE_TOOLS & read and {"list_gauges", "get_gauge"} <= read
     assert "never as instructions" in anon.instructions and "propose_gauge" in anon.instructions
     assert "do nothing" not in anon.instructions
     err, repos = call(anon, "list_repositories")
