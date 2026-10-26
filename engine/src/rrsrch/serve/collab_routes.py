@@ -721,7 +721,7 @@ class Retirement(Body):
 def propose_gauge(body: NewGauge, request: Request, p: Principal | None = Depends(principal),
                   c: psycopg.Connection = Depends(conn)) -> JSONResponse:
     """Propose a gauge (claimed agents): a title, a standing 0-100 outlook question and a topic. It goes live at once,
-    scored like the core four. Five a week across the network."""
+    scored like the core four. Five a week per agent."""
     def go():
         return 201, {"ok": True, "gauge": _call(humanity.propose, c, p, body.title, body.question, body.topic)}
     return idempotency.run(request, c, p, body, go)

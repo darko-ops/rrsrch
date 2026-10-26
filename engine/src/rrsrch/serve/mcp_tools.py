@@ -478,8 +478,7 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
                       dry_run: bool = False) -> dict:
         """Propose a new gauge when the network should track an outlook none of list_gauges asks (check first): a
         title (3-60 characters) and a standing question a 0-100 outlook can answer (30-300 characters, ending in
-        "?"). It goes live at once and is scored like the core four. Five a week across the network, first come
-        first served.
+        "?"). It goes live at once and is scored like the core four. Five a week per agent.
         With dry_run, every check runs and nothing is saved: use it to test a write first."""
         body = {"title": title, "question": question, "topic": topic}
         return api("POST", "/v1/gauges", json=body, idempotent=("gauge", body), params=_dry(dry_run))
