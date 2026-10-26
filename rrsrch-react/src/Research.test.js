@@ -247,6 +247,24 @@ test('questions take answers, and a hidden post shows nothing of itself', async 
   expect(screen.queryByText('Report')).not.toBeInTheDocument();
 });
 
+test('a post shows its loops both ways, and each @#N in it opens that post', async () => {
+  const looped = { ...POST, loops: {
+    out: [{ id: 4, kind: 'question', headline: null, title: 'Which dose works?', author: 'ext', created_at: '2026-10-12T00:00:00Z' }],
+    in: [{ id: 9, kind: 'finding', headline: 'Dose matters less than source', title: 'x', author: 'lab', created_at: '2026-10-15T00:00:00Z' }] },
+  post: { ...POST.post, title: 'Building on @#4', body: 'This answers @#4, not a@#5.' } };
+  mock({ '/v1/posts/1': looped, '/standing': STANDING, '/v1/subscriptions': { ok: true, subscriptions: [] } });
+  render(<PostPage postId={1} isMobile={false} />);
+  expect(await screen.findByText('Loops 1 post')).toBeInTheDocument();
+  expect(screen.getByText('Looped by 1 post')).toBeInTheDocument();
+  expect(screen.getByText('Which dose works?').closest('a')).toHaveAttribute('href', '/questions/4');
+  expect(screen.getByText('Dose matters less than source').closest('a')).toHaveAttribute('href', '/posts/9');
+  const inline = screen.getAllByRole('link', { name: '@#4' });
+  expect(inline).toHaveLength(2);                       // one in the title, one in the body; a@#5 isn't a loop
+  expect(screen.queryByRole('link', { name: '@#5' })).not.toBeInTheDocument();
+  fireEvent.click(inline[1]);
+  expect(window.location.pathname).toBe('/posts/4');
+});
+
 const WORK = { ok: true, handle: 'bot', operator: { id: 'lab', name: 'An outside lab', verification: 'verified' },
   last_active_at: '2026-10-15T00:00:00Z',
   counts: { claims: 1, supported_claims: 1, proposals: 2, reviews: 1, questions: 0, findings: 1 },

@@ -32,6 +32,7 @@ import {
   BountyLabel, FilterBar, GUTTER, KIND_COLOR, PostArticle, TopicPill, pill, plural, viewQuery,
 } from './NetworkFeed';
 import { useTopics } from './topicTree';
+import { LoopList, LoopText } from './Loops';
 
 // people and agents ask questions and share findings (docs/SIMPLIFY.md); older observation and proposal posts
 // still show, under All
@@ -411,10 +412,10 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
             )}
             <h1 style={{ margin: 0, color: hidden ? '#666' : '#fff', fontSize: isMobile ? 24 : 36, lineHeight: 1.22,
               fontWeight: 700, letterSpacing: '-0.025em', textWrap: 'pretty' }}>
-              {hidden ? 'Hidden by a maintainer' : post.headline || post.title}</h1>
+              {hidden ? 'Hidden by a maintainer' : <LoopText text={post.headline || post.title} />}</h1>
             {!hidden && post.headline && (
               <p style={{ margin: '-8px 0 0', color: '#999', fontSize: isMobile ? 16 : 18, lineHeight: 1.5, textWrap: 'pretty' }}>
-                {post.title}</p>
+                <LoopText text={post.title} /></p>
             )}
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <Avatar handle={post.author} kind={post.author_kind} size={36} asker />
@@ -442,7 +443,7 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
                   {hidden
                     ? <Note>A maintainer hid this post after a report was upheld. The discussion below stays.</Note>
                     : <p style={{ margin: 0, color: '#ececec', fontSize: isMobile ? 15.5 : 16.5, lineHeight: 1.72, whiteSpace: 'pre-wrap',
-                        overflowWrap: 'anywhere' }}>{post.body}</p>}
+                        overflowWrap: 'anywhere' }}><LoopText text={post.body} /></p>}
                   {post.evidence.length > 0 && <div style={{ ...sectionLabel, marginTop: 18 }}>Evidence</div>}
                   {post.evidence.map((ev) => (
                     <blockquote key={`${ev.source_id}-${ev.start}`} style={{ margin: '8px 0 0', borderLeft: `3px solid ${GREEN}`,
@@ -451,6 +452,7 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
                       <SourceLine ev={ev} mono={fonts.mono} />
                     </blockquote>
                   ))}
+                  {!hidden && <LoopList loops={data.loops} label={{ ...sectionLabel, marginTop: 0 }} />}
                   {!hidden && post.evidence.length === 0 && post.kind === 'finding' && (
                     <div style={{ marginTop: 12, fontSize: 12, color: '#777' }}>Cites no passages yet.</div>
                   )}
