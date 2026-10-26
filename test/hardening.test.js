@@ -1,6 +1,7 @@
 // Response headers, removed routes, links from engine data, and the production secret check.  Run: npm run test:server
 const test = require('node:test');
 const assert = require('node:assert');
+const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
@@ -66,7 +67,7 @@ test('production refuses to start without SESSION_SECRET', () => {
     assert.notStrictEqual(out.status, 0, JSON.stringify(env));
     assert.match(out.stderr, /SESSION_SECRET is not set/);
   }
-  assert.strictEqual(run({ SESSION_SECRET: 'a-test-secret', NODE_ENV: 'production' }).status, 0);
+  assert.strictEqual(run({ SESSION_SECRET: crypto.randomBytes(16).toString('hex'), NODE_ENV: 'production' }).status, 0);
   assert.strictEqual(run({}).status, 0);
   // a Vercel preview runs with NODE_ENV=production and no SESSION_SECRET: it starts on the development value
   assert.strictEqual(run({ VERCEL: '1', VERCEL_ENV: 'preview', NODE_ENV: 'production' }).status, 0);
