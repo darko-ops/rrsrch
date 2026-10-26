@@ -304,26 +304,42 @@ def test_explore_carries_kind_counts_and_a_text_filter(world):
     assert client.get("/v1/explore", params={"q": "x" * 101}).status_code in (400, 422)
 
 
-def test_a_post_loops_earlier_posts_with_at_hash_and_both_show_the_loop(world):
+def test_a_post_loops_earlier_posts_with_hash_and_both_show_the_loop(world):
     client, h, url = world
     first = post(client, h["bot"], title="WOMAC gains at 12 months")
     second = post(client, h["ext"], kind="question", title="Which dose works?")
-    loop = post(client, h["ext"], title=f"Building on @#{first}",
-                body=f"Same cohort as @#{first}; it answers @#{second}. Ask @bot. Not a loop: a@#{second}, @#{second}x")
+    loop = post(client, h["ext"], title=f"Building on post #{first}",
+                body=f"Same cohort as #{first}; it answers @#{second}. Not loops: MR #{second}, merge request "
+                     f"#{second}, a#{second}, /#{second}, &#{second};, #{second}x, the #999999 cause.")
     got = client.get(f"/v1/posts/{loop}").json()["loops"]
     assert [(i["id"], i["author"]) for i in got["out"]] == [(first, "bot"), (second, "ext")]
     looped = client.get(f"/v1/posts/{first}").json()["loops"]
     assert looped["out"] == [] and [i["id"] for i in looped["in"]] == [loop]
     back = client.get(f"/v1/posts/{second}").json()["loops"]["in"]
-    assert [i["id"] for i in back] == [loop] and back[0]["title"] == f"Building on @#{first}"
+    assert [i["id"] for i in back] == [loop] and back[0]["title"] == f"Building on post #{first}"
 
-    for bad in ("@#999999", " ".join(f"@#{first + i}" for i in range(21))):
-        r = client.post("/v1/posts", headers=h["ext"], json={"kind": "finding", "title": "x", "body": bad})
-        assert r.status_code == 400, bad
-    r = client.post("/v1/posts/drafts", headers=h["ext"], json={"kind": "finding", "title": "x", "body": "@#999999"})
-    assert any("@#999999" in p for p in r.json()["preview"]["problems"])
+    only_mr = post(client, h["bot"], title="Re-verified", body=f"See MR #{first} and issue #{second}.")
+    assert client.get(f"/v1/posts/{only_mr}").json()["loops"]["out"] == []
+    r = client.post("/v1/posts/drafts", headers=h["ext"], json={"kind": "finding", "title": "x",
+                                                               "body": f"#{first} and the #999999 cause"})
+    assert r.json()["preview"]["as_posted"]["loops"] == [first] and r.json()["preview"]["problems"] == []
     with psycopg.connect(url) as c:
         assert audit.verify(c) == []
+
+
+def test_older_posts_that_name_posts_with_hash_are_looped_by_the_backfill(world):
+    client, h, url = world
+    first = post(client, h["bot"], title="WOMAC gains at 12 months")
+    second = post(client, h["ext"], kind="question", title="Which dose works?")
+    loop = post(client, h["ext"], title=f"Answering post #{first}", body=f"See #{second}, not MR #{first}.")
+    later = post(client, h["bot"], title="A later post")
+    with psycopg.connect(url) as c:
+        before = sorted(c.execute("SELECT post_id, looped_id FROM post_loops").fetchall())
+        c.execute("DELETE FROM post_loops")
+        c.execute(open(research.__file__.replace("src/rrsrch/collab/research.py",
+                                                 "db/migrations/0061_loop_hash.sql")).read())
+        after = sorted(c.execute("SELECT post_id, looped_id FROM post_loops").fetchall())
+    assert after == before == [(loop, first), (loop, second)] and later not in [a for a, _ in after]
 
 
 def test_a_post_cannot_loop_a_private_post_and_readers_only_see_loops_they_can_open(world):
@@ -331,8 +347,22 @@ def test_a_post_cannot_loop_a_private_post_and_readers_only_see_loops_they_can_o
     client.post("/v1/repos", headers=h["admin"], json={"slug": "rrsrch/notes", "topic": "Notes",
                                                        "visibility": "private", "policy": PRIVATE_RULES})
     hidden = post(client, h["admin"], title="Internal", repository="rrsrch/notes")
-    r = client.post("/v1/posts", headers=h["ext"], json={"kind": "finding", "title": "x", "body": f"@#{hidden}"})
-    assert r.status_code == 400                                                    # ext can't read it
-    public = post(client, h["admin"], title="Public, looping the internal note", body=f"See @#{hidden}.")
+    cannot = post(client, h["ext"], title="x", body=f"#{hidden}")                    # ext can't read it: plain text
+    assert client.get(f"/v1/posts/{cannot}", headers=h["admin"]).json()["loops"]["out"] == []
+    public = post(client, h["admin"], title="Public, looping the internal note", body=f"See #{hidden}.")
     assert [i["id"] for i in client.get(f"/v1/posts/{public}", headers=h["admin"]).json()["loops"]["out"]] == [hidden]
     assert client.get(f"/v1/posts/{public}").json()["loops"]["out"] == []          # anonymous readers don't see it
+
+
+def test_the_author_of_a_looped_post_hears_about_it(world):
+    client, h, url = world
+    mine = post(client, h["bot"], title="WOMAC gains at 12 months")
+    theirs = post(client, h["ext"], kind="question", title="Which dose works?")
+    loop = post(client, h["ext"], title=f"Building on #{mine}", body=f"And on my own #{theirs}.")
+
+    got = [i for i in client.get("/v1/inbox", headers=h["bot"]).json()["items"] if i["target"] == f"post:{loop}"]
+    assert [i["type"] for i in got] == ["loop"]
+    assert got[0]["detail"]["loops"] == [mine, theirs] and got[0]["detail"]["looped_authors"] == ["bot"]
+    assert f"post:{loop}" in [n["target"] for n in notes(client, h["bot"])]          # in check-ins too
+    assert not [i for i in client.get("/v1/inbox", headers=h["ext"]).json()["items"]  # looping yourself: no notice
+                if i["type"] == "loop"]

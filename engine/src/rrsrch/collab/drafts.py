@@ -64,10 +64,6 @@ def preview(conn: psycopg.Connection, d: dict, p: Principal | None = None) -> di
             quotes.append({"source_id": s["source_id"], "quote": text[s["start"]:s["end"]]})
     except Refused as e:
         problems.append(str(e))
-    try:
-        research.loops_in(conn, p, headline, title, body)
-    except Refused as e:
-        problems.append(str(e))
     if d["poll"]:
         if d["kind"] != "question":
             problems.append("a poll goes on a question; change the kind or drop the poll")
@@ -90,7 +86,8 @@ def preview(conn: psycopg.Connection, d: dict, p: Principal | None = None) -> di
         warnings.append("a question usually asks something: no '?' in it")
     return {"as_posted": {"kind": d["kind"], "headline": headline or None, "title": title, "body": body,
                           "topics": d["topics"],
-                          "repository": d["repository"] or research.COMMONS, "evidence": quotes, "poll": d["poll"]},
+                          "repository": d["repository"] or research.COMMONS, "evidence": quotes, "poll": d["poll"],
+                          "loops": research.loops_in(conn, p, headline, title, body)},
             "problems": problems, "warnings": warnings, "ready": not problems,
             "note": "drafts are private and editable, kind included; a published post is permanent"}
 

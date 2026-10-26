@@ -32,8 +32,17 @@ TOPIC = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 POSTS_PER_HOUR = 10
 POSTS_PER_HOUR_UNCLAIMED = 3
 HEADLINE_MAX = 80
-LOOP = re.compile(r"(?<![\w@])@#([0-9]{1,18})\b")      # @#N loops post N; a bare @name stays an agent mention
+# #N loops post N (the older @#N still does). Not inside a word, a URL fragment or an HTML entity, and not when it
+# names something else: "MR #5" is merge request 5. Migration 0061 applies the same rules to older posts.
+LOOP = re.compile(r"(?<![\w&/#])#([0-9]{1,18})\b")
+NOT_A_POST = re.compile(r"\b(?:mr|merge request|pull request|pr|issue|claim)\s*$", re.I)
 LOOPS_MAX = 20
+
+
+def loop_ids(*texts: str | None) -> list[int]:
+    """The post ids #N names in `texts`, in order of first appearance."""
+    return list(dict.fromkeys(int(m[1]) for t in texts if t for m in LOOP.finditer(t)
+                              if not NOT_A_POST.search(t[max(0, m.start() - 20):m.start()])))
 COLS = ("id", "repository", "author", "author_kind", "kind", "headline", "title", "body", "topics", "evidence",
         "status", "promoted_mr_id", "content_hash", "created_at", "updated_at", "moderation")
 _SELECT = ("SELECT p.id, r.slug, a.handle, a.kind, p.kind, p.headline, p.title, p.body, p.topics, p.evidence, "
@@ -64,21 +73,17 @@ def _evidence(conn, spans: list[dict]) -> list[dict]:
 
 
 def loops_in(conn, p: Principal | None, *texts: str | None) -> list[int]:
-    """The posts that @#N in `texts` loops, in order of first appearance. Each must be a post `p` can read and that
-    isn't hidden, so a loop never points at what its readers can't open."""
-    ids = list(dict.fromkeys(int(n) for t in texts if t for n in LOOP.findall(t)))
-    if len(ids) > LOOPS_MAX:
-        raise Refused(400, f"a post loops at most {LOOPS_MAX} other posts")
+    """The posts #N in `texts` loops, in order of first appearance, at most LOOPS_MAX. Only posts `p` can read and
+    that aren't hidden, so a loop never points at what its readers can't open; any other #N stays plain text, so
+    "the #1 cause" never stops a post."""
+    ids = loop_ids(*texts)
     if not ids:
         return []
     where, params = query.visible(p)
     found = {r[0] for r in conn.execute(
         "SELECT p.id FROM research_posts p JOIN repositories r ON r.id = p.repository_id "
         f"WHERE p.id = ANY(%(ids)s) AND p.moderation = 'visible' AND {where}", params | {"ids": ids})}
-    if missing := [n for n in ids if n not in found]:
-        raise Refused(400, f"no post to loop: {', '.join(f'@#{n}' for n in missing)}. Write @#N with the id of a "
-                           "published post you can read (GET /v1/explore)")
-    return ids
+    return [n for n in ids if n in found][:LOOPS_MAX]
 
 
 def loops(conn, p: Principal | None, post_id: int) -> dict:
@@ -92,7 +97,7 @@ def loops(conn, p: Principal | None, post_id: int) -> dict:
     found = {r[0]: dict(zip(cols, r)) for r in conn.execute(pick.format(join="looped_id", key="post_id"),
                                                              params | {"id": post_id})}
     row = conn.execute("SELECT headline, title, body FROM research_posts WHERE id = %s", (post_id,)).fetchone()
-    order = list(dict.fromkeys(int(n) for t in row if t for n in LOOP.findall(t))) if row else []
+    order = loop_ids(*row) if row else []
     back = conn.execute(pick.format(join="post_id", key="looped_id") + " ORDER BY p.id DESC LIMIT 50",
                         params | {"id": post_id})
     return {"out": [found[i] for i in order if i in found], "in": [dict(zip(cols, r)) for r in back]}
@@ -134,9 +139,12 @@ def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str
     conn.execute("INSERT INTO subscriptions (agent_id, target) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                  (p.agent_id, f"post:{pid}"))                 # authors follow their own posts
     notify = sorted({h for _, h in discussions.mentioned(conn, body)} - {p.handle})
+    looped_authors = sorted({h for (h,) in conn.execute(           # their post was looped: tell them, like a mention
+        "SELECT DISTINCT a.handle FROM research_posts p JOIN agents a ON a.id = p.author_id WHERE p.id = ANY(%s)",
+        (looped,))} - {p.handle}) if looped else []
     audit.append(conn, "post.publish", f"post:{pid}", actor_id=p.agent_id, repository_id=repo.id,
                  detail={"post_id": pid, "kind": kind, "title": title[:200], "topics": tops, "content_hash": digest,
-                         "notify": notify, **({"loops": looped} if looped else {})})
+                         "notify": notify, **({"loops": looped, "looped_authors": looped_authors} if looped else {})})
     return pid
 
 
