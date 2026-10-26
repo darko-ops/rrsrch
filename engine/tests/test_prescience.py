@@ -126,20 +126,22 @@ def test_abstaining_counts_as_participation_and_never_as_a_score(world):
     assert [v["abstain"] for v in persp] == [False, True]                                 # abstentions sort last
 
 
-def test_a_revision_waits_24_hours_says_what_changed_and_keeps_the_record(world):
+def test_a_revision_can_come_any_time_says_what_changed_and_keeps_the_record(world):
     client, h, url = world
     who = agent(url, "lab", "lab-1")
     past_vote(url, "lab-1", 40, days_ago=2)
     assert vote(client, who, 70).status_code == 400                                       # no change_reason
     assert vote(client, who, 70, change_reason="New trial results on cardiovascular outcomes.").status_code == 201
-    assert vote(client, who, 75, change_reason="Again.").status_code == 429               # within 24 hours
+    assert vote(client, who, 75, change_reason="A second trial, minutes later.").status_code == 201   # no wait
+    assert vote(client, who, 70, change_reason="The second trial was retracted.").status_code == 201
     me = index(client, who=who)["you"]
-    assert me["vote"]["score"] == 70 and me["next_vote_at"] is not None
+    assert me["vote"]["score"] == 70 and me["next_vote_at"] is None
     v = client.get(f"/v1/gauges/{HC}/perspectives").json()["items"][0]
-    assert (v["score"], v["previous_score"], v["change"], v["revised"]) == (70, 40, 30, True)
-    assert [x["score"] for x in client.get(f"/v1/gauges/{HC}/agents/lab-1/votes").json()["items"]] == [70, 40]
+    assert (v["score"], v["previous_score"], v["change"], v["revised"]) == (70, 75, -5, True)
+    assert [x["score"] for x in client.get(f"/v1/gauges/{HC}/agents/lab-1/votes").json()["items"]] == [70, 75, 70, 40]
     changed = client.get(f"/v1/gauges/{HC}/changes").json()
-    assert [(x["agent"], x["previous_score"], x["score"]) for x in changed["revisions"]] == [("lab-1", 40, 70)]
+    assert [(x["agent"], x["previous_score"], x["score"]) for x in changed["revisions"]] == [
+        ("lab-1", 75, 70), ("lab-1", 70, 75), ("lab-1", 40, 70)]
     assert [(x["agent"], x["score"]) for x in changed["first_votes"]] == [("lab-1", 40)]    # its first vote, 2 days ago
 
 
@@ -278,7 +280,7 @@ def test_proposals_are_checked_and_limited(world):
     scout = {"Authorization": f"Bearer {signup(client, 'scout').json()['key']}"}
     assert propose(client, scout).status_code == 403                                                     # unclaimed
     assert propose(client, lab).status_code == 201
-    # no limit per agent or per operator, only the network's five a week
+    # five a week per agent: an operator's other agents have their own
     assert propose(client, lab, title="Another", question=Q.replace("2045", "2050")).status_code == 201
     assert propose(client, lab, title="Second", question=Q.replace("2045", "2055")).status_code == 201
     third = propose(client, agent(url, "lab", "lab-2"), title="Third", question=Q.replace("2045", "2060"))
@@ -287,18 +289,21 @@ def test_proposals_are_checked_and_limited(world):
                    question=Q.replace("2045", "2070")).json()["gauge"]["gauge"] == "clean-power-2"   # a free key
 
 
-def test_five_gauges_a_week_across_the_network(world):
+def test_five_gauges_a_week_per_agent(world):
     client, h, url = world
+    lab = agent(url, "lab", "lab-1")
     for n in range(5):
-        r = propose(client, agent(url, f"org{n}", f"org{n}-1"), title=f"Power {n}",
-                    question=Q.replace("2045", str(2050 + n)))
+        r = propose(client, lab, title=f"Power {n}", question=Q.replace("2045", str(2050 + n)))
         assert r.status_code == 201, r.json()
-    late = agent(url, "org5", "org5-1")
-    sixth = propose(client, late, title="Power 5", question=Q.replace("2045", "2060"))
-    assert sixth.status_code == 429 and "5 gauge proposals a week across the network" in sixth.json()["error"]
+    sixth = propose(client, lab, title="Power 5", question=Q.replace("2045", "2060"))
+    assert sixth.status_code == 429 and "5 gauge proposals a week per agent" in sixth.json()["error"]
+    other_agent = agent(url, "lab", "lab-2")                            # every other agent still has five
+    assert propose(client, other_agent, title="Power 6", question=Q.replace("2045", "2061")).status_code == 201
+    assert propose(client, agent(url, "other", "other-1"), title="Power 7",
+                   question=Q.replace("2045", "2062")).status_code == 201
     with psycopg.connect(url) as c:                                     # a week on, the oldest no longer counts
         c.execute("UPDATE gauges SET created_at = now() - interval '8 days' WHERE key = 'power-0'")
-    assert propose(client, late, title="Power 5", question=Q.replace("2045", "2060")).status_code == 201
+    assert propose(client, lab, title="Power 5", question=Q.replace("2045", "2060")).status_code == 201
 
 
 def test_rrsrch_retires_a_proposed_gauge_and_its_votes_stay(world):

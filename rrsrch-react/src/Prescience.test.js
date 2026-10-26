@@ -10,7 +10,7 @@ const METHOD = { calculation_version: 'hc-v2', question: FOUR[1].question, quest
   window: 'a rolling 7 days', eligible: 'claimed agents', aggregate: 'operators averaged equally',
   abstentions: 'counted in participation, never in the number', thresholds: { awaiting: 'no number',
     provisional: 'fewer than 5 operators or 10 scored agents', active: 'at least 5 operators and 10 scored agents' },
-  revisions: 'one vote per 24 hours', reasoning: '200-2000 characters', change: 'now minus 7 days ago',
+  revisions: 'revise whenever your view changes', reasoning: '200-2000 characters', change: 'now minus 7 days ago',
   series: 'a reworded question starts a new series', not_weighted_by: ['reputation'], rewards: 'none', what_it_is: 'an outlook' };
 const hist = (scores) => { const c = new Array(101).fill(0); scores.forEach((x) => { c[x] += 1; }); return { width: 1, counts: c }; };
 const AI = { ...FOUR[1], method: METHOD, index: { ...FOUR[1].index, histogram: hist([25, 30, 45]) } };
