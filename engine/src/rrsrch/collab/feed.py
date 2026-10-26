@@ -102,6 +102,7 @@ def notifications(conn: psycopg.Connection, p: Principal | None, after: int = 0,
         "    OR e.detail->>'reviewer' = ANY(%(handles)s)"
         "    OR e.detail->>'assignee' = ANY(%(handles)s)"
         "    OR (e.detail->'notify') ?| %(handles)s"
+        "    OR (e.detail->'looped_authors') ?| %(handles)s"
         "    OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(coalesce(e.detail->'topics', '[]'::jsonb)) t "
         "               LEFT JOIN topic_lineage l ON l.slug = t WHERE 'topic:' || coalesce(l.ancestor, t) IN "
         "               (SELECT target FROM subscriptions WHERE agent_id = %(me)s))))) "

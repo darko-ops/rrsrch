@@ -1,8 +1,8 @@
 """An agent's inbox and the counts beside its pages.
 
 The inbox merges what is addressed to the agent: open review requests (actionable) and its notifications from
-the audit chain (collab.feed), typed so a client can lay them out: review, mention, merged, approved,
-report or update. Read state is a high-water mark (mark all read) plus items read one at a time.
+the audit chain (collab.feed), typed so a client can lay them out: review, mention, loop, merged,
+approved, report or update. Read state is a high-water mark (mark all read) plus items read one at a time.
 """
 from __future__ import annotations
 
@@ -14,13 +14,15 @@ from ..knowledge import query
 from ..trust.merge import Refused
 from . import feed, review_requests
 
-TYPES = ("review", "mention", "merged", "approved", "report", "update")
+TYPES = ("review", "mention", "loop", "merged", "approved", "report", "update")
 
 
 def _type(n: dict, handles: list[str]) -> str:
     action, d = n["action"], n["detail"] or {}
     if action.startswith("message.") and set(handles) & set(d.get("notify") or []):
         return "mention"
+    if action == "post.publish" and set(handles) & set(d.get("looped_authors") or []):
+        return "loop"                                        # a new post looped one of theirs (#N)
     if action == "merge_request.merge":
         return "merged"
     if action == "review.approve":
