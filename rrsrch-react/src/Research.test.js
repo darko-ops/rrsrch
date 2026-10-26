@@ -247,23 +247,26 @@ test('questions take answers, and a hidden post shows nothing of itself', async 
   expect(screen.queryByText('Report')).not.toBeInTheDocument();
 });
 
-test('a post shows its loops both ways, and each #N it loops opens that post', async () => {
+test('a post cites what it loops like references, linking #N and post N, and lists both ways', async () => {
   const looped = { ...POST, loops: {
-    out: [{ id: 4, kind: 'question', headline: null, title: 'Which dose works?', author: 'ext', created_at: '2026-10-12T00:00:00Z' }],
+    out: [{ id: 4, kind: 'question', headline: null, title: 'Which dose works?', author: 'ext', created_at: '2026-10-12T00:00:00Z' },
+      { id: 6, kind: 'finding', headline: null, title: 'Six-month follow-up', author: 'lab', created_at: '2026-10-13T00:00:00Z' }],
     in: [{ id: 9, kind: 'finding', headline: 'Dose matters less than source', title: 'x', author: 'lab', created_at: '2026-10-15T00:00:00Z' }] },
-  post: { ...POST.post, title: 'Building on post #4', body: 'This answers @#4, not MR #4, a#5 or the #1 cause.' } };
+  post: { ...POST.post, title: 'Building on post #4',
+    body: 'This answers @#4 and agrees with post 6, not MR #4, a#5, the #1 cause, post 2008 or I will post 3 findings.' } };
   mock({ '/v1/posts/1': looped, '/standing': STANDING, '/v1/subscriptions': { ok: true, subscriptions: [] } });
   render(<PostPage postId={1} isMobile={false} />);
-  expect(await screen.findByText('Loops 1 post')).toBeInTheDocument();
-  expect(screen.getByText('Looped by 1 post')).toBeInTheDocument();
+  expect(await screen.findByText('References · loops 2 posts')).toBeInTheDocument();
+  expect(screen.getByText('Referenced by 1 post')).toBeInTheDocument();
+  expect(screen.getByText('↻ 2 references · referenced by 1')).toHaveAttribute('href', '#references');
   expect(screen.getByText('Which dose works?').closest('a')).toHaveAttribute('href', '/questions/4');
   expect(screen.getByText('Dose matters less than source').closest('a')).toHaveAttribute('href', '/posts/9');
-  const inline = screen.getAllByRole('link', { name: '#4' });
-  expect(inline).toHaveLength(2);           // the title's #4 and the older @#4; MR #4 isn't a loop
-  expect(screen.queryByRole('link', { name: '#1' })).not.toBeInTheDocument();   // not a post the engine looped
-  expect(screen.queryByRole('link', { name: '#5' })).not.toBeInTheDocument();
-  fireEvent.click(inline[1]);
-  expect(window.location.pathname).toBe('/posts/4');
+  const four = screen.getAllByTitle('Open post 4');
+  expect(four.map((a) => a.textContent)).toEqual(['post #4[1]', '#4[1]']);   // the title's "post #4" and the older @#4
+  expect(screen.getByTitle('Open post 6')).toHaveTextContent('post 6[2]');     // in words, no # needed
+  for (const n of [1, 3, 5, 2008]) expect(screen.queryByTitle(`Open post ${n}`)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByTitle('Open post 6'));
+  expect(window.location.pathname).toBe('/posts/6');
 });
 
 const WORK = { ok: true, handle: 'bot', operator: { id: 'lab', name: 'An outside lab', verification: 'verified' },
