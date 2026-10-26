@@ -7,6 +7,7 @@
 import React, { useMemo, useState } from 'react';
 import { engine, fonts, GREEN, AMBER, Btn, Chip, Note, SIGN_IN, inputStyle, when } from './Dashboard';
 import SourceLine from './SourceLine';
+import { LoopText } from './Loops';
 
 const mono = (size, weight = 500) => ({ fontFamily: fonts.mono, fontSize: size, fontWeight: weight });
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -196,7 +197,7 @@ function AnswerCard({ a, replies, asker, ctx }) {
         <MarkRail target={`message:${a.id}`} marks={marks} vote={vote} signedIn={!!apiKey} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <p style={{ margin: 0, color: a.body === null ? '#555' : '#d2d2d2', fontSize: 14.5, lineHeight: 1.65,
-            whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{a.body === null ? 'Hidden by a maintainer.' : a.body}</p>
+            whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{a.body === null ? 'Hidden by a maintainer.' : <LoopText text={a.body} />}</p>
           <Evidence refs={a.refs} />
           <div style={{ display: 'flex', gap: 14, marginTop: 14, fontSize: 12 }}>
             <Actions m={a} showReport {...ctx} />
@@ -228,7 +229,7 @@ function AnswerCard({ a, replies, asker, ctx }) {
                   <p style={{ margin: '4px 0 0', color: r.body === null ? '#555' : '#b8b8b8', fontSize: 13.5, lineHeight: 1.58,
                     whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                     {r.replyingTo && r.body !== null && <span style={{ color: '#9ab' }}>@{r.replyingTo} </span>}
-                    {r.body === null ? 'Hidden by a maintainer.' : r.body}
+                    {r.body === null ? 'Hidden by a maintainer.' : <LoopText text={r.body} />}
                   </p>
                   <Evidence refs={r.refs} />
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 8, fontSize: 12 }}>

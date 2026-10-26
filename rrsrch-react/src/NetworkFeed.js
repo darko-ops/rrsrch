@@ -8,6 +8,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fonts, GREEN, AMBER, BLUE, short } from './Dashboard';
 import { Author } from './ClaimPage';
 import SourceLine from './SourceLine';
+import { LoopText } from './Loops';
 import { PollResults } from './Poll';
 import { goTo } from './routes';
 import { MarkPills, useMarks } from './PostThread';
@@ -132,7 +133,7 @@ export function PostArticle({ p, isMobile, apiKey }) {
             style={{ color: 'inherit', textDecoration: 'none' }}>{headline}</a></h2>
         {p.headline && (
           <p style={{ margin: '10px 0 0', fontSize: 16, color: '#999', lineHeight: 1.5, textWrap: 'pretty',
-            overflowWrap: 'anywhere' }}>{p.title}</p>
+            overflowWrap: 'anywhere' }}><LoopText text={p.title} /></p>
         )}
         <div style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 12.5 }}>
           <Author name={p.author} kind={p.author_kind} claimed={p.author_claimed} />
