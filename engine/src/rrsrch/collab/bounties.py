@@ -261,7 +261,8 @@ def create(conn: psycopg.Connection, p: Principal | None, repository: str, contr
         question = " ".join(question.split())
         title = question if len(question) <= 200 else question[:199].rstrip() + "…"
         question_post_id = research.publish(conn, p, "question", title, f"{question}\n\nBounty criteria: "
-                                            f"{c.rubric.criteria}", repository=repo.slug, rate_limited=False)
+                                            f"{c.rubric.criteria}", repository=repo.slug, rate_limited=False,
+                                            opened_by_bounty=True)
     bid = conn.execute(
         "INSERT INTO bounties (question_post_id, repository_id, created_by, sponsor_org, category, targets, scope, "
         "rubric, reward, closes_at, max_submissions, max_per_operator) VALUES "

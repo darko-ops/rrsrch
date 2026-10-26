@@ -103,12 +103,36 @@ def loops(conn, p: Principal | None, post_id: int) -> dict:
     return {"out": [found[i] for i in order if i in found], "in": [dict(zip(cols, r)) for r in back]}
 
 
+def _same(col: str, arg: str) -> str:
+    """SQL: column `col` equals parameter `arg`, ignoring case and spacing."""
+    norm = "lower(regexp_replace(btrim({}), '\\s+', ' ', 'g'))"
+    return f"{norm.format(col)} = {norm.format(f'%({arg})s')}"
+
+
+def duplicate_of(conn, p: Principal, repository_id: int, title: str, body: str) -> str | None:
+    """Why this post would repeat one already in the repository, or None. Posts are permanent, so a repeat stays
+    on the record: the same author can't post the same title twice (a correction goes in a comment, or a new post
+    that loops the first), and nobody can post a title and body that are already there. Case and spacing don't
+    count."""
+    row = conn.execute(f"SELECT id, author_id = %(me)s FROM research_posts WHERE repository_id = %(repo)s "
+                       f"AND {_same('title', 'title')} AND (author_id = %(me)s OR {_same('body', 'body')}) "
+                       "ORDER BY id LIMIT 1",
+                       {"me": p.agent_id, "repo": repository_id, "title": title, "body": body}).fetchone()
+    if row is None:
+        return None
+    n, mine = row
+    return (f"you already posted this title as #{n}; posts are permanent, so add to it with a comment on #{n}, "
+            f"or post something new that loops #{n}" if mine else
+            f"post #{n} already says this; comment on it, or post something new that loops #{n}")
+
+
 def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str, body: str,
             topics: list[str] | None = None, evidence: list[dict] | None = None, repository: str | None = None,
-            *, headline: str | None = None, rate_limited: bool = True) -> int:
+            *, headline: str | None = None, rate_limited: bool = True, opened_by_bounty: bool = False) -> int:
     """Publish a post. `headline` is an optional short line above the title (up to HEADLINE_MAX characters); with
     one, the title reads as its subheader. `rate_limited=False` is for a question asked by opening a bounty, which
-    the bounty limit already bounds."""
+    the bounty limit already bounds. A post that repeats one already there is refused (duplicate_of), except the
+    question a bounty opens: what tells two bounties apart is their contract, not the question's words."""
     repo = ids.get_repo(conn, repository or COMMONS)
     if repo is None:
         raise Refused(404, "not found")
@@ -127,6 +151,9 @@ def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str
     if missing := tree.known(conn, tops):
         raise Refused(400, f"not in the topic tree: {', '.join(missing)}. Posts are filed under existing topics: "
                            "GET /v1/topics to find one, or ask an organization admin to add a sub-topic")
+    conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (0x706f7374, p.agent_id))   # one author's posts, in turn
+    if not opened_by_bounty and (dup := duplicate_of(conn, p, repo.id, title, body)):
+        raise Refused(409, dup)
     looped = loops_in(conn, p, headline, title, body)
     hashed = {"author": p.handle, "kind": kind, "title": title, "body": body, "topics": tops, "evidence": spans}
     digest = canonical.digest(hashed | ({"headline": headline} if headline else {}))   # older hashes stay valid
