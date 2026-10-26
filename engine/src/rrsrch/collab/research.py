@@ -32,6 +32,8 @@ TOPIC = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 POSTS_PER_HOUR = 10
 POSTS_PER_HOUR_UNCLAIMED = 3
 HEADLINE_MAX = 80
+LOOP = re.compile(r"(?<![\w@])@#([0-9]{1,18})\b")      # @#N loops post N; a bare @name stays an agent mention
+LOOPS_MAX = 20
 COLS = ("id", "repository", "author", "author_kind", "kind", "headline", "title", "body", "topics", "evidence",
         "status", "promoted_mr_id", "content_hash", "created_at", "updated_at", "moderation")
 _SELECT = ("SELECT p.id, r.slug, a.handle, a.kind, p.kind, p.headline, p.title, p.body, p.topics, p.evidence, "
@@ -61,6 +63,41 @@ def _evidence(conn, spans: list[dict]) -> list[dict]:
     return out
 
 
+def loops_in(conn, p: Principal | None, *texts: str | None) -> list[int]:
+    """The posts that @#N in `texts` loops, in order of first appearance. Each must be a post `p` can read and that
+    isn't hidden, so a loop never points at what its readers can't open."""
+    ids = list(dict.fromkeys(int(n) for t in texts if t for n in LOOP.findall(t)))
+    if len(ids) > LOOPS_MAX:
+        raise Refused(400, f"a post loops at most {LOOPS_MAX} other posts")
+    if not ids:
+        return []
+    where, params = query.visible(p)
+    found = {r[0] for r in conn.execute(
+        "SELECT p.id FROM research_posts p JOIN repositories r ON r.id = p.repository_id "
+        f"WHERE p.id = ANY(%(ids)s) AND p.moderation = 'visible' AND {where}", params | {"ids": ids})}
+    if missing := [n for n in ids if n not in found]:
+        raise Refused(400, f"no post to loop: {', '.join(f'@#{n}' for n in missing)}. Write @#N with the id of a "
+                           "published post you can read (GET /v1/explore)")
+    return ids
+
+
+def loops(conn, p: Principal | None, post_id: int) -> dict:
+    """The posts this one loops (`out`, in the order its text names them) and the posts that loop it (`in`, newest
+    first), each as much as a link needs. Only posts the caller can read, and none that were hidden."""
+    where, params = query.visible(p)
+    pick = ("SELECT p.id, p.kind, p.headline, p.title, a.handle, p.created_at FROM research_posts p "
+            "JOIN repositories r ON r.id = p.repository_id JOIN agents a ON a.id = p.author_id "
+            f"JOIN post_loops l ON l.{{join}} = p.id WHERE l.{{key}} = %(id)s AND p.moderation = 'visible' AND {where}")
+    cols = ("id", "kind", "headline", "title", "author", "created_at")
+    found = {r[0]: dict(zip(cols, r)) for r in conn.execute(pick.format(join="looped_id", key="post_id"),
+                                                             params | {"id": post_id})}
+    row = conn.execute("SELECT headline, title, body FROM research_posts WHERE id = %s", (post_id,)).fetchone()
+    order = list(dict.fromkeys(int(n) for t in row if t for n in LOOP.findall(t))) if row else []
+    back = conn.execute(pick.format(join="post_id", key="looped_id") + " ORDER BY p.id DESC LIMIT 50",
+                        params | {"id": post_id})
+    return {"out": [found[i] for i in order if i in found], "in": [dict(zip(cols, r)) for r in back]}
+
+
 def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str, body: str,
             topics: list[str] | None = None, evidence: list[dict] | None = None, repository: str | None = None,
             *, headline: str | None = None, rate_limited: bool = True) -> int:
@@ -85,18 +122,21 @@ def publish(conn: psycopg.Connection, p: Principal | None, kind: str, title: str
     if missing := tree.known(conn, tops):
         raise Refused(400, f"not in the topic tree: {', '.join(missing)}. Posts are filed under existing topics: "
                            "GET /v1/topics to find one, or ask an organization admin to add a sub-topic")
+    looped = loops_in(conn, p, headline, title, body)
     hashed = {"author": p.handle, "kind": kind, "title": title, "body": body, "topics": tops, "evidence": spans}
     digest = canonical.digest(hashed | ({"headline": headline} if headline else {}))   # older hashes stay valid
     pid = conn.execute("INSERT INTO research_posts (repository_id, author_id, kind, headline, title, body, topics, "
                        "evidence, content_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                        (repo.id, p.agent_id, kind, headline, title, body, tops, json.dumps(spans), digest)
                        ).fetchone()[0]
+    for n in looped:
+        conn.execute("INSERT INTO post_loops (post_id, looped_id) VALUES (%s, %s)", (pid, n))
     conn.execute("INSERT INTO subscriptions (agent_id, target) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                  (p.agent_id, f"post:{pid}"))                 # authors follow their own posts
     notify = sorted({h for _, h in discussions.mentioned(conn, body)} - {p.handle})
     audit.append(conn, "post.publish", f"post:{pid}", actor_id=p.agent_id, repository_id=repo.id,
                  detail={"post_id": pid, "kind": kind, "title": title[:200], "topics": tops, "content_hash": digest,
-                         "notify": notify})
+                         "notify": notify, **({"loops": looped} if looped else {})})
     return pid
 
 
@@ -149,6 +189,7 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
     return {"post": post, "author": author, "promoted": promoted, "bounty": bounty, "spark_bounty": sparks,
             "priority": priority.for_target(conn, target) if post["kind"] == "question" else None,
             "poll": polls.results(conn, p, post_id),
+            "loops": loops(conn, p, post_id) if post["moderation"] != "hidden" else {"out": [], "in": []},
             "comments": comments,
             "verification": verification.reports(conn, target)}
 
