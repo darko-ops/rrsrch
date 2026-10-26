@@ -1,4 +1,5 @@
 """Benchmarks: every agent ranked on the same measures, compared by the model it runs, and charted over time."""
+import os
 from datetime import datetime, timedelta, timezone
 
 import psycopg
@@ -96,6 +97,7 @@ def test_daily_snapshots_chart_a_metric_by_family_and_backfill_counts_only(world
     with psycopg.connect(url) as c:
         old = c.execute("SELECT id FROM research_posts WHERE title = 'Solo 0'").fetchone()[0]
         c.execute("UPDATE research_posts SET created_at = now() - interval '3 days' WHERE id = %s", (old,))
+        c.execute("UPDATE agents SET created_at = now() - interval '5 days'")
         n = benchmarks.snapshot(c, today)
         assert n == benchmarks.snapshot(c, today)                                 # rerunning replaces the day
         benchmarks.snapshot(c, today - timedelta(days=2))
@@ -110,3 +112,34 @@ def test_daily_snapshots_chart_a_metric_by_family_and_backfill_counts_only(world
     assert lines["qwen"][-1] == {"day": str(today), "value": 1.0, "agents": 3}
     claimed = client.get("/v1/benchmarks/series", params={"metric": "sparks", "scope": "claimed"}).json()
     assert {x["family"]: x["points"] for x in claimed["series"]}["llama"][-1]["value"] == 3.0
+
+
+def test_the_chart_starts_when_each_agent_joined_and_ends_on_today_as_it_stands(world):
+    client, h, url = world
+    _team(client, url)
+    today = datetime.now(timezone.utc).date()
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE agents SET created_at = now() - interval '5 days' WHERE handle <> 'llama-solo'")
+        benchmarks.snapshot(c, today - timedelta(days=2))     # llama-solo joined today: not a 0 two days ago
+        two_ago = {h for (h,) in c.execute("SELECT DISTINCT a.handle FROM benchmark_snapshots s JOIN agents a "
+                                            "ON a.id = s.agent_id WHERE s.day = %s", (today - timedelta(days=2),))}
+        assert "llama-solo" not in two_ago and {"qwen-0", "loose"} <= two_ago
+    # no snapshot today yet: today's point is measured live, so the chart ends where the leaderboard stands
+    s = client.get("/v1/benchmarks/series", params={"metric": "sparks", "group": "family"}).json()
+    lines = {x["family"]: x["points"] for x in s["series"]}
+    assert lines["llama"][0] == {"day": str(today - timedelta(days=2)), "value": 0.0, "agents": 1}
+    assert lines["llama"][-1] == {"day": str(today), "value": 2.0, "agents": 2}
+    board = client.get("/v1/leaderboard", params={"group": "family"}).json()
+    assert {i["family"]: i["value"] for i in board["items"]}["llama"] == 2.0
+
+    # migration 0063 drops rows an earlier backfill wrote for days before an agent joined
+    with psycopg.connect(url) as c:
+        c.execute("INSERT INTO benchmark_snapshots (day, agent_id, organization_id, model, family, metric, value) "
+                  "SELECT %s, id, organization_id, 'llama-3.1-70b', 'llama', 'sparks', 0 FROM agents "
+                  "WHERE handle = 'llama-solo'", (today - timedelta(days=3),))
+        c.execute(open(os.path.join(os.path.dirname(__file__), "..", "db/migrations/0063_benchmarks_from_joining.sql")).read())
+        left = c.execute("SELECT count(*) FROM benchmark_snapshots s JOIN agents a ON a.id = s.agent_id "
+                         "WHERE s.day < (a.created_at AT TIME ZONE 'UTC')::date").fetchone()[0]
+        assert left == 0
+        assert c.execute("SELECT count(*) FROM benchmark_snapshots WHERE day = %s",
+                         (today - timedelta(days=2),)).fetchone()[0] > 0

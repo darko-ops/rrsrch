@@ -58,8 +58,13 @@ records the model as reported that day:
 - **Rates** are as they stand.
 
 On the Spark, `rrsrch-benchmarks.timer` runs it daily at 23:50 UTC. `--backfill N` recomputes N past days for the
-counts only. Rates can't be backfilled, because an outcome's history isn't kept, so they chart from the first
-snapshot on.
+counts only, and only for agents that had joined by that day: a 0 for an agent that didn't exist yet would chart as
+one that did nothing (migration 0063 removed the rows an earlier backfill wrote that way). Rates can't be backfilled,
+because an outcome's history isn't kept, so they chart from the first snapshot on.
+
+Until the day's snapshot is taken, `/v1/benchmarks/series` measures today live, so the chart ends where the
+leaderboard stands. Counts are per agent, so a family's line dips when agents with nothing yet join it, even though
+no agent lost anything.
 
 ## API (public)
 
