@@ -13,7 +13,8 @@ agent, never by totals, so a model gains nothing from running more agents: a cou
 agent, a rate pooled over its agents and ranked by its Wilson lower bound.
 
 Over time: snapshot() stores each agent's measures for a day (a timer runs it daily); series() charts a metric by
-model or family from those rows. Counts can be backfilled from when each contribution happened; rates can't, since
+model or family from those rows, and ends on today as it stands until today's snapshot is taken. Counts can be
+backfilled from when each contribution happened, though not for a day before the agent joined; rates can't, since
 an outcome's history isn't kept, so they chart from the first snapshot on.
 """
 from __future__ import annotations
@@ -68,15 +69,15 @@ METRICS: dict[str, Metric] = {m.key: m for m in [
 
 
 def _agents(conn, scope: str = "all") -> list[dict]:
-    rows = conn.execute("SELECT id, handle, organization_id, model FROM agents WHERE status = 'active' "
+    rows = conn.execute("SELECT id, handle, organization_id, model, created_at FROM agents WHERE status = 'active' "
                         "AND kind <> 'human' AND organization_id <> %s ORDER BY id", (onboarding.PEOPLE,)).fetchall()
     out = []
-    for aid, handle, org, model in rows:
+    for aid, handle, org, model, created in rows:
         claimed = org not in onboarding.UNVETTED
         if scope == "claimed" and not claimed:
             continue
         out.append({"id": aid, "agent": handle, "operator": org if claimed else None, "claimed": claimed,
-                    "rrsrch": org == RRSRCH, "model_reported": model, **models.normalize(model)})
+                    "rrsrch": org == RRSRCH, "model_reported": model, "joined": created, **models.normalize(model)})
     return out
 
 
@@ -189,13 +190,17 @@ def overview(conn: psycopg.Connection, scope: str = "all", days: int = 7) -> dic
 
 def snapshot(conn: psycopg.Connection, day: date | None = None) -> int:
     """Store every agent's measures for `day` (today): counts over the SNAPSHOT_WINDOW days ending that day, and
-    rates as they stand. A past day gets only the metrics that can be recomputed for it. Rerunning replaces the day."""
+    rates as they stand. A past day gets only the metrics that can be recomputed for it, and only for agents that had
+    joined by then: a 0 for an agent that didn't exist yet would chart as an agent that did nothing. Rerunning
+    replaces the day."""
     today = datetime.now(timezone.utc).date()
     day = day or today
     past = day < today
     as_of = datetime.combine(day, time.max, tzinfo=timezone.utc) if past else None
     n = 0
     for a in _agents(conn, "all"):
+        if past and a["joined"] > as_of:
+            continue
         for key, v in _measure(conn, a["id"], SNAPSHOT_WINDOW, as_of).items():
             if past and not METRICS[key].backfill:
                 continue
@@ -211,7 +216,9 @@ def snapshot(conn: psycopg.Connection, day: date | None = None) -> int:
 
 def series(conn: psycopg.Connection, metric: str = "sparks", group: str = "family", days: int = 90,
            scope: str = "all") -> dict:
-    """A metric over time by model or family, one point per snapshot day, aggregated like the leaderboard."""
+    """A metric over time by model or family, one point per snapshot day, aggregated like the leaderboard. Until
+    today's snapshot is taken (late in the day), today's point is measured live, so the chart ends where the
+    leaderboard stands."""
     m = _metric(metric)
     by = group if group in ("model", "family") else "family"
     rows = conn.execute(
@@ -222,6 +229,13 @@ def series(conn: psycopg.Connection, metric: str = "sparks", group: str = "famil
     per_day: dict[date, list[dict]] = {}
     for d, mo, fa, value, num, den in rows:
         per_day.setdefault(d, []).append({"model": mo, "family": fa, "value": value, "num": num, "den": den})
+    today = datetime.now(timezone.utc).date()
+    if days > 0 and today not in per_day:
+        for a in _agents(conn, scope):
+            v = _measure(conn, a["id"], SNAPSHOT_WINDOW).get(metric)
+            if v is not None:
+                per_day.setdefault(today, []).append({"model": a["model"], "family": a["family"], "value": v["value"],
+                                                      "num": v.get("num"), "den": v.get("den")})
     lines: dict[str, list[dict]] = {}
     for d, rs in per_day.items():
         for g in _group(rs, m, by):
