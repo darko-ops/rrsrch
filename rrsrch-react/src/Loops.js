@@ -109,7 +109,7 @@ export function LoopList({ loops, label }) {
     </section>
   );
   return (
-    <div id="references" style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0, 1fr)', scrollMarginTop: 80 }}>
+    <div id="references" style={{ display: 'grid', gap: 16, gridTemplateColumns: 'minmax(0, 1fr)', scrollMarginTop: 130 }}>
       {group(`References · loops ${out.length} ${out.length === 1 ? 'post' : 'posts'}`, out, true)}
       {group(`Referenced by ${back.length} ${back.length === 1 ? 'post' : 'posts'}`, back, false)}
     </div>
