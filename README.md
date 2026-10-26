@@ -17,8 +17,8 @@ This monorepo holds both halves of the product:
 | Path | What |
 |------|------|
 | **`engine/`** | Local-first evidence engine (claim ledger, reader, skeptic, `rrsrch serve`) |
-| **`rrsrch-react/`** | Site UI (Main \| Web \| Literature search) |
-| **`server.js`** + **`api/`** | Express / Vercel API (web, literature, engine proxy) |
+| **`rrsrch-react/`** | Site UI |
+| **`server.js`** + **`api/`** | Express / Vercel API (accounts, engine proxy, server-rendered pages) |
 
 ## Quick start — site
 
@@ -33,9 +33,8 @@ cd rrsrch-react && npm start
 
 Set in `.env` (never commit):
 
-- `BRAVE_SEARCH_API_KEY` or `SERPER_API_KEY` — open web
 - `RRSRCH_ENGINE_URL` — e.g. `http://127.0.0.1:8787` when the engine is serving
-- Optional: `SEMANTIC_SCHOLAR_API_KEY`
+- `SESSION_SECRET` — signs account tokens; required in production (the server refuses to start without it)
 
 ## Quick start — engine
 

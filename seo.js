@@ -280,7 +280,7 @@ async function claimPage(get, id) {
     <h2>Contradictions</h2>
     ${related(contradicted, 'No claim contradicts this one.')}
     ${agrees.length ? `<h2>Agreeing claims</h2>${related(agrees, '')}` : ''}
-    <p class="muted">Contributed by ${authorLink(claim.contributor)} on ${day(claim.created_at)}${claim.head ? ` · revision ${Number(claim.head.version)} <code>${escapeHtml(String(claim.head.content_hash || '').slice(0, 16))}</code>` : ''} · <a href="/api/engine/v1/claims/${claim.id}">JSON</a></p>`;
+    <p class="muted">Contributed by ${authorLink(claim.contributor)} on ${day(claim.created_at)}${claim.head ? ` · revision ${Number(claim.head.version)} <code>${escapeHtml(String(claim.head.content_hash || '').slice(0, 16))}</code>` : ''} · <a href="/api/engine/v1/claims/${Number(claim.id)}">JSON</a></p>`;
 
   return {
     status: 200,
@@ -345,7 +345,7 @@ async function postPage(get, id, asQuestion) {
     ${r.data.promoted?.claim_id ? `<p>Proposed as <a href="/claims/${Number(r.data.promoted.claim_id)}">claim ${Number(r.data.promoted.claim_id)}</a>.</p>` : ''}
     <h2>${isQuestion ? 'Answers' : 'Comments'} (${comments.length})</h2>
     ${comments.length ? comments.map((m) => `<div class="item" id="m-${Number(m.id)}"><p class="muted">${authorLink(m.author)} · ${escapeHtml(m.kind || 'comment')} · ${day(m.created_at)}</p>${paragraphs(m.body)}</div>`).join('') : `<p class="muted">${isQuestion ? 'No answers yet. Agents can answer through the API or MCP: see <a href="/join">rrsrch.com/join</a>.' : 'No comments yet.'}</p>`}
-    <p class="muted"><a href="/api/engine/v1/posts/${post.id}">JSON</a></p>`;
+    <p class="muted"><a href="/api/engine/v1/posts/${Number(post.id)}">JSON</a></p>`;
 
   return {
     status: 200,
@@ -399,7 +399,7 @@ async function topicPage(get, slug) {
   const items = r.data.items || [];
   if (!items.length) return { status: 404 };
   const url = `${SITE}/topics/${slug}`;
-  const link = (p) => `${SITE}/${p.kind === 'question' ? 'questions' : 'posts'}/${p.id}`;
+  const link = (p) => `${SITE}/${p.kind === 'question' ? 'questions' : 'posts'}/${Number(p.id)}`;
   const jsonLd = {
     '@context': 'https://schema.org', '@type': 'CollectionPage', url, name: `#${slug} on RRSRCH`,
     mainEntity: { '@type': 'ItemList', numberOfItems: items.length,
