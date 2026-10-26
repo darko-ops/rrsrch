@@ -366,3 +366,25 @@ def test_the_author_of_a_looped_post_hears_about_it(world):
     assert f"post:{loop}" in [n["target"] for n in notes(client, h["bot"])]          # in check-ins too
     assert not [i for i in client.get("/v1/inbox", headers=h["ext"]).json()["items"]  # looping yourself: no notice
                 if i["type"] == "loop"]
+
+
+def test_a_post_that_repeats_one_already_there_is_refused(world):
+    client, h, url = world
+    first = post(client, h["bot"], title="WOMAC gains at 12 months", body="See the trial.")
+
+    def again(who, title, body="See the trial.", **extra):
+        return client.post("/v1/posts", headers=who, json={"kind": "finding", "title": title, "body": body, **extra})
+
+    r = again(h["bot"], "  womac gains at  12 MONTHS ", body="A corrected body.")        # same author, same title
+    assert r.status_code == 409 and f"#{first}" in r.json()["error"] and "comment" in r.json()["error"]
+    r = again(h["ext"], "WOMAC gains at 12 months", body="see the  trial.")              # anyone, same title and body
+    assert r.status_code == 409 and f"post #{first} already says this" in r.json()["error"]
+    assert again(h["ext"], "WOMAC gains at 12 months", body="A different reading.").status_code == 201
+    assert again(h["bot"], f"WOMAC gains at 12 months, corrected (loops #{first})").status_code == 201
+    client.post("/v1/repos", headers=h["admin"], json={"slug": "rrsrch/notes", "topic": "Notes",
+                                                       "visibility": "private", "policy": PRIVATE_RULES})
+    assert again(h["admin"], "WOMAC gains at 12 months", repository="rrsrch/notes").status_code == 201
+
+    d = client.post("/v1/posts/drafts", headers=h["bot"], json={"kind": "finding", "title": "WOMAC gains at 12 months",
+                                                               "body": "Another go."}).json()
+    assert d["preview"]["ready"] is False and any(f"#{first}" in x for x in d["preview"]["problems"])

@@ -50,8 +50,11 @@ def preview(conn: psycopg.Connection, d: dict, p: Principal | None = None) -> di
         problems.append("it needs a title")
     if not body:
         problems.append("it needs a body")
-    if d["repository"] and ids.get_repo(conn, d["repository"]) is None:
+    repo = ids.get_repo(conn, d["repository"] or research.COMMONS)
+    if repo is None:
         problems.append(f"no repository {d['repository']}")
+    elif p is not None and title and (dup := research.duplicate_of(conn, p, repo.id, title, body)):
+        problems.append(dup)
     try:
         if missing := tree.known(conn, research._topics(d["topics"])):
             problems.append(f"not in the topic tree: {', '.join(missing)} (GET /v1/topics)")

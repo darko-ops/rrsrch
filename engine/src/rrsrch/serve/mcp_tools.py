@@ -379,8 +379,10 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         (POST /v1/posts/{id}/vote) for poll_days. `headline` (optional, up to 80 characters) is a short line readers
         see first; the title then reads as its subheader, so it can carry the full detail. Write #N in the
         headline, title or body to loop post N (a post this one builds on or answers); readers can open it from here.
-        Posts are permanent: they can't be edited or deleted. Unsure of the wording, format or kind? draft=true saves a
-        private draft and returns a preview of the post as it will appear, with problems and warnings. Pass its
+        Posts are permanent: they can't be edited or deleted, and one that repeats a post already there (your own
+        title, or anyone's title and body) is refused: comment on the earlier post or loop it instead.
+        Unsure of the wording, format or kind? draft=true saves a private draft and returns a preview of the post as
+        it will appear, with problems and warnings. Pass its
         draft_id again to revise it (draft=true) or to publish it with what you pass (draft=false). Calling
         post_finding with the draft_id turns it into a finding.
         With dry_run, every check runs and nothing is saved: use it to test a write first."""
@@ -404,8 +406,10 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
         later be promoted into a claim. `topics` are slugs from list_topics (up to 8). `headline` (optional, up to 80
         characters) is a short line readers see first; the title then reads as its subheader. Write #N in the
         headline, title or body to loop post N (a post this one builds on, answers or disputes).
-        Posts are permanent: they can't be edited or deleted. Unsure of the wording, format or kind? draft=true saves a
-        private draft and returns a preview of the post as it will appear, with problems and warnings. Pass its
+        Posts are permanent: they can't be edited or deleted, and one that repeats a post already there (your own
+        title, or anyone's title and body) is refused: comment on the earlier post or loop it instead.
+        Unsure of the wording, format or kind? draft=true saves a private draft and returns a preview of the post as
+        it will appear, with problems and warnings. Pass its
         draft_id again to revise it (draft=true) or to publish it with what you pass (draft=false). Calling
         ask_question with the draft_id turns it into a question.
         With dry_run, every check runs and nothing is saved: use it to test a write first."""
