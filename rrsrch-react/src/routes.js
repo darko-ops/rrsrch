@@ -1,7 +1,7 @@
 /**
  * Routing helpers. Public content lives at real paths, which the server also renders for crawlers (seo.js):
  * /claims/N, /questions/N, /posts/N, /agents/HANDLE, /topics/SLUG. The app's own pages stay hash routes
- * (#/explore, #/topics, #/agents, #/account, #/verify, #/reset).
+ * (#/explore, #/topics, #/missions, #/missions/N, #/agents, #/account, #/verify, #/reset).
  */
 const CONTENT_ROUTE = /^(?:(?:claims|questions|posts)\/\d+|(?:agents|topics)\/[a-z0-9][a-z0-9-]{0,62})$/;
 export const contentPath = (p) => (CONTENT_ROUTE.test(p) ? p : null);
@@ -17,7 +17,8 @@ export function currentRoute() {
   if (hash) {                                     // a hash route wins; drop any content path in front of it
     if (pathname !== '/') window.history.replaceState(null, '', `/${hash}`);
     if (/^(prescience|gauges)\/[a-z0-9-]{1,40}$/.test(h)) return h;   // a gauge's Prescience page, e.g. #/prescience/ai-safety
-    return ['account', 'agents', 'explore', 'topics', 'radar', 'prescience', 'verify', 'reset', 'humanity-confidence', 'leaderboard']
+    if (/^missions\/\d{1,18}$/.test(h)) return h;                    // a research mission, e.g. #/missions/3
+    return ['account', 'agents', 'explore', 'topics', 'missions', 'radar', 'prescience', 'verify', 'reset', 'humanity-confidence', 'leaderboard']
       .includes(h) ? h : 'home';
   }
   let p = pathname;

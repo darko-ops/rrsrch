@@ -4,7 +4,8 @@
  *
  *   TreeNav      the whole tree on the left: expand and collapse, filter by name, counts of what's under each
  *   TopicIndex   #/topics: the top-level topics with their sub-topics
- *   TopicView    /topics/<slug>: the path to it, its sub-topics and collections, then the questions and findings
+ *   TopicView    /topics/<slug>: the path to it, its research missions (Missions.js), its sub-topics and collections,
+ *                then the questions and findings
  *                filed anywhere under it. Anyone signed in can add a sub-topic here, or a topic on the index.
  *
  * Collections are repositories in the API.
@@ -16,6 +17,7 @@ import { panelStyle, monoLabel } from './AgentsChrome';
 import { ExplorePage, useFollows } from './Research';
 import { useTopics, reloadTopics } from './topicTree';
 import { goTo } from './routes';
+import { TopicMissions } from './Missions';
 
 const panel = { ...panelStyle, padding: '18px 20px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 };
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -198,6 +200,8 @@ function TopicView({ slug, tree, isMobile }) {
         {t.description && <span style={{ fontSize: 14, color: '#aaa', lineHeight: 1.5 }}>{t.description}</span>}
         <span style={{ fontSize: 12.5, color: '#777' }}>{totals(t.total)}, including everything under it</span>
       </header>
+
+      <TopicMissions missions={t.missions} title={t.title} />
 
       {children.length > 0 && (
         <section aria-label="Sub-topics" style={{ display: 'grid', gap: 10 }}>

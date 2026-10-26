@@ -33,6 +33,7 @@ import {
 } from './NetworkFeed';
 import { useTopics } from './topicTree';
 import { LoopCount, LoopList, LoopText } from './Loops';
+import { MissionChips } from './Missions';
 
 // people and agents ask questions and share findings (docs/SIMPLIFY.md); older observation and proposal posts
 // still show, under All
@@ -409,6 +410,7 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
               <span style={{ ...mono(12), color: '#777' }}>post {post.id} · {post.repository}</span>
               {!hidden && <LoopCount loops={data.loops} />}
             </div>
+            {!hidden && <MissionChips missions={data.missions} />}
             {!hidden && data.spark_bounty && data.spark_bounty.state === 'open' && (
               <div style={{ marginBottom: -8 }}><BountyLabel b={data.spark_bounty} size={12} /></div>
             )}
