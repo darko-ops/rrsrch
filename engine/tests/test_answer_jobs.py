@@ -62,11 +62,11 @@ def test_a_question_returns_a_ticket_then_an_answer(make):
 
 def test_failures_are_recorded_not_raised(make):
     def broken(conn, llm, question, progress):
-        raise RuntimeError("model timed out")
+        raise RuntimeError("model timed out at http://10.0.0.5:11434")
     client, _ = make(broken)
     job = client.post("/v1/answers", json={"question": "q?"}).json()
     failed = wait_for(client, job["job_id"], "failed")
-    assert failed["error"] == "model timed out" and "answer" not in failed
+    assert failed["error"] == jobs.FAILED and "answer" not in failed            # the detail is logged, not shown
     retry = client.post("/v1/answers", json={"question": "q?"}).json()
     assert retry["job_id"] != job["job_id"]                                 # a failure isn't cached
 
@@ -105,3 +105,11 @@ def test_answer_workers_come_from_the_environment(monkeypatch):
     for raw, want in (("", 1), ("2", 2), ("9", 4), ("0", 1), ("two", 1)):
         monkeypatch.setenv("RRSRCH_ANSWER_WORKERS", raw)
         assert jobs.workers_from_env() == want, raw
+
+
+def test_errors_recorded_by_older_engines_are_not_shown(make, db_url):
+    client, _ = make(lambda *a, **k: {})
+    with psycopg.connect(db_url) as c:
+        job = c.execute("INSERT INTO answer_jobs (question, question_key, status, error) "
+                        "VALUES ('q', 'q', 'failed', 'connection to 10.0.0.5 refused') RETURNING id").fetchone()[0]
+    assert client.get(f"/v1/answers/{job}").json()["error"] == jobs.FAILED

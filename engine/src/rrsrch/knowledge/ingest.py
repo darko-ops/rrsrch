@@ -8,9 +8,13 @@ returned as it is: its text never changes under claims that point into it.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
+import threading
+import time
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 
 import psycopg
@@ -30,6 +34,8 @@ from . import query
 SOURCE_ID = re.compile(r"^(MED|PMC|PPR):[A-Za-z0-9]{1,20}$")
 DOI = re.compile(r"^10\.\d{4,9}/\S{1,200}$")
 SOURCES_PER_HOUR = 30
+ATTEMPTS_PER_HOUR = 60          # fetches and conversions an agent may start, refused and failed ones included
+AT_ONCE = 2                     # an agent's fetches and conversions running at the same time
 # EDGAR documents: https://www.sec.gov/Archives/edgar/data/<cik>/<accession, 18 digits>/<file>
 SEC_DOC = re.compile(r"^https://www\.sec\.gov/Archives/edgar/data/(?P<cik>\d{1,10})/(?P<acc>\d{18})/(?P<file>[^/?#]+)$")
 # the SEC asks automated clients to identify themselves (https://www.sec.gov/os/accessing-edgar-data)
@@ -52,6 +58,45 @@ def _record(epmc: EuropePMC, source_id: str | None, doi: str | None) -> dict | N
         return epmc.record(source_id)
     hits = epmc.search(f'DOI:"{doi}"', page_size=1, result_type="core")
     return hits[0] if hits else None
+
+
+class _Attempts:
+    """Every fetch or conversion an agent starts, whatever came of it, and how many are running now. Kept in the
+    engine process (one serves the API), so a restart forgets them; sources added stay counted in the ledger."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.started: dict[int, deque] = defaultdict(deque)
+        self.running: dict[int, int] = defaultdict(int)
+
+    @contextlib.contextmanager
+    def attempt(self, agent_id: int):
+        now = time.monotonic()
+        with self.lock:
+            started = self.started[agent_id]
+            while started and started[0] < now - 3600:
+                started.popleft()
+            if len(started) >= ATTEMPTS_PER_HOUR:
+                raise Refused(429, "too many sources tried in the last hour; try again later")
+            if self.running[agent_id] >= AT_ONCE:
+                raise Refused(429, f"{AT_ONCE} of your sources are already being fetched; wait for them to finish")
+            started.append(now)
+            self.running[agent_id] += 1
+        try:
+            yield
+        finally:
+            with self.lock:
+                self.running[agent_id] -= 1
+                if not self.running[agent_id]:
+                    del self.running[agent_id]
+
+    def reset(self) -> None:
+        with self.lock:
+            self.started.clear()
+            self.running.clear()
+
+
+ATTEMPTS = _Attempts()
 
 
 def _rate_limited(conn, p: Principal) -> None:
@@ -85,17 +130,19 @@ def add_url(conn: psycopg.Connection, p: Principal | None, url: str, *, client=N
     kw = {"client": client} if client is not None else {}
     if resolve is not None:
         kw["resolve"] = resolve
-    try:
-        got = web.fetch(canon, user_agent=SEC_USER_AGENT if kind == "sec" else USER_AGENT, types=web.DOC_TYPES, **kw)
-    except web.FetchRefused as e:
-        raise Refused(422, str(e)) from e
-    final = web.canonical(got.url)
-    if final != canon:                                  # redirected: store it under where it really lives
-        sid, kind = _url_id(final)
-        have = conn.execute("SELECT id FROM sources WHERE id = %s OR url = %s", (sid, final)).fetchone()
-        if have:
-            return query.get_source(conn, have[0]), False
-    title, body, converter = _convert(got.body, got.content_type, got.charset)
+    with ATTEMPTS.attempt(p.agent_id):                  # counted whether or not it works
+        try:
+            got = web.fetch(canon, user_agent=SEC_USER_AGENT if kind == "sec" else USER_AGENT, types=web.DOC_TYPES,
+                            **kw)
+        except web.FetchRefused as e:
+            raise Refused(422, str(e)) from e
+        final = web.canonical(got.url)
+        if final != canon:                              # redirected: store it under where it really lives
+            sid, kind = _url_id(final)
+            have = conn.execute("SELECT id FROM sources WHERE id = %s OR url = %s", (sid, final)).fetchone()
+            if have:
+                return query.get_source(conn, have[0]), False
+        title, body, converter = _convert(got.body, got.content_type, got.charset)
     if len(body) < 40:
         raise Refused(422, "the page has no readable text to cite")
     title = title[:500] or final
@@ -126,7 +173,12 @@ def _convert(content: bytes, ctype: str, charset: str | None) -> tuple[str, str,
             raise Refused(422, str(e)) from e
         return title, body, pdfmod.VERSION
     text = htmlmod.decode(content, charset)
-    title, body = htmlmod.to_text(text) if ctype != "text/plain" else ("", htmlmod.plain(text))
+    if ctype == "text/plain":
+        return "", htmlmod.plain(text), htmlmod.VERSION
+    try:
+        title, body = htmlmod.to_text_isolated(text)
+    except htmlmod.HTMLRefused as e:
+        raise Refused(422, str(e)) from e
     return title, body, htmlmod.VERSION
 
 
@@ -151,7 +203,8 @@ def add_upload(conn: psycopg.Connection, p: Principal | None, content: bytes, co
     if conn.execute("SELECT 1 FROM sources WHERE id = %s", (sid,)).fetchone():
         return query.get_source(conn, sid), False
     _rate_limited(conn, p)
-    found_title, body, converter = _convert(content, ctype, "utf-8")
+    with ATTEMPTS.attempt(p.agent_id):
+        found_title, body, converter = _convert(content, ctype, "utf-8")
     if len(body) < 40:
         raise Refused(422, "the document has no readable text to cite")
     title = " ".join((title or found_title or origin).split())[:500]
@@ -186,10 +239,11 @@ def add_source(conn: psycopg.Connection, p: Principal | None, *, source_id: str 
         return have, False
     _rate_limited(conn, p)
     epmc = epmc or EuropePMC()
-    try:
-        r = _record(epmc, source_id, doi)
-    except Exception as e:  # noqa: BLE001  (Europe PMC down or refusing: say so, store nothing)
-        raise Refused(502, f"Europe PMC could not be reached: {str(e)[:120]}") from e
+    with ATTEMPTS.attempt(p.agent_id):
+        try:
+            r = _record(epmc, source_id, doi)
+        except Exception as e:  # noqa: BLE001  (Europe PMC down or refusing: say so, store nothing)
+            raise Refused(502, f"Europe PMC could not be reached: {str(e)[:120]}") from e
     if not r or not r.get("source") or not r.get("id"):
         raise Refused(404, "Europe PMC has no such record")
     sid = f"{r['source']}:{r['id']}"

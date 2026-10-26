@@ -87,9 +87,9 @@ def test_bad_requests_get_the_error_shape_the_site_reads(calls, kwargs, error):
 @pytest.mark.db
 def test_writer_failures_are_500s_not_crashes(answering):
     def boom(conn, llm, q, progress=None):
-        raise RuntimeError("model timed out")
+        raise RuntimeError("model at http://10.0.0.5:11434 timed out")
     r = answering(boom).post("/v1/answer", json={"question": "q"})
-    assert (r.status_code, r.json()) == (500, {"ok": False, "error": "model timed out"})
+    assert (r.status_code, r.json()) == (500, {"ok": False, "error": jobs.FAILED})      # what went wrong is logged
 
 
 def test_health_reports_claims_or_503(calls, monkeypatch, tmp_path):
@@ -99,7 +99,7 @@ def test_health_reports_claims_or_503(calls, monkeypatch, tmp_path):
         assert client(calls).get(path).json() == {"ok": True, "claims": 7, "model": "m", "answers_in_progress": 7,
                                                      "backup": None}
     r = client(calls, fail_db=True).get("/v1/health")
-    assert (r.status_code, r.json()) == (503, {"ok": False, "error": "connection refused"})
+    assert (r.status_code, r.json()) == (503, {"ok": False, "error": "the ledger is unavailable"})   # not the cause
 
 
 def test_unknown_paths_and_methods(calls):
@@ -141,3 +141,33 @@ def test_health_reports_the_last_backup_without_error_text(calls, monkeypatch, t
     b = client(calls).get("/v1/health").json()["backup"]
     assert b["last_state"] == "failed" and b["last_step"] == "offsite" and "last_error" not in b
     assert 2.9 < b["verified_age_hours"] < 3.1
+
+
+def test_the_api_docs_are_served_only_when_asked_for(calls, monkeypatch):
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client(calls).get(path).status_code == 404
+    body = {"handle": "some-bot", "kind": "assistant", "extra": 1}
+    r = client(calls).post("/v1/agents/register", json=body)
+    assert r.json()["error"] == "unknown field: extra. Nothing was saved"
+    monkeypatch.setenv("RRSRCH_PUBLIC_DOCS", "1")
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client(calls).get(path).status_code == 200
+    r = client(calls).post("/v1/agents/register", json=body)
+    assert r.json()["error"].endswith("the fields each endpoint takes are in /openapi.json")
+
+
+def test_uploads_need_a_key_before_the_body_is_read(calls):
+    """Refused from the headers alone: a large body from someone who isn't signed in is never read."""
+    def never():
+        raise AssertionError("the body was read")
+        yield b""
+    c = client(calls)
+    for headers in ({}, {"Authorization": "Basic abc"}, {"Authorization": "Bearer "},
+                    {"x-rrsrch-site-user": "u1", "x-rrsrch-proxy-secret": "wrong"}):
+        r = c.post("/v1/sources/upload", content=never(),
+                   headers={"Content-Type": "application/json", "Content-Length": str(60 * 1024 * 1024), **headers})
+        assert (r.status_code, r.json()["error"]) == (401, "authentication required: send 'Authorization: Bearer <key>'")
+    r = c.post("/v1/sources/upload", content=b"x" * 10, headers={"Content-Length": str(api.UPLOAD_BODY + 1),
+                                                                "Authorization": "Bearer rrsrch_nope_nope"})
+    assert r.status_code == 401                         # a key that doesn't check out is refused just the same
+    assert api.UPLOAD_BODY < 68 * 1024 * 1024           # a 50 MB PDF in base64 and its fields, no more

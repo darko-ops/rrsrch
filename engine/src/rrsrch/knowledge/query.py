@@ -13,6 +13,7 @@ from __future__ import annotations
 import psycopg
 
 from ..identity.access import Principal
+from ..reader import spans
 
 MAX_LIMIT = 200
 
@@ -276,13 +277,15 @@ def search(conn: psycopg.Connection, p: Principal | None, q: str, *, repository:
     where, params = visible(p)
     params |= {"q": q, "repo": repository, "state": state, "type": type_, "limit": limit, "offset": offset}
     rows = _rows(conn.execute(
-        "SELECT c.id, r.slug, c.type, c.state, c.text, ts_rank(c.search, query) AS rank, "
-        "  ts_headline('english', c.text, query, 'StartSel=[, StopSel=], MaxWords=40, MinWords=10') "
-        "FROM claims c JOIN repositories r ON r.id = c.repository_id, websearch_to_tsquery('english', %(q)s) query "
-        f"WHERE c.search @@ query AND {where} "
-        "AND (%(repo)s::text IS NULL OR r.slug = %(repo)s) AND (%(state)s::text IS NULL OR c.state = %(state)s) "
-        "AND (%(type)s::text IS NULL OR c.type = %(type)s) "
-        "ORDER BY rank DESC, c.id LIMIT %(limit)s OFFSET %(offset)s", params),
+        # the page is chosen first, so only its rows get a headline (the costly part)
+        "SELECT id, slug, type, state, text, rank, "
+        "  ts_headline('english', text, query, 'StartSel=[, StopSel=], MaxWords=40, MinWords=10') FROM ("
+        "  SELECT c.id, r.slug, c.type, c.state, c.text, ts_rank(c.search, query) AS rank, query "
+        "  FROM claims c JOIN repositories r ON r.id = c.repository_id, websearch_to_tsquery('english', %(q)s) query "
+        f"  WHERE c.search @@ query AND {where} "
+        "  AND (%(repo)s::text IS NULL OR r.slug = %(repo)s) AND (%(state)s::text IS NULL OR c.state = %(state)s) "
+        "  AND (%(type)s::text IS NULL OR c.type = %(type)s) "
+        "  ORDER BY rank DESC, c.id LIMIT %(limit)s OFFSET %(offset)s) page ORDER BY rank DESC, id", params),
         ("id", "repository", "type", "state", "proposition", "rank", "highlight"))
     for r in rows:
         r["rank"] = round(float(r["rank"]), 6)
@@ -307,15 +310,21 @@ def get_source(conn: psycopg.Connection, source_id: str) -> dict | None:
     return src
 
 
+NORMALIZED = spans.Normalized()
+
+
 def locate(conn: psycopg.Connection, source_id: str, quote: str) -> list[dict]:
-    """Where a quote appears verbatim (up to typography) in a source's documents: the exact span to cite."""
-    from ..reader import spans
+    """Where a quote appears verbatim (up to typography) in a source's documents: the exact span to cite. Each
+    document is normalized once and kept for the next quote (spans.Normalized)."""
     found = []
-    for part, sha, text in conn.execute("SELECT part, sha256, text FROM documents WHERE source_id = %s "
-                                        "ORDER BY part", (source_id,)):
-        if (hit := spans.locate(quote, text)) is not None:
+    for doc_id, part, sha in conn.execute("SELECT id, part, sha256 FROM documents WHERE source_id = %s "
+                                          "ORDER BY part", (source_id,)).fetchall():
+        text = lambda: conn.execute("SELECT text FROM documents WHERE id = %s", (doc_id,)).fetchone()[0]  # noqa: E731
+        if (hit := NORMALIZED.locate(quote, f"{doc_id}:{sha}", text)) is not None:
+            excerpt = conn.execute("SELECT substr(text, %s, %s) FROM documents WHERE id = %s",
+                                   (hit[0] + 1, hit[1] - hit[0], doc_id)).fetchone()[0]
             found.append({"source_id": source_id, "part": part, "doc_sha256": sha, "start": hit[0], "end": hit[1],
-                          "excerpt": text[hit[0]:hit[1]]})
+                          "excerpt": excerpt})
     return found
 
 

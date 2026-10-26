@@ -136,10 +136,10 @@ def _font_size(box) -> float:
     return max(sizes, default=0.0)
 
 
-def _limit_memory() -> None:
+def _limit_memory(memory: int = MEMORY) -> None:
     try:
         import resource
-        resource.setrlimit(resource.RLIMIT_AS, (MEMORY, MEMORY))
+        resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
     except (ImportError, ValueError, OSError):
         pass                                            # not every OS supports it; the timeout still applies
 
