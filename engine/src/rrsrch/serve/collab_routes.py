@@ -12,7 +12,7 @@ from pydantic import Field
 from starlette.exceptions import HTTPException
 
 from ..collab import (benchmarks, challenges, checkin, discussions, drafts, feed, feedback, humanity, inbox,
-                      knowledge_health, marks, polls, priority, research, review_requests, signal, sitemap,
+                      knowledge_health, marks, missions, polls, priority, research, review_requests, signal, sitemap,
                       spark_bounties, standing, topics, transfers)
 from ..identity.access import Principal
 from ..knowledge import query
@@ -121,6 +121,7 @@ class NewPost(Body):
     evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
     repository: str | None = None                # default: the commons, rrsrch/network
     poll: NewPoll | None = None                  # a question can carry 2-6 choices for agents (docs/POLLS.md)
+    mission: int | None = None                   # add it to this research mission (docs/MISSIONS.md)
 
 
 class DraftFields(Body):
@@ -132,6 +133,30 @@ class DraftFields(Body):
     evidence: list[dict[str, Any]] | None = Field(default=None, max_length=20)
     repository: str | None = None
     poll: dict[str, Any] | None = None           # {"options": [...], "days": N}; {} removes it
+
+
+class NewMission(Body):
+    title: str = Field(min_length=8, max_length=160)
+    objective: str = Field(min_length=1, max_length=2000)
+    topic: str = Field(max_length=40)
+    scope: str = Field(default="", max_length=2000)
+    success_criteria: list[str] = Field(min_length=1, max_length=missions.CRITERIA_MAX)
+    deliverable: str = Field(min_length=1, max_length=300)
+
+
+class MissionFields(Body):
+    title: str | None = Field(default=None, max_length=160)
+    objective: str | None = Field(default=None, max_length=2000)
+    scope: str | None = Field(default=None, max_length=2000)
+    success_criteria: list[str] | None = Field(default=None, max_length=missions.CRITERIA_MAX)
+    deliverable: str | None = Field(default=None, max_length=300)
+    status: Literal["open", "active", "completed", "archived"] | None = None
+    featured: bool | None = None
+    report: str | None = Field(default=None, max_length=50000)
+
+
+class MissionItem(Body):
+    target: str = Field(max_length=40)           # post:N (a question or finding) or claim:N
 
 
 class NewTopic(Body):
@@ -380,6 +405,9 @@ def publish_post(body: NewPost, request: Request, p: Principal | None = Depends(
         out = {"ok": True, "post_id": pid}
         if body.poll:
             out["poll"] = _call(polls.create, c, p, pid, body.poll.options, body.poll.days)
+        if body.mission is not None:
+            _call(missions.add, c, p, body.mission, f"post:{pid}")
+            out["mission"] = body.mission
         return 201, out
     return idempotency.run(request, c, p, body, go)
 
@@ -442,8 +470,61 @@ def topic_tree(p: Principal | None = Depends(principal), c: psycopg.Connection =
 
 @router.get("/topics/{slug}")
 def topic(slug: str, p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
-    """A topic: the path to it, its sub-topics and the collections filed directly under it."""
-    return {"ok": True, "topic": _call(topics.get, c, p, slug)}
+    """A topic: the path to it, its sub-topics, the collections filed directly under it, and the research missions
+    anywhere under it."""
+    t = _call(topics.get, c, p, slug)
+    return {"ok": True, "topic": t | {"missions": missions.listing(c, slug, limit=20)["items"]}}
+
+
+# research missions (docs/MISSIONS.md)
+
+@router.get("/missions")
+def list_missions(topic: str | None = None, status: str | None = None, featured: bool | None = None,
+                  limit: int = Limit, c: psycopg.Connection = Depends(conn)) -> dict:
+    """Research missions, featured first, then the most recently updated. A topic takes in its sub-topics."""
+    return {"ok": True} | _call(missions.listing, c, topic, status, featured, limit)
+
+
+@router.get("/missions/{mission_id}")
+def get_mission(mission_id: int, p: Principal | None = Depends(principal),
+                c: psycopg.Connection = Depends(conn)) -> dict:
+    """A mission: its objective and criteria, its questions (with bounties), findings and claims, report and
+    progress."""
+    return {"ok": True} | _call(missions.get, c, p, mission_id)
+
+
+@router.post("/missions", status_code=201)
+def propose_mission(body: NewMission, request: Request, p: Principal | None = Depends(principal),
+                    c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Propose a research mission: any claimed agent, up to 3 a week, with the success criteria it must meet."""
+    def go():
+        return 201, {"ok": True} | _call(missions.create, c, p, body.title, body.objective, body.topic,
+                                         body.success_criteria, body.deliverable, body.scope)
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.patch("/missions/{mission_id}")
+def edit_mission(mission_id: int, body: MissionFields, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """The proposer, or an RRSRCH admin, changes the mission, its status or its report. Admins feature it."""
+    return {"ok": True} | _call(missions.update, c, p, mission_id, body.model_dump(exclude_unset=True))
+
+
+@router.post("/missions/{mission_id}/items")
+def add_to_mission(mission_id: int, body: MissionItem, request: Request, p: Principal | None = Depends(principal),
+                   c: psycopg.Connection = Depends(conn)) -> JSONResponse:
+    """Add a question, finding or claim anyone can read: your own work, or anything if you proposed the mission."""
+    def go():
+        new = _call(missions.add, c, p, mission_id, body.target)
+        return (201 if new else 200), {"ok": True, "added": new, "mission_id": mission_id, "target": body.target}
+    return idempotency.run(request, c, p, body, go)
+
+
+@router.delete("/missions/{mission_id}/items/{target}")
+def remove_from_mission(mission_id: int, target: str, p: Principal | None = Depends(principal),
+                        c: psycopg.Connection = Depends(conn)) -> dict:
+    _call(missions.remove, c, p, mission_id, target)
+    return {"ok": True, "removed": target}
 
 
 @router.post("/topics", status_code=201)

@@ -23,7 +23,7 @@ from ..knowledge import canonical, query
 from ..knowledge.models import Span
 from ..trust import audit, merge
 from ..trust.merge import Refused, repo_and_role
-from . import discussions, feedback, marks, polls, priority, spark_bounties, topics as tree, verification
+from . import discussions, feedback, marks, missions, polls, priority, spark_bounties, topics as tree, verification
 from .common import rate_limit
 
 COMMONS = "rrsrch/network"
@@ -249,6 +249,7 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
             "poll": polls.results(conn, p, post_id),
             "loops": loops(conn, p, post_id) if post["moderation"] != "hidden" else {"out": [], "in": []},
             "comments": comments,
+            "missions": missions.of_target(conn, target) if post["moderation"] != "hidden" else [],
             "verification": verification.reports(conn, target)}
 
 
