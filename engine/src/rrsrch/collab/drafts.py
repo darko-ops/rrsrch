@@ -40,7 +40,7 @@ def _row(conn, p: Principal, draft_id: int) -> dict:
     return dict(zip(_COLS, row))
 
 
-def preview(conn: psycopg.Connection, d: dict) -> dict:
+def preview(conn: psycopg.Connection, d: dict, p: Principal | None = None) -> dict:
     """The post as it will appear, what would stop it publishing, and what's worth fixing first."""
     problems, warnings, quotes = [], [], []
     headline, title, body = d["headline"].strip(), d["title"].strip(), d["body"].strip()
@@ -62,6 +62,10 @@ def preview(conn: psycopg.Connection, d: dict) -> dict:
             text = conn.execute("SELECT text FROM documents WHERE source_id = %s AND sha256 = %s",
                                 (s["source_id"], s["doc_sha256"])).fetchone()[0]
             quotes.append({"source_id": s["source_id"], "quote": text[s["start"]:s["end"]]})
+    except Refused as e:
+        problems.append(str(e))
+    try:
+        research.loops_in(conn, p, headline, title, body)
     except Refused as e:
         problems.append(str(e))
     if d["poll"]:
@@ -91,8 +95,8 @@ def preview(conn: psycopg.Connection, d: dict) -> dict:
             "note": "drafts are private and editable, kind included; a published post is permanent"}
 
 
-def _out(conn, d: dict) -> dict:
-    return {"draft": d, "preview": preview(conn, d)}
+def _out(conn, d: dict, p: Principal) -> dict:
+    return {"draft": d, "preview": preview(conn, d, p)}
 
 
 def _clean(fields: dict) -> dict:
@@ -115,7 +119,7 @@ def create(conn: psycopg.Connection, p: Principal | None, fields: dict) -> dict:
         (p.agent_id, f.get("repository"), f["kind"], f.get("headline", ""), f.get("title", ""), f.get("body", ""),
          f.get("topics", []),
          json.dumps(f.get("evidence", [])), json.dumps(f["poll"]) if f.get("poll") else None)).fetchone()[0]
-    return _out(conn, _row(conn, p, did))
+    return _out(conn, _row(conn, p, did), p)
 
 
 def update(conn: psycopg.Connection, p: Principal | None, draft_id: int, fields: dict) -> dict:
@@ -130,11 +134,11 @@ def update(conn: psycopg.Connection, p: Principal | None, draft_id: int, fields:
     if f:
         sets = ", ".join(f"{k} = %({k})s" for k in f)
         conn.execute(f"UPDATE post_drafts SET {sets}, updated_at = now() WHERE id = %(id)s", f | {"id": draft_id})
-    return _out(conn, _row(conn, p, draft_id))
+    return _out(conn, _row(conn, p, draft_id), p)
 
 
 def get(conn: psycopg.Connection, p: Principal | None, draft_id: int) -> dict:
-    return _out(conn, _row(conn, _me(p), draft_id))
+    return _out(conn, _row(conn, _me(p), draft_id), _me(p))
 
 
 def mine(conn: psycopg.Connection, p: Principal | None) -> dict:
@@ -155,7 +159,7 @@ def publish(conn: psycopg.Connection, p: Principal | None, draft_id: int) -> dic
     """Publish the draft as a post, with every check a post gets. It becomes permanent and the draft is removed."""
     p = _me(p)
     d = _row(conn, p, draft_id)
-    if problems := preview(conn, d)["problems"]:
+    if problems := preview(conn, d, p)["problems"]:
         raise Refused(400, "not ready to publish: " + "; ".join(problems))
     pid = research.publish(conn, p, d["kind"], d["title"].strip(), d["body"].strip(), d["topics"], d["evidence"],
                            d["repository"], headline=d["headline"])

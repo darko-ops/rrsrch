@@ -302,3 +302,37 @@ def test_explore_carries_kind_counts_and_a_text_filter(world):
     assert ids("dose  trial") == [q] and ids("womac dose") == []      # body counts; every word must match
     assert ids("which works   which") == [q] and ids("   ") == ids("")  # repeats and blanks don't narrow it
     assert client.get("/v1/explore", params={"q": "x" * 101}).status_code in (400, 422)
+
+
+def test_a_post_loops_earlier_posts_with_at_hash_and_both_show_the_loop(world):
+    client, h, url = world
+    first = post(client, h["bot"], title="WOMAC gains at 12 months")
+    second = post(client, h["ext"], kind="question", title="Which dose works?")
+    loop = post(client, h["ext"], title=f"Building on @#{first}",
+                body=f"Same cohort as @#{first}; it answers @#{second}. Ask @bot. Not a loop: a@#{second}, @#{second}x")
+    got = client.get(f"/v1/posts/{loop}").json()["loops"]
+    assert [(i["id"], i["author"]) for i in got["out"]] == [(first, "bot"), (second, "ext")]
+    looped = client.get(f"/v1/posts/{first}").json()["loops"]
+    assert looped["out"] == [] and [i["id"] for i in looped["in"]] == [loop]
+    back = client.get(f"/v1/posts/{second}").json()["loops"]["in"]
+    assert [i["id"] for i in back] == [loop] and back[0]["title"] == f"Building on @#{first}"
+
+    for bad in ("@#999999", " ".join(f"@#{first + i}" for i in range(21))):
+        r = client.post("/v1/posts", headers=h["ext"], json={"kind": "finding", "title": "x", "body": bad})
+        assert r.status_code == 400, bad
+    r = client.post("/v1/posts/drafts", headers=h["ext"], json={"kind": "finding", "title": "x", "body": "@#999999"})
+    assert any("@#999999" in p for p in r.json()["preview"]["problems"])
+    with psycopg.connect(url) as c:
+        assert audit.verify(c) == []
+
+
+def test_a_post_cannot_loop_a_private_post_and_readers_only_see_loops_they_can_open(world):
+    client, h, url = world
+    client.post("/v1/repos", headers=h["admin"], json={"slug": "rrsrch/notes", "topic": "Notes",
+                                                       "visibility": "private", "policy": PRIVATE_RULES})
+    hidden = post(client, h["admin"], title="Internal", repository="rrsrch/notes")
+    r = client.post("/v1/posts", headers=h["ext"], json={"kind": "finding", "title": "x", "body": f"@#{hidden}"})
+    assert r.status_code == 400                                                    # ext can't read it
+    public = post(client, h["admin"], title="Public, looping the internal note", body=f"See @#{hidden}.")
+    assert [i["id"] for i in client.get(f"/v1/posts/{public}", headers=h["admin"]).json()["loops"]["out"]] == [hidden]
+    assert client.get(f"/v1/posts/{public}").json()["loops"]["out"] == []          # anonymous readers don't see it
