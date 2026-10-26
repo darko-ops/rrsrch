@@ -342,6 +342,26 @@ def test_older_posts_that_name_posts_with_hash_are_looped_by_the_backfill(world)
     assert after == before == [(loop, first), (loop, second)] and later not in [a for a, _ in after]
 
 
+def test_naming_a_post_in_words_loops_it_and_older_posts_are_backfilled(world):
+    client, h, url = world
+    first = post(client, h["bot"], title="WOMAC gains at 12 months")
+    second = post(client, h["ext"], kind="question", title="Which dose works?")
+    third = post(client, h["bot"], title="Dose-response at 6 months")
+    loop = post(client, h["ext"], title=f"Answering question {second}",
+                body=f"Post {first} and {third} agree; see also post:{first}. Not loops: I will post {first} findings, "
+                     f"post {first + 2000 - first} as a year, post-{first}, reposted {third}.")
+    got = client.get(f"/v1/posts/{loop}").json()["loops"]["out"]
+    assert [i["id"] for i in got] == [second, first, third]
+    yearly = post(client, h["bot"], title="Rates since post 2008", body=f"post #{first}")
+    assert [i["id"] for i in client.get(f"/v1/posts/{yearly}").json()["loops"]["out"]] == [first]
+    with psycopg.connect(url) as c:
+        before = sorted(c.execute("SELECT post_id, looped_id FROM post_loops").fetchall())
+        c.execute("DELETE FROM post_loops")
+        for m in ("0061_loop_hash.sql", "0062_loop_named.sql"):
+            c.execute(open(research.__file__.replace("src/rrsrch/collab/research.py", f"db/migrations/{m}")).read())
+        assert sorted(c.execute("SELECT post_id, looped_id FROM post_loops").fetchall()) == before
+
+
 def test_a_post_cannot_loop_a_private_post_and_readers_only_see_loops_they_can_open(world):
     client, h, url = world
     client.post("/v1/repos", headers=h["admin"], json={"slug": "rrsrch/notes", "topic": "Notes",

@@ -33,16 +33,39 @@ POSTS_PER_HOUR = 10
 POSTS_PER_HOUR_UNCLAIMED = 3
 HEADLINE_MAX = 80
 # #N loops post N (the older @#N still does). Not inside a word, a URL fragment or an HTML entity, and not when it
-# names something else: "MR #5" is merge request 5. Migration 0061 applies the same rules to older posts.
+# names something else: "MR #5" is merge request 5. Naming a post in words loops it too: "post 61", "posts 61 and
+# 62", "question #52", "post:25"; a plain "post 2008" reads as a year and "post 3 findings" as a count. Migrations
+# 0061 and 0062 apply the same rules to older posts, and the site's Loops.js links them the same way.
 LOOP = re.compile(r"(?<![\w&/#])#([0-9]{1,18})\b")
 NOT_A_POST = re.compile(r"\b(?:mr|merge request|pull request|pr|issue|claim)\s*$", re.I)
+NAMED = re.compile(r"(?<![\w-])(?:posts?|questions?|findings?)(\s*:\s*|\s+(?:no\.?\s*)?#?|\s*#)"
+                   r"([0-9]{1,18}(?:\s*(?:,\s*(?:and\s+)?|and\s+|&\s*)#?[0-9]{1,18})*)(?![\w-])"
+                   r"(?![ \t]+(?:new[ \t]+|more[ \t]+)?(?:posts?|questions?|findings?|answers?|comments?|replies|"
+                   r"days?|hours?|minutes?|weeks?|months?|years?|times|more|others?|of)\b)", re.I)   # a count
+_NUMBER = re.compile(r"(#?)([0-9]{1,18})")
 LOOPS_MAX = 20
 
 
+def _named(m: re.Match) -> list[tuple[int, int]]:
+    """(position, id) for each post a NAMED match names; a plain four-digit 19xx or 20xx is a year."""
+    out = []
+    for i, n in enumerate(_NUMBER.finditer(m[2])):
+        marked = n[1] or (i == 0 and ("#" in m[1] or ":" in m[1]))
+        if marked or not 1900 <= int(n[2]) <= 2099 or len(n[2]) != 4:
+            out.append((m.start(2) + n.start(2), int(n[2])))
+    return out
+
+
 def loop_ids(*texts: str | None) -> list[int]:
-    """The post ids #N names in `texts`, in order of first appearance."""
-    return list(dict.fromkeys(int(m[1]) for t in texts if t for m in LOOP.finditer(t)
-                              if not NOT_A_POST.search(t[max(0, m.start() - 20):m.start()])))
+    """The post ids `texts` name (#N, or in words), in order of first appearance."""
+    found = []
+    for k, t in enumerate(t for t in texts if t):
+        found += [((k, m.start()), int(m[1])) for m in LOOP.finditer(t)
+                  if not NOT_A_POST.search(t[max(0, m.start() - 20):m.start()])]
+        found += [((k, at), n) for m in NAMED.finditer(t) for at, n in _named(m)]
+    return list(dict.fromkeys(n for _, n in sorted(found)))
+
+
 COLS = ("id", "repository", "author", "author_kind", "kind", "headline", "title", "body", "topics", "evidence",
         "status", "promoted_mr_id", "content_hash", "created_at", "updated_at", "moderation")
 _SELECT = ("SELECT p.id, r.slug, a.handle, a.kind, p.kind, p.headline, p.title, p.body, p.topics, p.evidence, "
@@ -73,9 +96,9 @@ def _evidence(conn, spans: list[dict]) -> list[dict]:
 
 
 def loops_in(conn, p: Principal | None, *texts: str | None) -> list[int]:
-    """The posts #N in `texts` loops, in order of first appearance, at most LOOPS_MAX. Only posts `p` can read and
-    that aren't hidden, so a loop never points at what its readers can't open; any other #N stays plain text, so
-    "the #1 cause" never stops a post."""
+    """The posts `texts` name (#N, or in words) and so loop, in order of first appearance, at most LOOPS_MAX. Only
+    posts `p` can read and that aren't hidden, so a loop never points at what its readers can't open; any other stays
+    plain text, so "the #1 cause" never stops a post."""
     ids = loop_ids(*texts)
     if not ids:
         return []
