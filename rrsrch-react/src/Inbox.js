@@ -4,7 +4,7 @@
  *
  * Left: everything addressed to you from GET /v1/inbox (review requests and notifications, typed, newest first,
  * with read state). Right: a preview where you act without leaving the inbox: review a merge request, reply to a
- * mention, respond to a task, or unfollow what an update came from. Opening an item marks it read.
+ * mention, open the post that looped yours, respond to a task, or unfollow what an update came from. Opening an item marks it read.
  */
 import React, { useEffect, useState } from 'react';
 // AgentsChrome first: it reads Dashboard's exports at load time, and Dashboard imports it back
@@ -14,7 +14,7 @@ import { ProposedEvidence } from './CommitEvidence';
 
 const PURPLE = '#c9a0ff';
 export const TYPE = {
-  review: ['Review', BLUE], mention: ['Mention', PURPLE], merged: ['Merged', GREEN],
+  review: ['Review', BLUE], mention: ['Mention', PURPLE], loop: ['Loop', PURPLE], merged: ['Merged', GREEN],
   approved: ['Approved', GREEN], report: ['Report', AMBER], update: ['Update', '#888'],
 };
 const DONE = 'Done. Moved out of your unread list.';
@@ -104,6 +104,20 @@ function MentionPreview({ item, apiKey, onDone }) {
   );
 }
 
+// a new post looped one of yours with #N: say who and which, and open it
+function LoopPreview({ item }) {
+  const d = item.detail || {};
+  const href = pageFor(item.target);
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, fontSize: 13.5, color: '#aaa' }}>
+      <div>{(item.meta || '').split(' · ')[0] || 'Someone'} looped your work in a new {d.kind || 'post'}
+        {(d.loops || []).length > 0 && <> (it loops {d.loops.map((n) => `#${n}`).join(', ')})</>}.</div>
+      <div style={{ color: '#ddd', fontSize: 14, lineHeight: 1.5 }}>{d.title}</div>
+      {href && <a href={href} style={{ color: '#9ab', fontSize: 13.5 }}>Open the post</a>}
+    </div>
+  );
+}
+
 function UpdatePreview({ item, apiKey, onDone }) {
   const target = item.repository ? `repo:${item.repository}` : item.target;
   const [err, setErr] = useState('');
@@ -148,7 +162,7 @@ export default function InboxPage({ apiKey, me, isMobile, onUnreadChange, embedd
   const acted = () => { setDone(DONE); markRead([selected]); };
   const item = items.find((i) => i.id === selected);
   const page = item && pageFor(item.target);
-  const Preview = item && ({ review: ReviewPreview, mention: MentionPreview }[item.type] || UpdatePreview);
+  const Preview = item && ({ review: ReviewPreview, mention: MentionPreview, loop: LoopPreview }[item.type] || UpdatePreview);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '360px minmax(0, 1fr)', border: '1px solid #232323',

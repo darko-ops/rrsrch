@@ -1,6 +1,6 @@
 /**
- * Loops (engine serve/onboarding.md, section 4): a post connects to other posts by writing @#N in its headline,
- * title or body. LoopText turns each @#N in a text into a link to post N; LoopList shows a post's loops both ways,
+ * Loops (engine serve/onboarding.md, section 4): a post connects to other posts by writing #N in its headline,
+ * title or body. LoopText turns each #N in a text into a link to post N; LoopList shows a post's loops both ways,
  * the posts it loops and the posts that loop it, from the engine's `loops` on GET /v1/posts/N.
  */
 import React from 'react';
@@ -9,8 +9,10 @@ import { goTo } from './routes';
 
 const postHref = (p) => `/${p.kind === 'question' ? 'questions' : 'posts'}/${p.id}`;
 
-// the engine's pattern: @#N not glued to a word or another @, and not followed by more letters or digits
-const LOOP = /(?<![\w@])@#(\d{1,18})(?!\w)/g;
+// the engine's rules (research.LOOP, NOT_A_POST): #N not inside a word, a URL fragment or an HTML entity, and not
+// naming something else, such as "MR #5"
+const LOOP = /(?<![\w&/#])#(\d{1,18})(?!\w)/g;
+const NOT_A_POST = /\b(?:mr|merge request|pull request|pr|issue|claim)\s*$/i;
 
 const open = (href) => (e) => {
   if (e.metaKey || e.ctrlKey || e.shiftKey) return;     // let the browser open a new tab
@@ -19,17 +21,20 @@ const open = (href) => (e) => {
   goTo(href);
 };
 
-export function LoopText({ text }) {
+// `only`, when given, is the posts the engine looped (a post page): any other #N, like "the #1 cause", stays text
+export function LoopText({ text, only }) {
   if (!text) return text ?? null;
   const out = [];
   let last = 0;
   for (const m of text.matchAll(LOOP)) {
+    if (NOT_A_POST.test(text.slice(Math.max(0, m.index - 20), m.index))) continue;
+    if (only && !only.has(Number(m[1]))) continue;
     if (m.index > last) out.push(text.slice(last, m.index));
     const href = `/posts/${m[1]}`;
     out.push(
       <a key={m.index} href={href} onClick={open(href)} title={`Open post ${m[1]}`}
         style={{ color: '#9ab', fontFamily: fonts.mono, fontSize: '0.92em', textDecoration: 'none',
-          background: 'rgba(153,170,187,0.12)', borderRadius: 5, padding: '0 4px' }}>@#{m[1]}</a>,
+          background: 'rgba(153,170,187,0.12)', borderRadius: 5, padding: '0 4px' }}>#{m[1]}</a>,
     );
     last = m.index + m[0].length;
   }
@@ -44,7 +49,7 @@ function LoopRow({ p }) {
     <a href={href} onClick={open(href)} style={{ display: 'flex', gap: 10, alignItems: 'baseline', padding: '8px 12px',
       borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.025)',
       textDecoration: 'none', minWidth: 0 }}>
-      <span style={{ fontFamily: fonts.mono, fontSize: 12, color: '#9ab', flex: 'none' }}>@#{p.id}</span>
+      <span style={{ fontFamily: fonts.mono, fontSize: 12, color: '#9ab', flex: 'none' }}>#{p.id}</span>
       <span style={{ color: '#e6e6e6', fontSize: 13.5, lineHeight: 1.45, overflowWrap: 'anywhere', minWidth: 0 }}>
         {p.headline || p.title}
         <span style={{ color: '#777', fontSize: 12 }}> · {p.kind} by {p.author}</span>
