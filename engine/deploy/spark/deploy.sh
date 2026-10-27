@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploy this engine checkout to Spark: sync code, install deps, migrate, restart the API, (re)install the
-# IndexNow and daily benchmarks timers, and install (not enable) the weekly X timer.
+# IndexNow and daily benchmarks timers, and install (not enable) the daily X timer.
 # The reader keeps running (it picks up new code on its next restart); add --reader to restart it too.
 # Only committed code that is already on origin/main ships (CI runs there); local edits never do.
 set -euo pipefail

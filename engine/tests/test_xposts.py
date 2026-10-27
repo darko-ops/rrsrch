@@ -1,5 +1,5 @@
-"""The weekly posts on X (collab/xposts.py): the core four, featured gauges and findings, the most discussed posts; each
-once a week, agent text made inert, never more than 280 characters, nothing sent without credentials."""
+"""The daily posts on X (collab/xposts.py): the core four, a featured gauge and finding, the most discussed posts; each
+once a day, agent text made inert, never more than 280 characters, nothing sent without credentials."""
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -63,7 +63,7 @@ def test_nothing_to_say_means_no_post(world):
         assert xposts.compose(c) == []
 
 
-def test_posts_each_kind_once_a_week_and_retries_what_failed(world, monkeypatch):
+def test_posts_each_kind_once_a_day_and_retries_what_failed(world, monkeypatch):
     client, h, url = world
     setup(client, url, h)
     sent, fail = [], {"popular"}
@@ -88,7 +88,7 @@ def test_posts_each_kind_once_a_week_and_retries_what_failed(world, monkeypatch)
         again = xposts.run(c, now=now + timedelta(hours=1), post=fake)
         assert [p["kind"] for p in again["posted"]] == ["popular"] and again["skipped"] == ["core", "featured"]
         assert xposts.run(c, now=now + timedelta(hours=2), post=fake)["drafts"] == []
-        nxt = xposts.compose(c, now + timedelta(days=7))           # a featured gauge rests for a few weeks,
+        nxt = xposts.compose(c, now + timedelta(days=1))           # a featured gauge rests for a week,
         assert [d["ref"] for d in nxt if d["kind"] == "featured"] == ["clean-power"]   # unless it's the only one
     assert sent == ["Radar", "Featured", "discussed"]
 
@@ -132,16 +132,20 @@ def test_admins_feature_gauges_and_findings_which_post_instead_of_the_engines_pi
             return httpx.Response(201, json={"data": {"id": str(len(sent))}})
 
         assert len(xposts.run(c, now=now, post=fake)["posted"]) == 4
-        feature(client, h["admin"], "gauges/clean-power")                  # featured midweek: it goes out on a rerun
-        assert [p["kind"] for p in xposts.run(c, now=now + timedelta(hours=1), post=fake)["posted"]] == ["featured"]
-        assert xposts.run(c, now=now + timedelta(hours=2), post=fake)["drafts"] == []
-        nxt = [(d["kind"], d["ref"]) for d in xposts.compose(c, now + timedelta(days=7))]
-        assert ("featured", "ocean-health") in nxt and ("featured", "clean-power") in nxt   # gauges post weekly,
-        assert not any(k == "finding" for k, _ in nxt)                                       # a finding once
-    assert len(sent) == 5
+        feature(client, h["admin"], "gauges/clean-power")                  # featured midday: one gauge a day
+        assert xposts.run(c, now=now + timedelta(hours=1), post=fake)["drafts"] == []
+
+        def tomorrow(days):
+            return {d["kind"]: d["ref"] for d in xposts.run(c, now=now + timedelta(days=days), post=fake)["drafts"]}
+
+        assert tomorrow(1)["featured"] == "clean-power"                    # featured gauges take turns,
+        assert tomorrow(2)["featured"] == "ocean-health"                   # the one posted longest ago first
+        assert tomorrow(3)["featured"] == "clean-power"
+        assert "finding" not in tomorrow(4)                                # a featured finding posts once
+    assert sent[2].startswith("Featured finding") and sum(t.startswith("Featured finding") for t in sent) == 1
 
 
-def test_with_nothing_featured_the_most_discussed_finding_posts_once_a_week(world, monkeypatch):
+def test_with_nothing_featured_the_most_discussed_finding_posts_once_a_day(world, monkeypatch):
     client, h, url = world
     a, b, c3 = agent(url, "lab-a", "a-1"), agent(url, "lab-b", "b-1"), agent(url, "lab-c", "c-1")
     first, second = post(client, a, title="First finding"), post(client, a, title="Second finding")
@@ -159,10 +163,9 @@ def test_with_nothing_featured_the_most_discussed_finding_posts_once_a_week(worl
     now = datetime(2026, 10, 26, 14, tzinfo=timezone.utc)
     with psycopg.connect(url) as c:
         got = xposts.run(c, now=now, post=fake)
-        assert [(d["kind"], d["ref"], d["auto"]) for d in got["drafts"] if d["kind"] == "finding"] == [
-            ("finding", f"post:{first}", True)]
-        assert xposts.run(c, now=now + timedelta(hours=1), post=fake)["drafts"] == []   # no second pick this week
-        nxt = [d["ref"] for d in xposts.compose(c, now + timedelta(days=2)) if d["kind"] == "finding"]
+        assert [(d["kind"], d["ref"]) for d in got["drafts"] if d["kind"] == "finding"] == [("finding", f"post:{first}")]
+        assert xposts.run(c, now=now + timedelta(hours=1), post=fake)["drafts"] == []   # no second pick today
+        nxt = [d["ref"] for d in xposts.compose(c, now + timedelta(days=1)) if d["kind"] == "finding"]
     assert nxt == [f"post:{second}"]                                                   # and never the same one again
 
 
@@ -174,6 +177,10 @@ def test_core_post_shows_the_weeks_change_as_the_gauges_list_gives_it():
     text = xposts.compose_core(core)
     assert "Humanity Confidence: 61.6 (+6.6)" in text and "AI Safety: 43.4 (−3.8)" in text
     assert "Human Agency: 51.4\n" in text and "Scientific Progress: 71.2\n" in text
+    assert "Up to 5 agents per gauge" in text and xposts.weight(text) <= 280
+    crowded = [g | {"index": {"agents": 120, "score": 55.5}, "change_7d": {"change": -12.5}} for g in core]
+    text = xposts.compose_core(crowded)                      # bigger numbers: the note shortens, the post still fits
+    assert "−12.5" in text and xposts.weight(text) <= 280 and text.endswith("/#/radar")
 
 
 def test_oauth_signature_matches_xs_documented_example():

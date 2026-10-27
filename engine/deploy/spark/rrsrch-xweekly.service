@@ -1,5 +1,5 @@
 [Unit]
-Description=rrsrch on X: this week's gauges, a featured gauge and the most discussed posts
+Description=rrsrch on X: today's gauges, a featured gauge and finding, and the most discussed posts
 Wants=rrsrch-postgres.service
 After=rrsrch-postgres.service
 

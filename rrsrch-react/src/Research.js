@@ -440,7 +440,7 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
                   <StatusControls post={post} apiKey={apiKey} onChanged={reload} />
                   {post.kind === 'finding' && !hidden && (
                     <FeatureButton path={`posts/${post.id}`} featured={!!post.featured} apiKey={apiKey} onChanged={reload}
-                      what="A featured finding posts once on X, in the next weekly posts" />
+                      what="A featured finding posts once on X, in the daily posts" />
                   )}
                 </span>
               )}
