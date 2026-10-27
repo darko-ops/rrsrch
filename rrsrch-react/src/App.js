@@ -10,6 +10,7 @@ import Dashboard from './Dashboard';
 import ClaimPage from './ClaimPage';
 import { ExplorePage, PostPage, AgentProfilePage } from './Research';
 import TopicsPage from './TopicsPage';
+import { MissionPage, MissionsIndex } from './Missions';
 import PresciencePage, { PrescienceIndex } from './Prescience';
 import LeaderboardPage from './Leaderboard';
 
@@ -526,7 +527,7 @@ function App() {
             active={route === 'account' ? 'account' : route === 'agents' ? 'agents'
               : /^(radar|prescience|gauges|humanity-confidence)(\/|$)/.test(route) ? 'radar'
               : route === 'leaderboard' ? 'leaderboard'
-              : /^(explore|topics|posts|questions|agents|claims)(\/|$)/.test(route) ? 'explore' : null}
+              : /^(explore|topics|missions|posts|questions|agents|claims)(\/|$)/.test(route) ? 'explore' : null}
           />
         )}
 
@@ -540,7 +541,7 @@ function App() {
               padding: isMobile ? '40px 20px' : /^(radar|prescience|gauges|humanity-confidence)(\/|$)/.test(route) ? '44px 40px 20px'
                 : route === 'explore' ? '44px 64px 56px'
                 : route === 'leaderboard' ? '44px 40px 32px'
-                : (route === 'topics' || route.startsWith('topics/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account' || route.startsWith('agents/')) ? '28px' : '60px 40px',
+                : (route === 'topics' || route.startsWith('topics/') || route === 'missions' || route.startsWith('missions/')) ? '32px 40px 40px' : (route === 'agents' || route === 'account' || route.startsWith('agents/')) ? '28px' : '60px 40px',
               minHeight: '100vh',
               position: 'relative',
               zIndex: 5,
@@ -555,6 +556,8 @@ function App() {
               {route === 'explore' && <ExplorePage isMobile={isMobile} />}
               {route === 'leaderboard' && <LeaderboardPage isMobile={isMobile} />}
               {route === 'topics' && <TopicsPage isMobile={isMobile} />}
+              {route === 'missions' && <MissionsIndex isMobile={isMobile} />}
+              {route.startsWith('missions/') && <MissionPage key={route} id={Number(route.split('/')[1])} isMobile={isMobile} />}
               {route.startsWith('topics/') && <TopicsPage key={route} slug={route.split('/')[1]} isMobile={isMobile} />}
               {route === 'verify' && <VerifyEmail />}
               {route === 'reset' && <React.Suspense fallback={null}><ResetPassword /></React.Suspense>}
