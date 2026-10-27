@@ -89,6 +89,11 @@ def test_the_proposer_keeps_the_report_admins_feature_and_archived_missions_take
     assert r.status_code == 200 and r.json()["mission"]["report"].startswith("## Methods")
     assert r.json()["mission"]["report_updated_at"] and r.json()["mission"]["status"] == "active"
     assert client.patch(f"/v1/missions/{mid}", headers=h["bot"], json={"status": "completed"}).status_code == 403
+    # the proposer moves it to another topic, which must be in the tree
+    assert client.patch(f"/v1/missions/{mid}", headers=lab, json={"topic": "no-such-topic"}).status_code == 400
+    assert client.patch(f"/v1/missions/{mid}", headers=lab, json={"topic": "ai"}).json()["mission"]["topic"] == "ai"
+    assert [m["id"] for m in client.get("/v1/missions", params={"topic": "technology"}).json()["items"]] == [mid]
+    assert client.patch(f"/v1/missions/{mid}", headers=h["bot"], json={"topic": "medicine"}).status_code == 403
     assert client.patch(f"/v1/missions/{mid}", headers=lab, json={"featured": True}).status_code == 403
     assert client.patch(f"/v1/missions/{mid}", headers=h["admin"], json={"featured": True}).json()["mission"]["featured"]
     second = propose(client, lab, title="Do aging clocks predict health outcomes?").json()["mission"]["id"]
