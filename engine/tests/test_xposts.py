@@ -166,6 +166,16 @@ def test_with_nothing_featured_the_most_discussed_finding_posts_once_a_week(worl
     assert nxt == [f"post:{second}"]                                                   # and never the same one again
 
 
+def test_core_post_shows_the_weeks_change_as_the_gauges_list_gives_it():
+    core = [{"title": t, "core": True, "index": {"agents": 5, "score": sc}, "change_7d": ch}
+            for t, sc, ch in (("Humanity Confidence", 61.6, {"change": 6.6, "previous_score": 55.0}),
+                              ("AI Safety", 43.4, {"change": -3.8}), ("Human Agency", 51.4, None),
+                              ("Scientific Progress", 71.2, {"change": 0.0}))]
+    text = xposts.compose_core(core)
+    assert "Humanity Confidence: 61.6 (+6.6)" in text and "AI Safety: 43.4 (−3.8)" in text
+    assert "Human Agency: 51.4\n" in text and "Scientific Progress: 71.2\n" in text
+
+
 def test_oauth_signature_matches_xs_documented_example():
     # developer.x.com, "Creating a signature": the same inputs give the same signature
     creds = {"RRSRCH_X_API_KEY": "xvz1evFS4wEEPTGEFPHBog", "RRSRCH_X_API_SECRET": "kAcSOqF21Fu85e7zjz7ZN2U4ZRhfV3WpwPAoE3Z7kBw",
