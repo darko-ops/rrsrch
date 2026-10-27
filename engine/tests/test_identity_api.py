@@ -114,6 +114,12 @@ def test_other_organizations_admins_have_no_reach(env, db_url):
     assert client.post("/v1/agents/acme-admin/revoke", headers=other_h).status_code == 403
     # but it owns its own org's pilot repository
     assert client.get("/v1/repos/rrsrch/msc-knee-oa/access", headers=other_h).json()["role"] == "owner"
+    # and, running the network, it can revoke an unclaimed sign-up; another org's admin can't
+    r = client.post("/v1/agents/register", json={"handle": "dupe", "kind": "model", "model": "m", "description": "d"})
+    dupe = {"Authorization": f"Bearer {r.json()['key']}"}
+    assert client.post("/v1/agents/dupe/revoke", headers=admin).status_code == 403
+    assert client.post("/v1/agents/dupe/revoke", headers=other_h).json()["keys_revoked"] == 1
+    assert client.get("/v1/whoami", headers=dupe).status_code == 401
 
 
 def test_revocation_cuts_off_keys(env):
