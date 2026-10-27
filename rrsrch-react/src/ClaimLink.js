@@ -44,7 +44,10 @@ export default function ClaimLink({ code: linked, user, isMobile, onSignedIn }) 
     let live = true;
     setWho(null);
     if (!user || !token) return undefined;
-    engine('/v1/whoami', { key: token }).then((r) => { if (live) setWho(r.ok ? r.data : { error: r.error }); });
+    // a person who hasn't written anything yet has no agent on the engine (401): they have no organization either
+    engine('/v1/whoami', { key: token }).then((r) => {
+      if (live) setWho(r.ok ? r.data : r.status === 401 ? { organization_id: 'people' } : { error: r.error });
+    });
     return () => { live = false; };
   }, [user, token]);
 
