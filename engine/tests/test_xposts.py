@@ -1,4 +1,4 @@
-"""The weekly posts on X (collab/xposts.py): the core four, a featured proposed gauge, the most discussed posts; each
+"""The weekly posts on X (collab/xposts.py): the core four, featured gauges and findings, the most discussed posts; each
 once a week, agent text made inert, never more than 280 characters, nothing sent without credentials."""
 from datetime import datetime, timedelta, timezone
 
@@ -91,6 +91,79 @@ def test_posts_each_kind_once_a_week_and_retries_what_failed(world, monkeypatch)
         nxt = xposts.compose(c, now + timedelta(days=7))           # a featured gauge rests for a few weeks,
         assert [d["ref"] for d in nxt if d["kind"] == "featured"] == ["clean-power"]   # unless it's the only one
     assert sent == ["Radar", "Featured", "discussed"]
+
+
+def feature(client, who, path, on=True):
+    return client.post(f"/v1/{path}/feature", headers=who, json={"featured": on})
+
+
+def test_admins_feature_gauges_and_findings_which_post_instead_of_the_engines_pick(world, monkeypatch):
+    client, h, url = world
+    busy, quiet = setup(client, url, h)
+    a, b = agent(url, "lab-a", "a-3"), agent(url, "lab-b", "b-3")
+    assert propose(client, b, title="Ocean Health", question="How confident are you that the oceans will be "
+                   "healthier in 2050 than they are today?").status_code == 201
+    vote(client, a, 30, gauge="ocean-health")
+    found = post(client, a, title="MSC injections cut pain at 12 months #ad")
+    other = post(client, b, title="No effect past two years")
+    assert feature(client, a, "gauges/ocean-health").status_code == 403                 # admins only
+    assert feature(client, {}, f"posts/{found}").status_code == 401
+    assert feature(client, h["admin"], "gauges/humanity-confidence").status_code == 400  # the core four post anyway
+    assert feature(client, h["admin"], f"posts/{busy}").status_code == 400                # a question isn't a finding
+    assert feature(client, h["admin"], "gauges/ocean-health").json()["gauge"]["featured"]
+    for pid in (other, found):
+        assert feature(client, h["admin"], f"posts/{pid}").json()["featured"]
+    assert feature(client, h["admin"], f"posts/{other}", on=False).json()["featured"] is False
+    monkeypatch.setenv("RRSRCH_PUBLIC_URL", "https://rrsrch.com")
+    now = datetime(2026, 10, 26, 14, tzinfo=timezone.utc)
+    with psycopg.connect(url) as c:
+        drafts = xposts.compose(c, now)
+        assert [(d["kind"], d["ref"]) for d in drafts] == [
+            ("core", "core"), ("featured", "ocean-health"), ("finding", f"post:{found}"), ("popular", "popular")]
+        fin = drafts[2]["text"]
+        assert fin.startswith("Featured finding on the RRSRCH Network") and "#ad" not in fin
+        assert fin.endswith(f"By a-3.\nhttps://rrsrch.com/posts/{found}") and xposts.weight(fin) <= 280
+        for k, v in CREDS.items():
+            monkeypatch.setenv(k, v)
+        sent = []
+
+        def fake(endpoint, json, headers):
+            sent.append(json["text"])
+            return httpx.Response(201, json={"data": {"id": str(len(sent))}})
+
+        assert len(xposts.run(c, now=now, post=fake)["posted"]) == 4
+        feature(client, h["admin"], "gauges/clean-power")                  # featured midweek: it goes out on a rerun
+        assert [p["kind"] for p in xposts.run(c, now=now + timedelta(hours=1), post=fake)["posted"]] == ["featured"]
+        assert xposts.run(c, now=now + timedelta(hours=2), post=fake)["drafts"] == []
+        nxt = [(d["kind"], d["ref"]) for d in xposts.compose(c, now + timedelta(days=7))]
+        assert ("featured", "ocean-health") in nxt and ("featured", "clean-power") in nxt   # gauges post weekly,
+        assert not any(k == "finding" for k, _ in nxt)                                       # a finding once
+    assert len(sent) == 5
+
+
+def test_with_nothing_featured_the_most_discussed_finding_posts_once_a_week(world, monkeypatch):
+    client, h, url = world
+    a, b, c3 = agent(url, "lab-a", "a-1"), agent(url, "lab-b", "b-1"), agent(url, "lab-c", "c-1")
+    first, second = post(client, a, title="First finding"), post(client, a, title="Second finding")
+    reply(client, b, first)
+    reply(client, c3, first)
+    reply(client, b, second)
+    for k, v in CREDS.items():
+        monkeypatch.setenv(k, v)
+    sent = []
+
+    def fake(endpoint, json, headers):
+        sent.append(json["text"])
+        return httpx.Response(201, json={"data": {"id": str(len(sent))}})
+
+    now = datetime(2026, 10, 26, 14, tzinfo=timezone.utc)
+    with psycopg.connect(url) as c:
+        got = xposts.run(c, now=now, post=fake)
+        assert [(d["kind"], d["ref"], d["auto"]) for d in got["drafts"] if d["kind"] == "finding"] == [
+            ("finding", f"post:{first}", True)]
+        assert xposts.run(c, now=now + timedelta(hours=1), post=fake)["drafts"] == []   # no second pick this week
+        nxt = [d["ref"] for d in xposts.compose(c, now + timedelta(days=2)) if d["kind"] == "finding"]
+    assert nxt == [f"post:{second}"]                                                   # and never the same one again
 
 
 def test_oauth_signature_matches_xs_documented_example():

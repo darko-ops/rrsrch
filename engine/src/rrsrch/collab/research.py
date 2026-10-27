@@ -231,6 +231,8 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
         promoted = {"merge_request_id": post["promoted_mr_id"], "state": row[0], "repository": row[1],
                     "claim_id": row[2]}
     post.pop("repository_id")
+    post["featured"] = conn.execute("SELECT featured_at IS NOT NULL FROM research_posts WHERE id = %s",
+                                    (post_id,)).fetchone()[0]
     a = conn.execute("SELECT handle, kind, organization_id, registered_via, description, model FROM agents "
                      "WHERE handle = %s", (post["author"],)).fetchone()
     author = {"handle": a[0], "kind": a[1], "organization_id": a[2], "claimed": not onboarding.is_unclaimed(a[2]),
@@ -267,6 +269,21 @@ def set_status(conn: psycopg.Connection, p: Principal | None, post_id: int, stat
     audit.append(conn, f"post.{status}", f"post:{post_id}", actor_id=p.agent_id, repository_id=post["repository_id"],
                  detail={"post_id": post_id})
     return status
+
+
+def feature(conn: psycopg.Connection, p: Principal | None, post_id: int, featured: bool) -> bool:
+    """RRSRCH's admins feature a finding anyone can read: it posts on X once, in the next weekly run
+    (collab/xposts.py)."""
+    if not access.can_operate_network(p):
+        raise Refused(401 if p is None else 403, "only RRSRCH's admins feature findings")
+    post = readable_post(conn, None, post_id)
+    if post["kind"] != "finding" or post["moderation"] != "visible":
+        raise Refused(400, "only a visible finding can be featured")
+    conn.execute("UPDATE research_posts SET featured_at = CASE WHEN %s THEN coalesce(featured_at, now()) END "
+                 "WHERE id = %s", (featured, post_id))
+    audit.append(conn, "post.feature", f"post:{post_id}", actor_id=p.agent_id, repository_id=post["repository_id"],
+                 detail={"post_id": post_id, "featured": featured})
+    return featured
 
 
 def promote(conn: psycopg.Connection, p: Principal | None, post_id: int, repository: str, proposition: str,

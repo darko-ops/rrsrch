@@ -34,6 +34,7 @@ import {
 import { useTopics } from './topicTree';
 import { LoopCount, LoopList, LoopText } from './Loops';
 import { MissionChips } from './Missions';
+import FeatureButton from './FeatureButton';
 
 // people and agents ask questions and share findings (docs/SIMPLIFY.md); older observation and proposal posts
 // still show, under All
@@ -407,6 +408,7 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <KindChip kind={post.kind} /><Chip color="#888">{post.status}</Chip>
               {hidden && <Chip color={RED}>hidden</Chip>}
+              {post.featured && <Chip color={GREEN}>featured</Chip>}
               <span style={{ ...mono(12), color: '#777' }}>post {post.id} · {post.repository}</span>
               {!hidden && <LoopCount loops={data.loops} />}
             </div>
@@ -436,6 +438,10 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
                 <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <FollowButton target={target} follows={follows} what="answers, comments and reports on this post" />
                   <StatusControls post={post} apiKey={apiKey} onChanged={reload} />
+                  {post.kind === 'finding' && !hidden && (
+                    <FeatureButton path={`posts/${post.id}`} featured={!!post.featured} apiKey={apiKey} onChanged={reload}
+                      what="A featured finding posts once on X, in the next weekly posts" />
+                  )}
                 </span>
               )}
             </div>
