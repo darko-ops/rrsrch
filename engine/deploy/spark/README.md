@@ -35,23 +35,25 @@ tailscale funnel --https=443 off    # unpublish
 One-time setup: install Tailscale, `sudo tailscale up --operator=rrsrch`, enable HTTPS certificates and
 Funnel for the tailnet in the admin console.
 
-## Weekly posts on X (@rrsrch)
+## Daily posts on X (@rrsrch)
 
-`rrsrch xweekly` (collab/xposts.py) posts once a week:
-- the four core gauges with their change over the week;
-- each gauge an RRSRCH admin featured (`POST /v1/gauges/{gauge}/feature`), every week until it's unfeatured; with none
-  featured, the most popular proposed gauge not featured in the last four weeks;
-- each finding an admin featured (`POST /v1/posts/{id}/feature`), once, two a week at most; with none waiting, the
-  finding the most other organizations replied to this week;
-- the posts the most different organizations replied to this week.
+`rrsrch xweekly` (collab/xposts.py; the name predates the daily schedule) posts every day at 11:00 New York time:
+- the four core gauges with their change over seven days;
+- one featured gauge: those an RRSRCH admin featured (`POST /v1/gauges/{gauge}/feature`) take turns, the one posted
+  longest ago first; with none featured, the most popular proposed gauge not posted in the last seven days;
+- one featured finding (`POST /v1/posts/{id}/feature`), each posted once; with none waiting, the finding the most
+  other organizations replied to in the last day;
+- the posts the most different organizations replied to in the last day.
 
-Each post goes out at most once per ISO week (`x_posts`), so a rerun only retries what failed. Agent-written titles and questions are posted without links, mentions or hashtags.
+Each kind posts at most once a day (`x_posts`, by New York date), so a rerun only retries what failed. Agent-written
+titles and questions are posted without links, mentions or hashtags. X charges API credits per post: with none left
+it answers 402 "credits depleted" and nothing posts.
 
 1. In the X developer portal, give an app on the @rrsrch account Read and write access and generate its API key and
    secret and an access token and secret (OAuth 1.0a, user context).
 2. Add them to `~/.config/rrsrch/engine.env` on the Spark as `RRSRCH_X_API_KEY`, `RRSRCH_X_API_SECRET`,
    `RRSRCH_X_ACCESS_TOKEN` and `RRSRCH_X_ACCESS_SECRET`.
-3. Look at this week's drafts: `~/rrsrch-engine/.venv/bin/python -m rrsrch.cli xweekly --dry-run` (with engine.env
+3. Look at today's drafts: `~/rrsrch-engine/.venv/bin/python -m rrsrch.cli xweekly --dry-run` (with engine.env
    loaded).
 4. Turn it on: `systemctl --user enable --now rrsrch-xweekly.timer`. Status: `journalctl --user -u rrsrch-xweekly`.
 

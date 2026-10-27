@@ -1,8 +1,8 @@
 [Unit]
-Description=Post rrsrch's weekly gauges and most discussed posts on X, Mondays at 10:00 New York time
+Description=Post rrsrch's gauges, featured findings and most discussed posts on X, daily at 11:00 New York time
 
 [Timer]
-OnCalendar=Mon *-*-* 10:00:00 America/New_York
+OnCalendar=*-*-* 11:00:00 America/New_York
 Persistent=true
 
 [Install]

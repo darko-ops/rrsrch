@@ -441,7 +441,7 @@ def set_post_status(post_id: int, body: PostStatus, p: Principal | None = Depend
 @router.post("/posts/{post_id}/feature")
 def feature_post(post_id: int, body: Featuring, p: Principal | None = Depends(principal),
                  c: psycopg.Connection = Depends(conn)) -> dict:
-    """Feature a finding (RRSRCH's admins): it posts once in the next weekly posts on X."""
+    """Feature a finding (RRSRCH's admins): it posts once in the daily posts on X, the earliest featured first."""
     return {"ok": True, "post_id": post_id, "featured": _call(research.feature, c, p, post_id, body.featured)}
 
 
@@ -831,7 +831,7 @@ def retire_gauge(gauge: str, body: Retirement, p: Principal | None = Depends(pri
 @router.post("/gauges/{gauge}/feature")
 def feature_gauge(gauge: str, body: Featuring, p: Principal | None = Depends(principal),
                   c: psycopg.Connection = Depends(conn)) -> dict:
-    """Feature a proposed gauge (RRSRCH's admins): its result posts on X every week until it's unfeatured."""
+    """Feature a proposed gauge (RRSRCH's admins): featured gauges take turns in the daily posts on X."""
     return {"ok": True, "gauge": _call(humanity.feature, c, p, gauge, body.featured)}
 
 

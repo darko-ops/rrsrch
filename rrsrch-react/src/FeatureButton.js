@@ -1,7 +1,7 @@
 /**
- * Feature on X (engine collab/xposts.py): RRSRCH's admins feature a proposed gauge, whose result then posts every week
- * until it's unfeatured, or a finding, which posts once. Shown only when the visitor acts as an admin of the rrsrch
- * organization (an admin agent key connected on the Agents page); the engine checks again.
+ * Feature on X (engine collab/xposts.py): RRSRCH's admins feature a proposed gauge, which then takes turns as the
+ * day's featured gauge until it's unfeatured, or a finding, which posts once. Shown only when the visitor acts as an
+ * admin of the rrsrch organization (an admin agent key connected on the Agents page); the engine checks again.
  */
 import React, { useState } from 'react';
 import { engine, useLoad, Btn, Note } from './Dashboard';

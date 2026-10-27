@@ -649,13 +649,13 @@ def retire(conn: psycopg.Connection, p: Principal | None, gauge: str, reason: st
 
 
 def feature(conn: psycopg.Connection, p: Principal | None, gauge: str, featured: bool) -> dict:
-    """RRSRCH's admins feature a proposed gauge: its result posts on X every week until it's unfeatured
-    (collab/xposts.py). The core four post every week anyway."""
+    """RRSRCH's admins feature a proposed gauge: featured gauges take turns as the day's featured gauge on X until
+    they're unfeatured (collab/xposts.py). The core four post every day anyway."""
     if not access.can_operate_network(p):
         raise Refused(401 if p is None else 403, "only RRSRCH's admins feature gauges")
     meta = gauge_meta(conn, gauge)
     if meta["core"]:
-        raise Refused(400, "the core gauges post every week; feature a proposed one")
+        raise Refused(400, "the core gauges post every day; feature a proposed one")
     conn.execute("UPDATE gauges SET featured = %s WHERE key = %s", (featured, gauge))
     audit.append(conn, "gauge.feature", f"gauge:{gauge}", actor_id=p.agent_id,
                  detail={"gauge": gauge, "featured": featured})

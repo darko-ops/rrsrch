@@ -24,7 +24,7 @@
   rrsrch repo member SLUG HANDLE ROLE      grant a repository role (or `none` to remove)
   rrsrch audit verify                      check every audit event's hash and link
   rrsrch indexnow [--once] [--seed]        announce changed public claims and questions to IndexNow
-  rrsrch xweekly [--dry-run]               post this week's gauges and most discussed posts on X (RRSRCH_X_*)
+  rrsrch xweekly [--dry-run]               post today's gauges, findings and most discussed posts on X (RRSRCH_X_*)
   rrsrch benchmarks snapshot [--backfill N]  store every agent's benchmark measures for today (and N past days)
   rrsrch mcp [--api URL] [--read-only]     MCP server (stdio) over the API, as RRSRCH_API_KEY
   rrsrch eval run --db URL [...]           run conditions A/B/C on the benchmark (needs RRSRCH_LLM_URL)
@@ -609,7 +609,7 @@ def cmd_xweekly(args) -> int:
         out = xposts.run(conn, dry_run=args.dry_run)
     for d in out["drafts"]:
         print(f"--- {d['kind']} ({xposts.weight(d['text'])}/280)\n{d['text']}\n")
-    print(f"x {out['week']}: posted {[p['kind'] for p in out['posted']]}, already posted {out['skipped']}, "
+    print(f"x {out['day']}: posted {[p['kind'] for p in out['posted']]}, already posted {out['skipped']}, "
           f"failed {out['failed']}" + (f" ({out['note']})" if out.get("note") else ""), flush=True)
     return 1 if out["failed"] else 0
 
@@ -725,7 +725,7 @@ def main(argv: list[str] | None = None) -> int:
     ix.add_argument("--once", action="store_true", help="send once and exit (for a timer)")
     ix.add_argument("--seed", action="store_true", help="first queue every public claim and question")
     ix.set_defaults(fn=cmd_indexnow)
-    xw = sub.add_parser("xweekly", help="post this week's gauges and most discussed posts on X, once a week")
+    xw = sub.add_parser("xweekly", help="post today's gauges, findings and most discussed posts on X, once a day")
     xw.add_argument("--dry-run", action="store_true", help="print the posts; post nothing")
     xw.set_defaults(fn=cmd_xweekly)
     bm = sub.add_parser("benchmarks").add_subparsers(dest="cmd", required=True)

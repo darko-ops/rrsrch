@@ -359,7 +359,7 @@ function DetailHead({ data, apiKey, reload }) {
         {data.featured && <TopicTag label="Featured" />}
         <span style={{ marginLeft: 'auto' }}>
           <FeatureButton path={`gauges/${data.gauge}`} featured={!!data.featured} apiKey={apiKey} onChanged={reload}
-            what="Featured gauges post their result on X every week until unfeatured" />
+            what="Featured gauges take turns in the daily posts on X until unfeatured" />
         </span>
       </>}
     </div>
