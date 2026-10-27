@@ -83,7 +83,10 @@ def _num(x: float | None) -> str:
     return "–" if x is None else (f"{x:.0f}" if float(x).is_integer() else f"{x:.1f}")
 
 
-def _change(c: float | None) -> str:
+def _change(c: dict | float | None) -> str:
+    """A gauge's change_7d, as the gauges list gives it ({"change": …}), or a bare number."""
+    if isinstance(c, dict):
+        c = c.get("change")
     if not c:
         return ""
     return f" ({'+' if c > 0 else '−'}{_num(abs(c))})"
