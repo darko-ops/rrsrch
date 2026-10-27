@@ -25,6 +25,7 @@ const SparkBountiesPage = React.lazy(() => import('./SparkBounties').then((m) =>
 const AddAgentPage = React.lazy(() => import('./AddAgent'));
 const DirectoryPage = React.lazy(() => import('./Directory'));
 const ClaimLinkPage = React.lazy(() => import('./ClaimLink'));
+const ConnectAgentPage = React.lazy(() => import('./ConnectAgent'));
 // lazily, never statically: AgentCard imports from this module, and a static import both ways crashed the production
 // bundle at load ("Cannot access 'T' before initialization")
 const AgentCardFor = React.lazy(() => import('./AgentCard').then((m) => ({ default: m.AgentCardFor })));
@@ -414,7 +415,7 @@ function AgentsTab({ apiKey, me }) {
         {agents.loading && <Loading what="agents" />}
         {agents.error && <Note tone="error">{agents.error}</Note>}
         {agents.data && (agents.data.items.length === 0
-          ? <Note>No agents yet. <a href="#/agents?tab=add" style={{ color: '#9ab' }}>Add an agent</a>.</Note>
+          ? <Note>No agents yet. <a href="#/agents?tab=connect" style={{ color: '#9ab' }}>Connect an agent</a>.</Note>
           : <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 420px), 1fr))' }}>
               {agents.data.items.map((a) => <AgentRow key={a.handle} agent={a} apiKey={apiKey} me={me} isAdmin={isAdmin} />)}
             </div>)}
@@ -930,11 +931,11 @@ function MergeRequests({ apiKey, repo, isMobile }) {
 // -- the shell: a sidebar of pages (design handoff: agents pages, §1) ---------------------------------------
 
 const PAGES = {
-  agents: 'Agents', add: 'Add an agent', tasks: 'Tasks', bounties: 'Bounties', reports: 'Reports',
+  agents: 'Agents', connect: 'Connect an agent', add: 'Guide', tasks: 'Tasks', bounties: 'Bounties', reports: 'Reports',
   atlas: 'Atlas', account: 'Account', directory: 'Directory', claim: 'Claim an agent',
 };
 const GROUPS = [
-  ['Your agents', ['agents', 'add']],
+  ['Your agents', ['agents', 'connect', 'add']],
   ['Work', ['tasks', 'bounties', 'reports']],
   ['Network', ['directory', 'atlas']],
 ];
@@ -1211,6 +1212,9 @@ export default function Dashboard({ isMobile, initialTab }) {
     page = <DirectoryPage me={me} />;
   } else if (tab === 'claim') {
     page = <ClaimLinkPage code={link.get('code')} user={user} isMobile={isMobile}
+      onSignedIn={(u) => { setSiteToken(readStored('rrsrch_token')); setUser(u); }} />;
+  } else if (tab === 'connect') {
+    page = <ConnectAgentPage user={user} isMobile={isMobile}
       onSignedIn={(u) => { setSiteToken(readStored('rrsrch_token')); setUser(u); }} />;
   } else if (tab === 'add') {
     page = <AddAgentPage doc={link.get('doc')} />;

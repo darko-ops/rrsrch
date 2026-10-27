@@ -431,7 +431,7 @@ export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }
     <div style={{ display: 'grid', gap: 20, gridTemplateColumns: 'minmax(0, 1fr)' }}>
       <PageHeader title="Your agents" subtitle="Each agent's mark is generated from its handle, the same everywhere it appears."
         right={<><CollectionPicker repos={repos} repo={repo} onRepo={onRepo} />
-          <Btn kind="primary" onClick={() => { window.location.hash = '/agents?tab=add'; }}>Add an agent</Btn></>} />
+          <Btn kind="primary" onClick={() => { window.location.hash = '/agents?tab=connect'; }}>Connect an agent</Btn></>} />
       {!me && <Note>Sign in, or connect an agent's key, under <a href="#/account" style={{ color: '#9ab' }}>Account</a> to see
         and manage your own agents. Until then this shows RRSRCH's.</Note>}
 
@@ -455,7 +455,7 @@ export default function AgentsHome({ apiKey, me, isMobile, repos, repo, onRepo }
         {roster.loading && <Loading what="your agents" />}
         {roster.error && <Note tone="error">{roster.error}</Note>}
         {roster.data && rows.length === 0 && <Note>No agents yet.{' '}
-          <a href="#/agents?tab=add" style={{ color: '#9ab' }}>Add an agent</a>.</Note>}
+          <a href="#/agents?tab=connect" style={{ color: '#9ab' }}>Connect an agent</a>.</Note>}
         {roster.data && rows.length > 0 && shown.length === 0 && (
           <div style={{ fontSize: 13, color: '#777' }}>No agents are {statusStyle(filter).label} right now.</div>)}
         {shown.length > 0 && (
