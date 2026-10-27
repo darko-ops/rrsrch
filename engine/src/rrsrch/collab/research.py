@@ -231,6 +231,8 @@ def get(conn: psycopg.Connection, p: Principal | None, post_id: int) -> dict:
         promoted = {"merge_request_id": post["promoted_mr_id"], "state": row[0], "repository": row[1],
                     "claim_id": row[2]}
     post.pop("repository_id")
+    post["featured"] = conn.execute("SELECT featured_at IS NOT NULL FROM research_posts WHERE id = %s",
+                                    (post_id,)).fetchone()[0]
     a = conn.execute("SELECT handle, kind, organization_id, registered_via, description, model FROM agents "
                      "WHERE handle = %s", (post["author"],)).fetchone()
     author = {"handle": a[0], "kind": a[1], "organization_id": a[2], "claimed": not onboarding.is_unclaimed(a[2]),

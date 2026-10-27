@@ -14,6 +14,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Bot, CircleSlash2, CircleUser, Search } from 'lucide-react';
 import AgreementPanel from './Agreement';
+import FeatureButton from './FeatureButton';
 import { engine, actingKey, fonts, Note, Loading, useLoad, when, short } from './Dashboard';
 import { EvidenceRef, bandColor, shown, pageOf, participation, mono, plural, LABEL, BAND_LABELS, useReducedMotion }
   from './HumanityConfidence';
@@ -226,6 +227,7 @@ function ProposedCard({ g, rank }) {
         <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {rank && <span style={{ ...mono(11, 600), color: RED.label }}>#{rank}</span>}
           <TopicTag label={g.topic_label} />
+          {g.featured && <TopicTag label="Featured" />}
           <span style={{ marginLeft: 'auto' }}><StatusText status={g.index.status} /></span>
         </span>
         <span style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 104px', gap: 16, alignItems: 'center' }}>
@@ -345,7 +347,7 @@ export function PrescienceIndex({ isMobile }) {
 // =====================================================================================================================
 
 // The gauge page's breadcrumb: back to the Radar, then what kind of gauge this is (its title is the page's h1).
-function DetailHead({ data }) {
+function DetailHead({ data, apiKey, reload }) {
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
       <a href="#/radar" style={{ color: '#aaa', fontSize: 13, textDecoration: 'none' }}>← Radar</a>
@@ -354,6 +356,11 @@ function DetailHead({ data }) {
         {data.topic_label && <TopicTag label={data.topic_label} />}
         <span style={{ fontSize: 12.5, color: '#888' }}>Proposed by <a href={`/agents/${data.proposed_by}`}
           style={{ color: '#ccc' }}>{data.proposed_by}</a>{data.proposed_at && ` on ${day(data.proposed_at)}`}</span>
+        {data.featured && <TopicTag label="Featured" />}
+        <span style={{ marginLeft: 'auto' }}>
+          <FeatureButton path={`gauges/${data.gauge}`} featured={!!data.featured} apiKey={apiKey} onChanged={reload}
+            what="Featured gauges post their result on X every week until unfeatured" />
+        </span>
       </>}
     </div>
   );
@@ -791,11 +798,11 @@ export default function PresciencePage({ gauge, isMobile }) {
   const apiKey = actingKey();
   const [view, setViewState] = useHashParam('view', 'overview', (v) => VIEWS.some(([k]) => k === v));
   const setView = (v) => { setViewState(v); setHashParams(pageOf(gauge), { view: v === 'overview' ? '' : v }); };
-  const [got] = useLoad(() => engine(`/v1/gauges/${gauge}`, { key: apiKey }), [gauge, apiKey]);
+  const [got, reload] = useLoad(() => engine(`/v1/gauges/${gauge}`, { key: apiKey }), [gauge, apiKey]);
   const data = got.data;
   return (
     <div style={{ fontFamily: fonts.main, display: 'grid', gap: 18, gridTemplateColumns: 'minmax(0, 1fr)' }}>
-      {data ? <DetailHead data={data} /> : <a href="#/radar" style={{ color: '#aaa', fontSize: 13, textDecoration: 'none' }}>← Radar</a>}
+      {data ? <DetailHead data={data} apiKey={apiKey} reload={reload} /> : <a href="#/radar" style={{ color: '#aaa', fontSize: 13, textDecoration: 'none' }}>← Radar</a>}
       {got.loading && !data && <Loading what="the gauge" />}
       {got.error && <Note tone="error">{got.error === 'not found' ? `No gauge ${gauge}.` : got.error}</Note>}
       {data && <>
