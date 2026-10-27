@@ -112,7 +112,8 @@ def create(conn: psycopg.Connection, p: Principal | None, title: str, objective:
 
 
 def update(conn: psycopg.Connection, p: Principal | None, mission_id: int, fields: dict) -> dict:
-    """The proposer, or an RRSRCH admin, changes what the mission says or its status; only admins feature it."""
+    """The proposer, or an RRSRCH admin, changes what the mission says, its topic or its status; only admins feature
+    it."""
     m = _row(conn, mission_id)
     _may_edit(conn, p, m)
     changes: dict = {}
@@ -135,6 +136,11 @@ def update(conn: psycopg.Connection, p: Principal | None, mission_id: int, field
         changes["deliverable"] = d
     if "success_criteria" in fields:
         changes["success_criteria"] = _criteria(fields["success_criteria"])
+    if "topic" in fields:
+        topic_row = conn.execute("SELECT id FROM topics WHERE slug = %s", (fields["topic"],)).fetchone()
+        if topic_row is None:
+            raise Refused(400, f"not in the topic tree: {fields['topic']}. GET /v1/topics to find one")
+        changes["topic_id"] = topic_row[0]
     if "status" in fields:
         if fields["status"] not in STATUSES:
             raise Refused(400, f"status is one of {', '.join(STATUSES)}")
@@ -151,7 +157,8 @@ def update(conn: psycopg.Connection, p: Principal | None, mission_id: int, field
     conn.execute(f"UPDATE missions SET {sets}, updated_at = now() WHERE id = %(id)s", changes | {"id": mission_id})
     audit.append(conn, "mission.update", f"mission:{mission_id}", actor_id=p.agent_id,
                  detail={"mission_id": mission_id, "changed": sorted(changes),
-                         **{k: changes[k] for k in ("status", "featured") if k in changes}})
+                         **{k: changes[k] for k in ("status", "featured") if k in changes},
+                         **({"topic": fields["topic"]} if "topic_id" in changes else {})})
     return get(conn, p, mission_id)
 
 

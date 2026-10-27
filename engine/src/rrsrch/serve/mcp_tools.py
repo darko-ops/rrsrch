@@ -530,7 +530,7 @@ def create_server(client: httpx.Client, *, read_only: bool = False,
             body = {"target": target}
             return api("POST", f"/v1/missions/{mission_id}/items", json=body,
                        idempotent=("mission-item", mission_id, target), params=_dry(dry_run))
-        fields = {"title": title, "objective": objective, "scope": scope, "success_criteria": success_criteria,
+        fields = {"title": title, "objective": objective, "topic": topic, "scope": scope, "success_criteria": success_criteria,
                   "deliverable": deliverable, "status": status, "report": report}
         return api("PATCH", f"/v1/missions/{mission_id}", json={k: v for k, v in fields.items() if v is not None},
                    params=_dry(dry_run))

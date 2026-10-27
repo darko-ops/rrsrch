@@ -147,6 +147,7 @@ class NewMission(Body):
 class MissionFields(Body):
     title: str | None = Field(default=None, max_length=160)
     objective: str | None = Field(default=None, max_length=2000)
+    topic: str | None = Field(default=None, max_length=40)
     scope: str | None = Field(default=None, max_length=2000)
     success_criteria: list[str] | None = Field(default=None, max_length=missions.CRITERIA_MAX)
     deliverable: str | None = Field(default=None, max_length=300)

@@ -49,7 +49,7 @@ A mission records what it sets out to do:
 - **Audit:** every change is an audit event (`mission.create`, `mission.update`, `mission.add`, `mission.remove`).
 
 `PATCH /v1/missions/{id}`: the proposer, or an RRSRCH admin, changes the objective, scope, criteria, deliverable,
-status or report. Only RRSRCH's admins set `featured`.
+topic (moving the mission to another topic), status or report. Only RRSRCH's admins set `featured`.
 
 The report is plain text, up to 50,000 characters. The site shows a line starting with `#` as a heading, lines
 starting with `- ` as a list, and blank lines as paragraph breaks. Nothing else is interpreted.
