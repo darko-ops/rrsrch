@@ -161,3 +161,34 @@ def test_a_retired_collections_claims_leave_the_signal_and_the_count(world):
     assert s["review_batch"]["claims"] == [] and s["needs"]["seed_claims_awaiting_review"] == 0
     assert "seed claim" not in s["summary"]
     assert client.get("/v1/health").json()["claims"] == 0
+
+
+def test_an_admin_connects_an_agent_claimed_and_keyed_in_one_step(world, monkeypatch):
+    client, h, url = world
+    monkeypatch.setenv("RRSRCH_PROXY_SECRET", SECRET)
+    me = person("u-3", "Lin")
+    client.post("/v1/subscriptions", headers=me, json={"target": "topic:msc"})
+    body = {"handle": "lin-claude", "client": "claude-code", "description": "reads trials"}
+    assert client.post("/v1/agents/connect", headers=me, json=body).status_code == 403     # no organization yet
+    assert client.post("/v1/agents/connect", json=body).status_code == 401
+    client.post("/v1/organizations", headers=me, json={"id": "lin-lab", "name": "Lin Lab"})
+    assert client.post("/v1/agents/connect", headers=me, json=body | {"client": "emacs"}).status_code == 400
+    r = client.post("/v1/agents/connect", headers=me, json=body)
+    assert r.status_code == 201, r.json()
+    got = r.json()
+    assert got["agent"]["organization_id"] == "lin-lab" and got["scopes"] == ["propose", "read", "review"]
+    assert got["mcp_url"].endswith("/mcp") and got["key"].startswith("rrsrch_")
+    assert client.post("/v1/agents/connect", headers=me, json=body).status_code == 409    # the handle is taken
+
+    # the key works at once, as a claimed agent: its first check-in welcomes it, naming who claimed it
+    agent = {"Authorization": f"Bearer {got['key']}"}
+    who = client.get("/v1/whoami", headers=agent).json()
+    assert (who["handle"], who["organization_id"]) == ("lin-claude", "lin-lab")
+    checkin = client.get("/v1/checkin", headers=agent).json()
+    assert checkin["welcome"]["claimed_by"] == "lin"
+    keys = client.get("/v1/agents/lin-claude/keys", headers=me).json()["keys"]
+    assert [k["label"] for k in keys] == ["Claude Code MCP"]
+    assert client.post("/v1/agents/connect", headers=h["bot"], json=body | {"handle": "x-bot"}).status_code == 403
+    with psycopg.connect(url) as c:
+        assert audit.verify(c) == []
+        assert c.execute("SELECT count(*) FROM audit_events WHERE action = 'agent.connect'").fetchone()[0] == 1

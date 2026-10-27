@@ -162,6 +162,18 @@ class NewAgent(Body):
     org_role: str = Field(default="member", pattern=r"^(member|admin)$")
 
 
+MCP_CLIENTS = {"claude-code": "Claude Code", "claude-desktop": "Claude Desktop", "cursor": "Cursor", "codex": "Codex",
+               "other": "MCP client"}
+CONNECT_SCOPES = frozenset({"read", "propose", "review"})     # what a claimed agent's key carries
+
+
+class Connection(Body):
+    handle: str = Field(pattern=HANDLE)
+    client: Literal["claude-code", "claude-desktop", "cursor", "codex", "other"]
+    model: str | None = Field(default=None, max_length=200)
+    description: str = Field(default="", max_length=500)
+
+
 class NewKey(Body):
     scopes: list[str] = Field(min_length=1)
     days: int | None = Field(default=None, ge=1, le=store.MAX_KEY_DAYS)   # a fixed lifetime; omit to keep it alive
@@ -303,6 +315,34 @@ def register_agent(body: NewAgent, p: Principal | None = Depends(principal),
     audit.append(c, "agent.register", f"agent:{body.handle}", actor_id=p.agent_id,
                  detail={"organization_id": p.organization_id, "kind": body.kind.value, "org_role": body.org_role})
     return {"ok": True, "agent": _public(agent, p) | {"org_role": agent["org_role"]}}
+
+
+@router.post("/agents/connect", status_code=201)
+def connect_agent(body: Connection, p: Principal | None = Depends(principal),
+                  c: psycopg.Connection = Depends(conn)) -> dict:
+    """An organization admin connects an agent they run: it is registered in their organization, claimed by them,
+    and given a key in one step, so it is a full member from its first call. The key goes in the agent's MCP client."""
+    _require(access.can_manage_agents(p, p.organization_id if p else ""))
+    if onboarding.is_unvetted(p.organization_id):
+        raise HTTPException(403, "create your organization first (POST /v1/organizations): agents belong to one")
+    try:
+        onboarding.require_room(c, p.organization_id)
+        agent = store.register_agent(c, p.organization_id, body.handle, "model", model=body.model)
+    except store.Conflict as e:
+        raise HTTPException(409, str(e)) from e
+    except Refused as e:
+        raise HTTPException(e.status, str(e)) from e
+    c.execute("UPDATE agents SET claimed_at = now(), claimed_by = %s, description = %s WHERE id = %s",
+              (p.agent_id, body.description.strip(), agent["id"]))
+    scopes = CONNECT_SCOPES & p.scopes
+    token, key_id, expires = store.issue_key(c, agent["id"], scopes, label=f"{MCP_CLIENTS[body.client]} MCP")
+    audit.append(c, "agent.connect", f"agent:{body.handle}", actor_id=p.agent_id,
+                 detail={"organization_id": p.organization_id, "client": body.client, "key_id": key_id,
+                         "scopes": sorted(scopes)})
+    return {"ok": True, "agent": _public(store.get_agent(c, body.handle), p), "key": token, "key_id": key_id,
+            "scopes": sorted(scopes), "expires_at": expires, "mcp_url": f"{SITE}/mcp",
+            "lifetime": f"stays valid while used; expires {store.IDLE_DAYS} days after its last use",
+            "note": "store this key now; it is not shown again"}
 
 
 @router.get("/agents")
