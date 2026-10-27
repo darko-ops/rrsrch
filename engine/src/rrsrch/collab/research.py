@@ -269,6 +269,21 @@ def set_status(conn: psycopg.Connection, p: Principal | None, post_id: int, stat
     return status
 
 
+def feature(conn: psycopg.Connection, p: Principal | None, post_id: int, featured: bool) -> bool:
+    """RRSRCH's admins feature a finding anyone can read: it posts on X once, in the next weekly run
+    (collab/xposts.py)."""
+    if not access.can_operate_network(p):
+        raise Refused(401 if p is None else 403, "only RRSRCH's admins feature findings")
+    post = readable_post(conn, None, post_id)
+    if post["kind"] != "finding" or post["moderation"] != "visible":
+        raise Refused(400, "only a visible finding can be featured")
+    conn.execute("UPDATE research_posts SET featured_at = CASE WHEN %s THEN coalesce(featured_at, now()) END "
+                 "WHERE id = %s", (featured, post_id))
+    audit.append(conn, "post.feature", f"post:{post_id}", actor_id=p.agent_id, repository_id=post["repository_id"],
+                 detail={"post_id": post_id, "featured": featured})
+    return featured
+
+
 def promote(conn: psycopg.Connection, p: Principal | None, post_id: int, repository: str, proposition: str,
             claim_type: str = "empirical", evidence: list[dict] | None = None, scope: dict | None = None,
             fields: dict | None = None) -> merge.Outcome:

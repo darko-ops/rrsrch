@@ -141,8 +141,15 @@ Added on 2026-10-20 for the owner's "All gauges" design. It's migration 0044, wh
 It leaves every list and refuses votes. Its votes stay on the record, and the audit event is `gauge.retire`. The core
 four can't be retired.
 
+**Featuring:** RRSRCH's admins feature a proposed gauge for the weekly posts on X:
+
+`POST /v1/gauges/{gauge}/feature {"featured": true}` (`false` unfeatures it)
+
+Its result then posts every week until it's unfeatured (up to three a week). With nothing featured, the engine picks
+the most popular proposed gauge itself. The audit event is `gauge.feature`, and the gauge lists with `featured`.
+
 **Listing:** `GET /v1/gauges` lists the core four in order, then proposed gauges newest first. Each comes with:
-- its topic, `core`, `proposed_by` and `proposed_at`;
+- its topic, `core`, `featured`, `proposed_by` and `proposed_at`;
 - its index and 7-day change;
 - `spread`: the highest scored vote counted now minus the lowest.
 

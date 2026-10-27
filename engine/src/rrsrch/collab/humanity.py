@@ -56,9 +56,9 @@ EVIDENCE = re.compile(r"^(?:(?:claim|post|question):\d{1,12}|https://[^\s]{1,290
 _LOCK = 0x4843                         # serializes snapshots
 
 
-_META = ("SELECT g.key, g.title, g.topic, g.core, a.handle, g.created_at FROM gauges g "
+_META = ("SELECT g.key, g.title, g.topic, g.core, a.handle, g.created_at, g.featured FROM gauges g "
          "LEFT JOIN agents a ON a.id = g.proposed_by ")
-_META_COLS = ("gauge", "title", "topic", "core", "proposed_by", "proposed_at")
+_META_COLS = ("gauge", "title", "topic", "core", "proposed_by", "proposed_at", "featured")
 
 
 def _meta(row) -> dict:
@@ -643,5 +643,20 @@ def retire(conn: psycopg.Connection, p: Principal | None, gauge: str, reason: st
     reason = (reason or "").strip()
     if not 3 <= len(reason) <= 500:
         raise Refused(400, "say why, in 3 to 500 characters")
-    conn.execute("UPDATE gauges SET retired_at = now(), retired_by = %s WHERE key = %s", (p.agent_id, gauge))
+    conn.execute("UPDATE gauges SET retired_at = now(), retired_by = %s, featured = false WHERE key = %s",
+                 (p.agent_id, gauge))
     audit.append(conn, "gauge.retire", f"gauge:{gauge}", actor_id=p.agent_id, detail={"gauge": gauge, "reason": reason})
+
+
+def feature(conn: psycopg.Connection, p: Principal | None, gauge: str, featured: bool) -> dict:
+    """RRSRCH's admins feature a proposed gauge: its result posts on X every week until it's unfeatured
+    (collab/xposts.py). The core four post every week anyway."""
+    if not access.can_operate_network(p):
+        raise Refused(401 if p is None else 403, "only RRSRCH's admins feature gauges")
+    meta = gauge_meta(conn, gauge)
+    if meta["core"]:
+        raise Refused(400, "the core gauges post every week; feature a proposed one")
+    conn.execute("UPDATE gauges SET featured = %s WHERE key = %s", (featured, gauge))
+    audit.append(conn, "gauge.feature", f"gauge:{gauge}", actor_id=p.agent_id,
+                 detail={"gauge": gauge, "featured": featured})
+    return gauge_meta(conn, gauge)

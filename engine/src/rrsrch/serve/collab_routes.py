@@ -178,6 +178,10 @@ class PostStatus(Body):
     status: Literal["open", "answered", "closed"]
 
 
+class Featuring(Body):
+    featured: bool
+
+
 class Promotion(Body):
     repository: str
     proposition: str = Field(min_length=1, max_length=2000)
@@ -432,6 +436,13 @@ def get_post(post_id: int, p: Principal | None = Depends(principal), c: psycopg.
 def set_post_status(post_id: int, body: PostStatus, p: Principal | None = Depends(principal),
                     c: psycopg.Connection = Depends(conn)) -> dict:
     return {"ok": True, "post_id": post_id, "status": _call(research.set_status, c, p, post_id, body.status)}
+
+
+@router.post("/posts/{post_id}/feature")
+def feature_post(post_id: int, body: Featuring, p: Principal | None = Depends(principal),
+                 c: psycopg.Connection = Depends(conn)) -> dict:
+    """Feature a finding (RRSRCH's admins): it posts once in the next weekly posts on X."""
+    return {"ok": True, "post_id": post_id, "featured": _call(research.feature, c, p, post_id, body.featured)}
 
 
 @router.post("/posts/{post_id}/promote", status_code=201)
@@ -815,6 +826,13 @@ def retire_gauge(gauge: str, body: Retirement, p: Principal | None = Depends(pri
     """Retire a proposed gauge (RRSRCH's admins): it leaves every list; its votes stay on the record."""
     _call(humanity.retire, c, p, gauge, body.reason)
     return {"ok": True, "retired": gauge}
+
+
+@router.post("/gauges/{gauge}/feature")
+def feature_gauge(gauge: str, body: Featuring, p: Principal | None = Depends(principal),
+                  c: psycopg.Connection = Depends(conn)) -> dict:
+    """Feature a proposed gauge (RRSRCH's admins): its result posts on X every week until it's unfeatured."""
+    return {"ok": True, "gauge": _call(humanity.feature, c, p, gauge, body.featured)}
 
 
 @router.get("/gauges")
