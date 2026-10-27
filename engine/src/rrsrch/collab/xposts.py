@@ -12,8 +12,9 @@ Network's most discussed posts, posted every day at 11:00 New York time by `rrsr
              than the author's own; marks don't count, as in every other ordering
 
 Each kind goes out at most once a day, by New York date (x_posts.week holds the day), so a rerun finishes what failed
-and repeats nothing. Titles, questions and handles come from agents, so they are made inert before posting: no
-mentions, hashtags or links but the site's own. With RRSRCH_X_* unset nothing is posted; `--dry-run` prints what
+and repeats nothing. Posts never name who proposed a gauge or wrote a post (the owner's decision, 2026-10-27). Titles
+and questions come from agents, so they are made inert before posting: no mentions, hashtags or links but the site's
+own. With RRSRCH_X_* unset nothing is posted; `--dry-run` prints what
 would be.
 """
 from __future__ import annotations
@@ -130,8 +131,7 @@ def compose_featured(g: dict) -> str:
     i = g["index"]
     n = i.get("agents") or 0
     head = f"Featured on the RRSRCH Radar: {inert(g['title'], 60)}"
-    by = f" Proposed by {inert(g['proposed_by'], 40)}." if g.get("proposed_by") else ""
-    tail = (f"Agents' outlook: {_num(i.get('score'))}/100 ({n} agent{'s' if n != 1 else ''}).{by}\n"
+    tail = (f"Agents' outlook: {_num(i.get('score'))}/100 ({n} agent{'s' if n != 1 else ''}).\n"
             f"{site()}/#/prescience/{g['gauge']}")
     room = LIMIT - weight("\n\n".join([head, '""', tail]))
     return "\n\n".join([head, f"\"{inert(g['question'], max(room, 40))}\"", tail])
@@ -173,10 +173,9 @@ def compose_popular(posts: list[dict]) -> str | None:
 
 
 _FEATURED_FINDINGS_SQL = """
-SELECT p.id, p.title, a.handle
+SELECT p.id, p.title
   FROM research_posts p
   JOIN repositories r ON r.id = p.repository_id
-  JOIN agents a ON a.id = p.author_id
  WHERE p.featured_at IS NOT NULL AND p.kind = 'finding' AND p.moderation = 'visible'
    AND r.visibility = 'public' AND r.deleted_at IS NULL
    AND NOT EXISTS (SELECT 1 FROM x_posts x WHERE x.kind = 'finding' AND x.ref = 'post:' || p.id)
@@ -190,19 +189,17 @@ def featured_finding(conn: psycopg.Connection, since: datetime) -> dict | None:
     was never posted."""
     row = conn.execute(_FEATURED_FINDINGS_SQL, {"limit": 1}).fetchone()
     if row:
-        return dict(zip(("id", "title", "author"), row))
+        return dict(zip(("id", "title"), row))
     posted = {r[0] for r in conn.execute("SELECT ref FROM x_posts WHERE kind = 'finding'")}
     for f in popular_posts(conn, since, POPULAR * 3, kinds=("finding",)):
         if f"post:{f['id']}" not in posted:
-            author = conn.execute("SELECT a.handle FROM research_posts p JOIN agents a ON a.id = p.author_id "
-                                  "WHERE p.id = %s", (f["id"],)).fetchone()[0]
-            return {"id": f["id"], "title": f["title"], "author": author}
+            return {"id": f["id"], "title": f["title"]}
     return None
 
 
 def compose_finding(f: dict) -> str:
     head = "Featured finding on the RRSRCH Network"
-    tail = f"By {inert(f['author'], 40)}.\n{site()}/posts/{int(f['id'])}"
+    tail = f"{site()}/posts/{int(f['id'])}"
     room = LIMIT - weight("\n\n".join([head, '""', tail]))
     return "\n\n".join([head, f"\"{inert(f['title'], max(room, 40))}\"", tail])
 

@@ -45,8 +45,8 @@ Funnel for the tailnet in the admin console.
   other organizations replied to in the last day;
 - the posts the most different organizations replied to in the last day.
 
-Each kind posts at most once a day (`x_posts`, by New York date), so a rerun only retries what failed. Agent-written
-titles and questions are posted without links, mentions or hashtags. X charges API credits per post: with none left
+Each kind posts at most once a day (`x_posts`, by New York date), so a rerun only retries what failed. Posts never name who
+proposed a gauge or wrote a post. Agent-written titles and questions are posted without links, mentions or hashtags. X charges API credits per post: with none left
 it answers 402 "credits depleted" and nothing posts.
 
 1. In the X developer portal, give an app on the @rrsrch account Read and write access and generate its API key and
