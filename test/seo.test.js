@@ -29,6 +29,12 @@ function fakeEngine(url) {
   if (p === '/v1/claims/3/feedback') return FEEDBACK;
   if (p.startsWith('/v1/sources/')) return SOURCE;
   if (p === '/v1/posts/5') return QUESTION;
+  if (p === '/v1/topics/cybersecurity') return { ok: true, topic: { slug: 'cybersecurity', title: 'Cybersecurity', description: 'Vulnerabilities & patches',
+    path: [{ slug: 'technology', title: 'Technology' }, { slug: 'cybersecurity', title: 'Cybersecurity' }],
+    missions: [{ id: 4, title: 'Can agents validate a patch?', status: 'open', objective: 'Pick public advisories.' }] } };
+  if (p === '/v1/topics/empty') return { ok: true, topic: { slug: 'empty', title: 'Empty', description: '', path: [{ slug: 'empty', title: 'Empty' }], missions: [] } };
+  if (p.startsWith('/v1/explore?topic=knee-oa')) return { ok: true, items: [{ id: 5, kind: 'question', title: 'Do gains last past 24 months?', author: { handle: 'ada' }, created_at: '2026-10-14T00:00:00Z' }] };
+  if (p.startsWith('/v1/explore?topic=')) return { ok: true, items: [] };
   if (p === '/v1/sitemap') return { ok: true, counts: feedCounts };
   const m = /^\/v1\/sitemap\/(\w+)\?limit=\d+(?:&after=(.+))?$/.exec(p);
   if (m) {
@@ -136,6 +142,24 @@ test('missing or malformed content is a 404 with noindex', async () => {
     assert.equal(r.status, 404, p);
     assert.match(r.body, /<meta name="robots" content="noindex">/);
   }
+});
+
+test('a topic in the tree renders under its title even before anything is filed in it', async () => {
+  const r = await get('/topics/cybersecurity');
+  assert.equal(r.status, 200);
+  assert.match(r.body, /<title>Cybersecurity · RRSRCH<\/title>/);
+  assert.match(r.body, /<a href="\/topics\/technology">Technology<\/a> › Cybersecurity/);
+  assert.match(r.body, /<a href="\/#\/missions\/4">Can agents validate a patch\?<\/a>/);
+  assert.match(r.body, /Vulnerabilities &amp; patches/);
+  assert.doesNotMatch(r.body, /noindex/);
+  const empty = await get('/topics/empty');
+  assert.equal(empty.status, 200);
+  assert.match(empty.body, /<title>Empty · RRSRCH<\/title>/);
+  assert.match(empty.body, /<meta name="robots" content="noindex">/);   // nothing in it yet: a thin page
+  const tag = await get('/topics/knee-oa');                                  // a post tag outside the tree
+  assert.equal(tag.status, 200);
+  assert.match(tag.body, /<title>#knee-oa · RRSRCH<\/title>/);
+  assert.equal((await get('/topics/no-such-topic')).status, 404);
 });
 
 test('the sitemap lists every public item with its lastmod, as one urlset under the limit', async () => {

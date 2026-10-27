@@ -394,23 +394,31 @@ async function agentPage(get, handle) {
 }
 
 async function topicPage(get, slug) {
-  const r = await get(`/v1/explore?topic=${encodeURIComponent(slug)}&limit=50`);
-  if (!r.data) return { status: r.status === 503 ? 503 : 404 };
-  const items = r.data.items || [];
-  if (!items.length) return { status: 404 };
+  // the topic tree says whether it exists (a new topic has no posts yet); posts can also carry tags outside the tree
+  const [t, r] = await Promise.all([get(`/v1/topics/${encodeURIComponent(slug)}`),
+    get(`/v1/explore?topic=${encodeURIComponent(slug)}&limit=50`)]);
+  const topic = t.data?.topic || null;
+  const items = r.data?.items || [];
+  if (!topic && !items.length) return { status: t.status === 503 || r.status === 503 ? 503 : 404 };
+  const name = topic?.title || `#${slug}`;
+  const missions = topic?.missions || [];
   const url = `${SITE}/topics/${slug}`;
   const link = (p) => `${SITE}/${p.kind === 'question' ? 'questions' : 'posts'}/${Number(p.id)}`;
   const jsonLd = {
-    '@context': 'https://schema.org', '@type': 'CollectionPage', url, name: `#${slug} on RRSRCH`,
+    '@context': 'https://schema.org', '@type': 'CollectionPage', url, name: `${name} on RRSRCH`,
     mainEntity: { '@type': 'ItemList', numberOfItems: items.length,
       itemListElement: items.map((p, i) => ({ '@type': 'ListItem', position: i + 1, url: link(p), name: p.title })) },
   };
-  const body = `${crumbs(`#${escapeHtml(slug)}`)}
-    <div class="eyebrow">Topic</div><h1>#${escapeHtml(slug)}</h1>
-    <ul>${items.map((p) => `<li><a href="${link(p).slice(SITE.length)}">${escapeHtml(p.title)}</a> <span class="muted">${escapeHtml(p.kind)} by ${escapeHtml(p.author?.handle || p.author || '')} · ${day(p.created_at)}</span>${p.excerpt ? `<br><span class="muted">${escapeHtml(clip(p.excerpt, 200))}</span>` : ''}</li>`).join('')}</ul>`;
+  const path = (topic?.path || []).slice(0, -1).map((x) => `<a href="/topics/${encodeURIComponent(x.slug)}">${escapeHtml(x.title)}</a>`);
+  const body = `${crumbs(...path, escapeHtml(name))}
+    <div class="eyebrow">Topic</div><h1>${escapeHtml(name)}</h1>
+    ${topic?.description ? `<p>${escapeHtml(topic.description)}</p>` : ''}
+    ${missions.length ? `<h2>Research missions</h2><ul>${missions.map((m) => `<li><a href="/#/missions/${Number(m.id)}">${escapeHtml(m.title)}</a> <span class="muted">${escapeHtml(m.status)}</span>${m.objective ? `<br><span class="muted">${escapeHtml(clip(m.objective, 200))}</span>` : ''}</li>`).join('')}</ul>` : ''}
+    ${items.length ? `<ul>${items.map((p) => `<li><a href="${link(p).slice(SITE.length)}">${escapeHtml(p.title)}</a> <span class="muted">${escapeHtml(p.kind)} by ${escapeHtml(p.author?.handle || p.author || '')} · ${day(p.created_at)}</span>${p.excerpt ? `<br><span class="muted">${escapeHtml(clip(p.excerpt, 200))}</span>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Nothing filed here yet.</p>'}`;
   return {
     status: 200,
-    page: { title: `#${slug} · RRSRCH`, description: `Findings and questions about ${slug} on RRSRCH, with the passages they cite.`, canonical: url, jsonLd, body },
+    page: { title: `${name} · RRSRCH`, description: topic?.description ? clip(`${name}: ${topic.description}. Findings, questions and research missions on RRSRCH.`, 300) : `Findings and questions about ${name} on RRSRCH, with the passages they cite.`,
+      canonical: url, jsonLd, body, noindex: !items.length && !missions.length },   // an empty topic is a thin page
   };
 }
 
