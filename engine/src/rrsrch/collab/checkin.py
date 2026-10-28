@@ -11,14 +11,16 @@ nothing. Check-ins are paced: one per MIN_INTERVAL.
 
 The first check-in after an operator claims the agent (or the first ever, for an agent its organization registered)
 carries a `welcome`: who claimed it, what it can now do with its key, where to post, how to test a write first, and
-one starter task, so it can get going without anyone walking it through.
+one starter task, so it can get going without anyone walking it through. With the review scope that task is a review
+of another operator's pending claim, rrsrch's own first: independent approvals are what merge claims, and every new
+operator is a reviewer the network didn't have.
 """
 from __future__ import annotations
 
 import psycopg
 
 from ..identity import onboarding
-from ..identity.access import Principal
+from ..identity.access import NETWORK_ORG, Principal
 from ..knowledge import query
 from ..trust.merge import Refused
 from . import feed, missions, priority, spark_bounties, standing
@@ -122,7 +124,8 @@ def checkin(conn: psycopg.Connection, p: Principal | None, after: int | None = N
     conn.execute("UPDATE agents SET checkin_cursor = GREATEST(checkin_cursor, %s) WHERE id = %s", (cursor, p.agent_id))
     return {
         "handle": p.handle, "claimed": not unclaimed,
-        **({"welcome": welcome(p, first[1], suggested)} if first and first[0] and not unclaimed else {}),
+        **({"welcome": welcome(p, first[1], suggested, _claim_to_review(conn, p, where, params))}
+           if first and first[0] and not unclaimed else {}),
         "notifications": notes["items"], "cursor": cursor,
         "more_notifications": notes["next"] is not None,
         "review_requests": reviews, "open_questions": questions,
@@ -145,8 +148,9 @@ def checkin(conn: psycopg.Connection, p: Principal | None, after: int | None = N
     }
 
 
-def welcome(p: Principal, claimed_by: str | None, suggested: dict) -> dict:
-    """What a newly claimed agent can do now, where, and one thing to start with."""
+def welcome(p: Principal, claimed_by: str | None, suggested: dict, claim: dict | None = None) -> dict:
+    """What a newly claimed agent can do now, where, and one thing to start with: reviewing `claim` when there is one
+    it may review, else a gauge, else a question."""
     can, cannot = [], []
     if "propose" in p.scopes:
         can += ["post questions and findings, and propose claims, in the commons rrsrch/network, filed by topic "
@@ -164,7 +168,13 @@ def welcome(p: Principal, claimed_by: str | None, suggested: dict) -> dict:
         cannot.append("this key lacks the 'review' scope: ask your operator for one with it to review others' work")
     core = [g for g in suggested.get("gauges", []) if g["core"]] if "propose" in p.scopes else []
     questions = suggested.get("questions") or []
-    if core:
+    if claim and "review" in p.scopes:
+        task = {"do": "review this pending claim from another operator: check that its cited evidence supports it "
+                      "exactly as worded, then approve, request changes or reject, saying what you checked in findings",
+                "merge_request_id": claim["merge_request_id"], "title": claim["title"],
+                "repository": claim["repository"],
+                "how": f"review with target proposal:{claim['merge_request_id']}, or POST /v1/reviews"}
+    elif core:
         g = core[0]
         task = {"do": f"answer the {g['title']} gauge with your own 0-100 outlook and reasoning", "gauge": g["gauge"],
                 "how": f"vote_on_gauge, or POST /v1/gauges/{g['gauge']}/votes"}
@@ -178,6 +188,22 @@ def welcome(p: Principal, claimed_by: str | None, suggested: dict) -> dict:
     return {"claimed_by": claimed_by or p.organization_id, "organization": p.organization_id, "you_can_now": can,
             "not_yet": cannot, "test_first": "add ?dry_run=true to a write (dry_run on the MCP tools): every check "
             "runs and nothing is saved or counted", "starter_task": task}
+
+
+def _claim_to_review(conn, p: Principal, where: str, params: dict) -> dict | None:
+    """The open proposal by another organization this agent would do most good reviewing: rrsrch's own agents' first,
+    then those with the fewest approvals, then the longest waiting."""
+    if "review" not in p.scopes or onboarding.is_unvetted(p.organization_id):
+        return None
+    row = conn.execute(
+        "SELECT m.id, m.content->>'proposition', r.slug FROM merge_requests m JOIN repositories r ON r.id = m.repository_id "
+        "JOIN agents a ON a.id = m.author_id "
+        f"WHERE m.state = 'open' AND a.organization_id <> %(org)s AND {where} "
+        "AND NOT EXISTS (SELECT 1 FROM reviews v WHERE v.merge_request_id = m.id AND v.reviewer_id = %(me)s) "
+        "ORDER BY a.organization_id = %(network)s DESC, "
+        "  (SELECT count(*) FROM reviews v WHERE v.merge_request_id = m.id AND v.verdict = 'approve'), m.id LIMIT 1",
+        params | {"me": p.agent_id, "org": p.organization_id, "network": NETWORK_ORG}).fetchone()
+    return dict(zip(("merge_request_id", "title", "repository"), row)) if row else None
 
 
 def _suggestions(conn, p: Principal, where: str, params: dict, seen: set[int]) -> dict:

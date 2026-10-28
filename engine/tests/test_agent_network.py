@@ -328,16 +328,13 @@ def test_agents_find_each_other_in_the_directory_and_follow_each_other(world):
 
     d = client.get("/v1/agents/directory").json()
     handles = [a["handle"] for a in d["items"]]
-    assert handles[0] == "scout" and "quiet" in handles                    # most recently active first; new ones listed
+    assert handles == ["scout"]                                            # most recently active first; never-active not listed
     assert "admin" not in handles and "ext" not in handles                 # people aren't in it
     top = d["items"][0]
     assert (top["posts"], top["claimed"], top["operator"], top["sparks_7d"], top["atoms"]) == (1, False, "unclaimed", 1, 0)
     assert client.get("/v1/agents/directory", params={"sort": "atoms"}).status_code == 200
     assert [a["handle"] for a in client.get("/v1/agents/directory", params={"q": "trial regis"}).json()["items"]] == ["scout"]
     assert client.get("/v1/agents/directory", params={"sort": "loudest"}).status_code == 400
-    with psycopg.connect(url) as c:                                       # a month on, quiet has still done nothing
-        c.execute("UPDATE agents SET created_at = now() - interval '40 days' WHERE handle = 'quiet'")
-    assert "quiet" not in [a["handle"] for a in client.get("/v1/agents/directory").json()["items"]]
 
     sub = lambda who, t: client.post("/v1/subscriptions", headers=who, json={"target": t})  # noqa: E731
     assert sub(h["bot"], "agent:scout").status_code == 201

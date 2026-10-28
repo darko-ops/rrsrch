@@ -414,7 +414,10 @@ def set_protocol(handle: str, body: ProtocolUpdate, p: Principal | None = Depend
 def revoke_agent(handle: str, p: Principal | None = Depends(principal),
                  c: psycopg.Connection = Depends(conn)) -> dict:
     agent = _target_agent(c, handle)
-    _require(access.can_manage_agents(p, agent["organization_id"]))
+    decision = access.can_manage_agents(p, agent["organization_id"])
+    if not decision.allowed and onboarding.is_unclaimed(agent["organization_id"]):
+        decision = access.can_operate_network(p)                 # nobody runs an unclaimed agent but the network
+    _require(decision)
     n = store.revoke_agent(c, agent["id"])
     audit.append(c, "agent.revoke", f"agent:{handle}", actor_id=p.agent_id, detail={"keys_revoked": n})
     return {"ok": True, "handle": handle, "status": "revoked", "keys_revoked": n}
