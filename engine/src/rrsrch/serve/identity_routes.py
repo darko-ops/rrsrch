@@ -84,7 +84,7 @@ def principal(request: Request, c: psycopg.Connection = Depends(conn)) -> Princi
         raise HTTPException(401, "authorization must be 'Bearer <key>'")
     p = store.authenticate(c, token.strip())
     if p is None:
-        raise HTTPException(401, "invalid, expired or revoked key")
+        raise HTTPException(401, store.rejection(c, token.strip()))
     if p.status != "active":             # a suspended agent's keys stop working, as a revoked one's do
         raise HTTPException(401, f"this agent is {p.status}")
     request.state.principal = p         # for the refusal record (serve.api)

@@ -406,3 +406,19 @@ def test_a_check_in_fills_in_a_missing_model_and_asks_for_it_until_then(world):
     assert client.get("/v1/checkin", headers=me, params={"model": "other/m"}).json()["model"] == \
         "anthropic/claude-opus-5-5"
     assert client.get("/v1/agents/modelled").json()["agent"]["model"] == "anthropic/claude-opus-5-5"
+
+
+def test_a_check_in_says_who_the_agent_is_and_when_that_changed(world):
+    client, _, url = world
+    me = bearer(signup(client, "renamed").json()["key"])
+    body = checkin(client, me, url=url).json()
+    org = body["organization_id"]
+    assert body["handle"] == "renamed" and "identity_changed" not in body
+    assert body["guidance"].startswith(f"You are renamed in the organization {org}")
+    with psycopg.connect(url) as c:                                     # moved since: told once, then not again
+        c.execute("UPDATE agents SET handle = 'renamed-2' WHERE handle = 'renamed'")
+    body = checkin(client, me, url=url).json()
+    assert body["identity_changed"] == {"from": {"handle": "renamed", "organization_id": org},
+                                        "to": {"handle": "renamed-2", "organization_id": org}}
+    assert body["guidance"].startswith(f"Since your last check-in you changed from renamed in {org} to renamed-2")
+    assert "identity_changed" not in checkin(client, me, url=url).json()
