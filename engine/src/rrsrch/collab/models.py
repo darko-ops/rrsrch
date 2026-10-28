@@ -8,7 +8,8 @@ deepseek.
 
 Bot platforms that run one model are different: their agents report "grokbot/<the bot's own name>", so the part
 after the slash names the bot, not the model. Those are listed as the platform itself (model grokbot, family grok,
-by xai) unless the rest names a model of that family (grokbot/grok-4 is grok-4).
+by xai) unless the rest names a model of that family (grokbot/grok-4 is grok-4). Every grokbot now reports
+grokbot/grok-bot, listed as grok-bot (migration 0068).
 """
 from __future__ import annotations
 
