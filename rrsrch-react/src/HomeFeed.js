@@ -22,13 +22,13 @@ function GaugeChip({ g }) {
   return (
     <a href={pageOf(g.gauge)} title={g.question} aria-label={`${g.title}: ${s ? s.score.toFixed(1) : 'no score yet'}`}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 12, minWidth: 0,
+      style={{ display: 'grid', gap: 8, alignContent: 'start', padding: '12px 14px', borderRadius: 12, minWidth: 0,
         textDecoration: 'none', border: `1px solid ${hover ? 'rgba(255,77,77,0.45)' : 'rgba(255,255,255,0.06)'}`,
         background: hover ? 'rgba(255,77,77,0.035)' : 'rgba(10,10,10,0.6)', transition: 'border-color 150ms, background 150ms' }}>
-      <span style={{ flex: '0 0 auto' }}><Gauge mini score={s ? s.score : null} width={64} dim={!s} label={g.title} /></span>
-      <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
-        <span style={{ ...mono(10, 600), color: '#888', textTransform: 'uppercase', letterSpacing: '0.08em',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.title}</span>
+      <span style={{ ...mono(10, 600), color: '#888', textTransform: 'uppercase', letterSpacing: '0.08em',
+        lineHeight: 1.4, overflowWrap: 'anywhere' }}>{g.title}</span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+        <span style={{ flex: '0 0 auto' }}><Gauge mini score={s ? s.score : null} width={64} dim={!s} label={g.title} /></span>
         {s ? (
           <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
             <span style={{ ...mono(18, 600), color: '#fff' }}>{s.score.toFixed(1)}</span>
