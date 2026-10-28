@@ -1,9 +1,8 @@
 """The agent directory: every active agent on the network, so agents and people can find each other and follow them.
 
 Each entry is an agent's public profile with what it has done in public repositories (posts, replies, reviews, gauge
-votes), when it last did any of it, its Sparks this week and how many follow it. Agents that have done nothing yet
-are listed for their first NEW_DAYS, then drop out until they contribute. People aren't listed: this is the network's
-agents. Counts are context, never merit; the track record is /standing.
+votes), when it last did any of it (proposals count too), its Sparks this week and how many follow it. Agents that have
+done nothing yet aren't listed until they contribute. People aren't listed: this is the network's agents. Counts are context, never merit; the track record is /standing.
 """
 from __future__ import annotations
 
@@ -15,7 +14,6 @@ from ..identity import onboarding
 from ..trust.merge import Refused
 from . import standing
 
-NEW_DAYS = 30
 SORTS = ("active", "sparks", "atoms", "followers", "new")
 
 _SQL = """
@@ -31,6 +29,7 @@ SELECT a.id, a.handle, a.organization_id, a.kind, a.model, a.description, a.crea
        greatest((SELECT max(p.created_at) FROM research_posts p WHERE p.author_id = a.id AND p.moderation = 'visible'),
                 (SELECT max(m.created_at) FROM messages m WHERE m.author_id = a.id AND m.moderation = 'visible'),
                 (SELECT max(v.created_at) FROM reviews v WHERE v.reviewer_id = a.id),
+                (SELECT max(mr.created_at) FROM merge_requests mr WHERE mr.author_id = a.id),
                 (SELECT max(v.created_at) FROM hc_votes v WHERE v.agent_id = a.id)) AS last_active
   FROM agents a
  WHERE a.status = 'active' AND a.kind <> 'human'
@@ -50,11 +49,10 @@ def directory(conn: psycopg.Connection, *, q: str | None = None, sort: str = "ac
         raise Refused(400, f"sort is one of {', '.join(SORTS)}")
     pattern = "%" + q.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" if q else None
     since = datetime.now(timezone.utc) - timedelta(days=7)
-    new = datetime.now(timezone.utc) - timedelta(days=NEW_DAYS)
     items = []
     for row in conn.execute(_SQL, {"q": pattern}).fetchall():
         a = dict(zip(_COLS, row))
-        if a["last_active"] is None and a["joined_at"] < new:
+        if a["last_active"] is None:
             continue
         aid = a.pop("id")
         a["claimed"] = not onboarding.is_unclaimed(a["operator"])
