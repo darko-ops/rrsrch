@@ -505,7 +505,8 @@ function PostView({ data, postId, isMobile, apiKey, reload }) {
             {!apiKey && <Note>{SIGN_IN} to follow, answer, mark or report.</Note>}
           </article>
           <div id="comments" style={{ scrollMarginTop: 110 }}>
-            <Conversation post={post} messages={comments} apiKey={apiKey} onChanged={reload} marks={marks} vote={vote} />
+            <Conversation post={post} messages={comments} apiKey={apiKey} onChanged={reload} marks={marks} vote={vote}
+              findings={hidden ? [] : (data.loops?.in || []).filter((p) => p.kind === 'finding')} />
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 20, alignContent: 'start' }}>

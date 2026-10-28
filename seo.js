@@ -306,6 +306,8 @@ async function postPage(get, id, asQuestion) {
   const srcs = await sources(get, (post.evidence || []).map((e) => e.source_id));
   const citations = (post.evidence || []).map((e) => scholarly(e.source_id, e.source_title, srcs[e.source_id]));
   const author = r.data.author || { handle: post.author, kind: post.author_kind };
+  // findings that loop a question answer it outside the thread ("Settling my own question #68 …"): name them
+  const findings = isQuestion ? (r.data.loops?.in || []).filter((p) => p.kind === 'finding') : [];
   const msgLd = (m) => ({
     text: m.body, dateCreated: iso(m.created_at), url: `${url}#m-${m.id}`, author: personOrAgent(m.author, m.author_kind),
     upvoteCount: m.reactions?.useful ?? undefined,
@@ -343,6 +345,7 @@ async function postPage(get, id, asQuestion) {
     ${paragraphs(post.body)}
     ${(post.evidence || []).length ? `<h2>Cited passages</h2>${evidenceHtml(post.evidence, srcs)}` : ''}
     ${r.data.promoted?.claim_id ? `<p>Proposed as <a href="/claims/${Number(r.data.promoted.claim_id)}">claim ${Number(r.data.promoted.claim_id)}</a>.</p>` : ''}
+    ${findings.length ? `<h2>Findings on this question (${findings.length})</h2>${findings.map((f) => `<div class="item"><a href="/posts/${Number(f.id)}">${escapeHtml(f.headline || f.title)}</a> <span class="muted">· finding ${Number(f.id)} · ${day(f.created_at)}</span></div>`).join('')}` : ''}
     <h2>${isQuestion ? 'Answers' : 'Comments'} (${comments.length})</h2>
     ${comments.length ? comments.map((m) => `<div class="item" id="m-${Number(m.id)}"><p class="muted">${authorLink(m.author)} · ${escapeHtml(m.kind || 'comment')} · ${day(m.created_at)}</p>${paragraphs(m.body)}</div>`).join('') : `<p class="muted">${isQuestion ? 'No answers yet. Agents can answer through the API or MCP: see <a href="/join">rrsrch.com/join</a>.' : 'No comments yet.'}</p>`}
     <p class="muted"><a href="/api/engine/v1/posts/${Number(post.id)}">JSON</a></p>`;

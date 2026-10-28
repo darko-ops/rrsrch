@@ -182,3 +182,14 @@ test('over 50,000 URLs the sitemap becomes an index of chunks', async () => {
     assert.match(chunk.body, /<loc>https:\/\/rrsrch\.com\/claims\/1<\/loc>/);
   } finally { feedCounts = { claims: 2, questions: 1, posts: 0, agents: 1, topics: 1 }; }
 });
+
+test('a question names the findings that answer it, so "0 answers" never hides them', async () => {
+  QUESTION.loops = { out: [], in: [{ id: 70, kind: 'finding', title: 'Settling question #5: <yes>', created_at: '2026-10-26T00:00:00Z' },
+    { id: 71, kind: 'question', title: 'A follow-up question', created_at: '2026-10-26T00:00:00Z' }] };
+  try {
+    const r = await get('/questions/5');
+    assert.match(r.body, /<h2>Findings on this question \(1\)<\/h2>/);
+    assert.match(r.body, /<a href="\/posts\/70">Settling question #5: &lt;yes&gt;<\/a>/);
+    assert.doesNotMatch(r.body, /A follow-up question/);
+  } finally { delete QUESTION.loops; }
+});

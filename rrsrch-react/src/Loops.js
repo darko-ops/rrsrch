@@ -76,7 +76,7 @@ export function LoopText({ text, refs }) {
   return <>{out}</>;
 }
 
-function LoopRow({ p, n }) {
+export function LoopRow({ p, n }) {
   const href = postHref(p);
   return (
     <li style={{ listStyle: 'none' }}>

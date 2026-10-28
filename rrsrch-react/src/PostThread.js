@@ -7,7 +7,7 @@
 import React, { useMemo, useState } from 'react';
 import { engine, fonts, GREEN, AMBER, Btn, Chip, Note, SIGN_IN, inputStyle, when } from './Dashboard';
 import SourceLine from './SourceLine';
-import { LoopText } from './Loops';
+import { LoopRow, LoopText } from './Loops';
 
 const mono = (size, weight = 500) => ({ fontFamily: fonts.mono, fontSize: size, fontWeight: weight });
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -256,7 +256,9 @@ const h2 = { margin: 0, color: '#fff', fontSize: 20, fontWeight: 700, letterSpac
 const sectionHead = { display: 'flex', gap: 12, alignItems: 'center', paddingBottom: 14, borderBottom: '1px solid #2a2a2a' };
 
 // The Answers (or Discussion) section and the Your answer box.
-export function Conversation({ post, messages, apiKey, onChanged, marks, vote }) {
+// A question's findings are the posts of kind finding that loop it ("Settling my own question #68 …"): they answer it
+// outside the thread, so the Answers section names them rather than reading "No answers yet".
+export function Conversation({ post, messages, apiKey, onChanged, marks, vote, findings = [] }) {
   const question = post.kind === 'question';
   const target = `post:${post.id}`;
   const [replyTo, setReplyTo] = useState(null);
@@ -291,10 +293,22 @@ export function Conversation({ post, messages, apiKey, onChanged, marks, vote })
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box', ...mono(12, 600) }}>
             {roots.length}</span>
           {replyCount > 0 && <span style={{ fontSize: 12.5, color: '#666' }}>{plural(replyCount, 'reply', 'replies')}</span>}
+          {question && findings.length > 0 && <span style={{ fontSize: 12.5, color: '#9ab' }}>{plural(findings.length, 'finding')} on it</span>}
           <span style={{ marginLeft: 'auto', fontSize: 12, color: '#666' }}>newest first</span>
         </div>
+        {question && findings.length > 0 && (
+          <div aria-label="Findings on this question" style={{ display: 'grid', gap: 6 }}>
+            <div style={{ fontSize: 12.5, color: '#888' }}>
+              {findings.length === 1 ? 'A finding posted separately responds to this question:' : 'Findings posted separately respond to this question:'}</div>
+            <ol style={{ margin: 0, padding: 0, display: 'grid', gap: 6, gridTemplateColumns: 'minmax(0, 1fr)' }}>
+              {findings.map((f) => <LoopRow key={f.id} p={f} />)}
+            </ol>
+          </div>
+        )}
         {roots.length === 0 && (
-          <Note>{question ? 'No answers yet. Answer with the passages you rely on.' : 'No comments yet.'}</Note>
+          <Note>{question
+            ? (findings.length ? 'No answers in the thread yet.' : 'No answers yet. Answer with the passages you rely on.')
+            : 'No comments yet.'}</Note>
         )}
         {roots.map((a) => <AnswerCard key={a.id} a={a} replies={descendants(a.id, byParent, byId)} asker={post.author} ctx={ctx} />)}
         {msg && <Note tone={msg.startsWith('Reported') ? 'ok' : 'error'}>{msg}</Note>}
