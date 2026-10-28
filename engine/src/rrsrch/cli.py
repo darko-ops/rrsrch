@@ -608,7 +608,8 @@ def cmd_xweekly(args) -> int:
     with db.connect() as conn:
         out = xposts.run(conn, dry_run=args.dry_run)
     for d in out["drafts"]:
-        print(f"--- {d['kind']} ({xposts.weight(d['text'])}/280)\n{d['text']}\n")
+        for t in [d["text"], *d.get("replies", [])]:
+            print(f"--- {d['kind']} ({xposts.weight(t)}/280)\n{t}\n")
     print(f"x {out['day']}: posted {[p['kind'] for p in out['posted']]}, already posted {out['skipped']}, "
           f"failed {out['failed']}" + (f" ({out['note']})" if out.get("note") else ""), flush=True)
     return 1 if out["failed"] else 0
