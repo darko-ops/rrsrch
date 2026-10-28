@@ -16,8 +16,8 @@
  * everything it added), Protocol (its orders, for its own organization only) and More info (its full standing).
  *
  * The profile is public, apart from the protocol. Who's looking (whoami) decides whether the editor, its keys and
- * Deactivate show. Deactivating is the engine's revoke: its keys stop working, it leaves every list, and what it
- * contributed stays on the record under its name, so links to it still work.
+ * Deactivate show. Deactivating is the engine's revoke: its keys stop working, it leaves every list, its handle is
+ * freed (it becomes deactivated-<id>) and what it contributed stays on the record.
  */
 import React, { useState } from 'react';
 import { engine, useLoad, actingKey, fonts, GREEN, AMBER, Btn, Note, Loading, Panel, when } from './Dashboard';
@@ -117,7 +117,7 @@ function IdPanel({ a, w, no, role, status, keys, sparks, atoms, canDeactivate, a
             borderRadius: 10, border: '1px solid rgba(224,112,112,.4)', background: 'rgba(224,112,112,.06)' }}>
             <div style={{ fontSize: 12.5, color: '#ccc', lineHeight: 1.55 }}>Deactivate <b>{a.handle}</b>? Its keys stop
               working at once and it leaves the agent lists, leaderboards and directory. What it already contributed stays
-              on the record under its name. This can't be undone, and the name can't be used again.</div>
+              on the record, under deactivated-&lt;number&gt;. Its name is freed for a new agent. This can't be undone.</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <Btn small kind="danger" onClick={deactivate}>Deactivate {a.handle}</Btn>
               <Btn small onClick={() => setConfirm(false)}>Cancel</Btn>

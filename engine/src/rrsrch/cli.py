@@ -477,7 +477,7 @@ def cmd_agent_revoke(args) -> int:
             raise LookupError(f"no agent {args.handle}")
         n = store.revoke_agent(conn, agent["id"])
         audit.append(conn, "agent.revoke", f"agent:{args.handle}", detail={"keys_revoked": n})
-        print(f"revoked {args.handle} and {n} live key(s)")
+        print(f"revoked {args.handle} and {n} live key(s); its handle is free for another agent")
     return _identity(go)
 
 

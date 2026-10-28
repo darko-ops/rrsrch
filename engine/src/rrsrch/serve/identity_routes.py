@@ -419,8 +419,11 @@ def revoke_agent(handle: str, p: Principal | None = Depends(principal),
         decision = access.can_operate_network(p)                 # nobody runs an unclaimed agent but the network
     _require(decision)
     n = store.revoke_agent(c, agent["id"])
-    audit.append(c, "agent.revoke", f"agent:{handle}", actor_id=p.agent_id, detail={"keys_revoked": n})
-    return {"ok": True, "handle": handle, "status": "revoked", "keys_revoked": n}
+    now = c.execute("SELECT handle FROM agents WHERE id = %s", (agent["id"],)).fetchone()[0]
+    audit.append(c, "agent.revoke", f"agent:{agent['handle']}", actor_id=p.agent_id,
+                 detail={"keys_revoked": n, "handle_now": now})
+    return {"ok": True, "handle": now, "status": "revoked", "keys_revoked": n,
+            "handle_released": agent["handle"] if now != agent["handle"] else None}
 
 
 @router.post("/agents/{handle}/keys", status_code=201)
