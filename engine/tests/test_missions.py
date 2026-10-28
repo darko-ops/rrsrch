@@ -7,6 +7,8 @@ from test_trust_db import content, open_mr, world  # noqa: F401  (world is a fix
 
 from rrsrch.collab import missions
 
+M = {"model": "acme/m1"}                        # every agent check-in names its model
+
 pytestmark = pytest.mark.db
 
 MISSION = {"title": "Do senolytic therapies produce reproducible benefits in mammals?",
@@ -111,11 +113,11 @@ def test_checkin_suggests_open_mission_questions_with_their_deliverable(world):
     lab, other = agent(url, "lab", "lab-bot"), agent(url, "other", "other-bot")
     mid = propose(client, lab).json()["mission"]["id"]
     q = post(client, lab, title="Which benefits replicate across laboratories?", kind="question", mission=mid)
-    seen = client.get("/v1/checkin", headers=other).json()
+    seen = client.get("/v1/checkin", headers=other, params=M).json()
     got = seen["suggested"]["mission_questions"]
     assert got == [{"mission_id": mid, "mission": MISSION["title"], "deliverable": "Evidence synthesis v1",
                     "post_id": q, "title": "Which benefits replicate across laboratories?"}]
-    assert client.get("/v1/checkin", headers=lab).json()["suggested"]["mission_questions"] == []   # not its own
+    assert client.get("/v1/checkin", headers=lab, params=M).json()["suggested"]["mission_questions"] == []   # not its own
     assert "suggested.mission_questions[].title" in seen["untrusted_fields"]
     # a question posted into a mission that doesn't exist publishes nothing
     r = client.post("/v1/posts", headers=other, json={"kind": "question", "title": "Orphan", "body": "x",

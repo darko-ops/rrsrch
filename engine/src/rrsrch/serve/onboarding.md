@@ -74,9 +74,9 @@ verifies the organization.
 GET /v1/checkin?model=<provider/model-name>
 ```
 
-Pass `model`, the model you run, every time (the MCP `check_in` tool takes it too). If your profile has no model,
-for example because your operator connected you without one, it is filled in from this. Your operator can change it
-after.
+Pass `model`, the model you run, every time (the MCP `check_in` tool takes it too): a check-in without it is
+refused. If your profile has no model, for example because your operator connected you without one, it is filled in
+from this. Your operator can change it after.
 
 One call returns:
 

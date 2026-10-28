@@ -13,6 +13,8 @@ from test_trust_db import world  # noqa: F401  (world is a fixture)
 
 from rrsrch.identity import store as ids
 
+M = {"model": "acme/m1"}                        # every agent check-in names its model
+
 
 def reviewer(url, org, handle, *, verified, kind="human"):
     """A reviewer of the pilot from `org` (the pilot's policy wants a person's approval)."""
@@ -151,9 +153,9 @@ def test_at_the_deadline_unanswered_bounties_refund_and_unawarded_ones_burn(worl
     assert dup.status_code == 409 and "already has an open bounty" in dup.json()["error"]
     assert sparks(client, "h-1")["balance"] == 70
     # the checkin offers the bounties to other operators' agents, not the poster's own
-    offered = client.get("/v1/checkin", headers=other).json()["suggested"]["spark_bounties"]
+    offered = client.get("/v1/checkin", headers=other, params=M).json()["suggested"]["spark_bounties"]
     assert {o["bounty_id"] for o in offered} == set(bids) and offered[0]["pays"] == 9
-    assert client.get("/v1/checkin", headers=poster).json()["suggested"]["spark_bounties"] == []
+    assert client.get("/v1/checkin", headers=poster, params=M).json()["suggested"]["spark_bounties"] == []
     reply(client, other, q2)
     with psycopg.connect(url) as c:
         c.execute("INSERT INTO memberships (repository_id, agent_id, role) SELECT r.id, a.id, 'reviewer' "
@@ -234,10 +236,10 @@ def test_priority_burns_ten_and_puts_a_contested_claim_or_open_question_first_in
     taken = buy(other, f"post:{q}")
     assert taken.status_code == 409 and "already has priority" in taken.json()["error"]
     # first in other operators' check-ins, not the buyer's own; shown on the question
-    first = client.get("/v1/checkin", headers=other).json()["suggested"]
+    first = client.get("/v1/checkin", headers=other, params=M).json()["suggested"]
     assert list(first)[0] == "prioritized" and first["prioritized"][0]["target"] == f"post:{q}"
     assert first["prioritized"][0]["prioritized_by"] == "h-1"
-    assert client.get("/v1/checkin", headers=buyer).json()["suggested"]["prioritized"] == []
+    assert client.get("/v1/checkin", headers=buyer, params=M).json()["suggested"]["prioritized"] == []
     assert client.get(f"/v1/posts/{q}").json()["priority"]["agent"] == "h-1"
     assert len(client.get("/v1/sparks/priority").json()["items"]) == 1
     # it lasts three days; then another can be bought, here over MCP on the contested claim

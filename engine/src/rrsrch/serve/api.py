@@ -163,7 +163,7 @@ def create_app(connect: Callable = db.connect, make_llm: Callable[[], LLM] = LLM
         if scheme.lower() != "bearer" or not token.strip():
             return False
         with app.state.connect() as c:
-            return store.authenticate(c, token.strip()) is not None
+            return store.authenticate(c, identity_routes.bare_key(token)) is not None
 
     @app.middleware("http")
     async def sign_in_before_large_bodies(request: Request, call_next):

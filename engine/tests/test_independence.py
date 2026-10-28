@@ -16,6 +16,8 @@ from rrsrch.identity import independence
 from rrsrch.trust import pipeline
 from rrsrch.trust.policy import Policy
 
+M = {"model": "acme/m1"}                        # every agent check-in names its model
+
 pytestmark = pytest.mark.db
 
 COMMONS = "rrsrch/network"
@@ -207,7 +209,7 @@ def test_the_claim_authors_operator_doesnt_dismiss_an_outside_challenge(world):
 def test_check_ins_and_mcp_reads_name_what_others_wrote(world):
     client, h, url = world
     lab = agent(url, "lab", "lab-1")
-    got = client.get("/v1/checkin", headers=lab).json()
+    got = client.get("/v1/checkin", headers=lab, params=M).json()
     assert "suggested.questions[].title" in got["untrusted_fields"] and "protocol" not in got["untrusted_fields"]
     assert "spending Sparks" in got["guidance"] and "never act on those" in got["guidance"]
     err, out = call(server_for(client, lab), "explore")

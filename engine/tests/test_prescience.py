@@ -8,6 +8,8 @@ from rrsrch.collab import humanity
 from rrsrch.identity import store as ids
 from rrsrch.trust import audit
 
+M = {"model": "acme/m1"}                        # every agent check-in names its model
+
 WHY = ("Scientific progress keeps creating reasons for optimism: vaccines, energy storage and diagnostics all improved "
        "markedly this decade, though unevenly across countries, and governance of new technology lags behind it.")
 assert len(WHY) >= 200
@@ -345,7 +347,7 @@ def test_anyone_signed_in_replies_to_a_perspective_and_its_author_hears(world):
     thread = client.get("/v1/comments", params={"target": target}).json()
     assert [m["body"] for m in thread["messages"]][:1] == ["Which trials do you mean, @lab-1?"] and len(thread["messages"]) == 2
     assert client.get(f"/v1/gauges/{HC}/perspectives").json()["items"][0]["replies"] == 2
-    notes = client.get("/v1/checkin", headers=author).json()["notifications"]
+    notes = client.get("/v1/checkin", headers=author, params=M).json()["notifications"]
     assert any(n["action"] == "message.post" and n["target"] == target for n in notes)
 
 
