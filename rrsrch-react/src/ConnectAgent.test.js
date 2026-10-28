@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import ConnectAgent, { setupFor, CLIENTS } from './ConnectAgent';
+import ConnectAgent, { FIRST_PROMPT, mcpSetup } from './ConnectAgent';
 
 const KEY = 'rrsrch_abc123_secret';
 
@@ -26,27 +26,10 @@ function serve(whoami, calls = []) {
 const USER = { email: 'x@example.org', email_verified: true };
 afterEach(() => localStorage.clear());
 
-test('every client gets a setup with the key in it', () => {
-  for (const [id] of CLIENTS) expect(setupFor(id, KEY).text).toContain(`Bearer ${KEY}`);
-  expect(setupFor('claude-code', KEY).text).toBe(
-    `claude mcp add --transport http --scope user rrsrch https://rrsrch.com/mcp --header "Authorization: Bearer ${KEY}"`);
-  expect(JSON.parse(setupFor('cursor', KEY).text).mcpServers.rrsrch.url).toBe('https://rrsrch.com/mcp');
-  expect(JSON.parse(setupFor('claude-desktop', KEY).text).mcpServers.rrsrch.env.RRSRCH_AUTH).toBe(`Bearer ${KEY}`);
-  expect(setupFor('codex', KEY).text).toContain('[mcp_servers.rrsrch]');
-  expect(setupFor('codex', KEY).cloud.prompt).toContain('$RRSRCH_KEY');
-  expect(setupFor('codex', KEY).cloud.prompt).not.toContain(KEY);
-  expect(setupFor('cursor', KEY).cloud).toBeUndefined();
-});
-
-test('connecting a Codex agent also shows the Codex cloud steps', async () => {
-  localStorage.setItem('rrsrch_token', 'site_tok');
-  serve(() => ({ handle: 'dana', organization_id: 'harbor-lab', org_role: 'admin' }));
-  render(<ConnectAgent user={USER} isMobile={false} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Codex' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
-  expect(await screen.findByText(/Running it in Codex cloud/)).toBeInTheDocument();
-  expect(screen.getByText(/add rrsrch.com to the domain allowlist/)).toBeInTheDocument();
-  expect(screen.getByText(/Allow all HTTP methods/)).toBeInTheDocument();
+test('every agent gets the same prompt, which reads the key from the environment and never holds it', () => {
+  expect(FIRST_PROMPT).toContain('https://rrsrch.com/agents.md');
+  expect(FIRST_PROMPT).toContain('$RRSRCH_KEY');
+  expect(mcpSetup(KEY)).toBe(`URL:     https://rrsrch.com/mcp\nHeader:  Authorization: Bearer ${KEY}`);
 });
 
 test('signed out, it asks you to sign in first', () => {
@@ -55,7 +38,7 @@ test('signed out, it asks you to sign in first', () => {
   expect(screen.getByText(/Sign in or create an account first/)).toBeInTheDocument();
 });
 
-test('a person with no organization names one, picks a client and gets one command with the key', async () => {
+test('a person with no organization names one and gets the key and the one prompt', async () => {
   localStorage.setItem('rrsrch_token', 'site_tok');
   let org = 'people';
   // new to the engine: whoami is a 401 until their first write, the organization
@@ -64,18 +47,17 @@ test('a person with no organization names one, picks a client and gets one comma
   fireEvent.change(await screen.findByLabelText('organization name'), { target: { value: 'Harbor Lab' } });
   org = 'harbor-lab';
   fireEvent.click(screen.getByRole('button', { name: 'Create it' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Cursor' }));
-  expect(screen.getByLabelText('agent handle')).toHaveValue('harbor-lab-cursor');
-  fireEvent.click(screen.getByRole('button', { name: 'Claude Code' }));
-  expect(screen.getByLabelText('agent handle')).toHaveValue('harbor-lab-claude');
+  expect(await screen.findByLabelText('agent handle')).toHaveValue('harbor-lab-agent');
   fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
-  expect(await screen.findByText('harbor-lab-claude is connected')).toBeInTheDocument();
-  expect(screen.getByText(/claude mcp add --transport http --scope user rrsrch/)).toHaveTextContent(KEY);
+  expect(await screen.findByText('harbor-lab-agent is connected')).toBeInTheDocument();
+  expect(screen.getByText(`RRSRCH_KEY=${KEY}`)).toBeInTheDocument();
+  expect(screen.getByText(FIRST_PROMPT)).toBeInTheDocument();
+  expect(screen.queryByRole('group', { name: 'MCP client' })).toBeNull();
   expect(screen.getByText(/not shown again/)).toBeInTheDocument();
   const writes = calls.filter(([m]) => m === 'POST').map(([, p, b]) => [p, b]);
   expect(writes).toEqual([
     ['/v1/organizations', { id: 'harbor-lab', name: 'Harbor Lab' }],
-    ['/v1/agents/connect', { handle: 'harbor-lab-claude', client: 'claude-code', model: null }],
+    ['/v1/agents/connect', { handle: 'harbor-lab-agent', client: 'other', model: null }],
   ]);
 });
 
