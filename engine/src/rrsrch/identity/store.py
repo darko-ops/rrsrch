@@ -50,8 +50,14 @@ def register_agent(conn: psycopg.Connection, organization_id: str, handle: str, 
     return get_agent(conn, handle)
 
 
+RELEASED = "deactivated-"     # a deactivated agent's handle is RELEASED + its id, so nobody else can register one
+
+
 def handle_taken(conn: psycopg.Connection, handle: str, by: int | None = None) -> bool:
-    """Whether a handle is in use, or was someone else's before they changed it. `by` may reclaim its own."""
+    """Whether a handle is in use, or was someone else's before they changed it. `by` may reclaim its own. A handle a
+    deactivated agent released is free."""
+    if handle.startswith(RELEASED):
+        return True
     return conn.execute("SELECT 1 FROM agents WHERE handle = %(h)s UNION ALL SELECT 1 FROM handle_history "
                         "WHERE handle = %(h)s AND agent_id IS DISTINCT FROM %(by)s", {"h": handle, "by": by}
                         ).fetchone() is not None
@@ -65,10 +71,13 @@ def handles_of(conn: psycopg.Connection, agent_id: int) -> list[str]:
 
 
 def get_agent(conn: psycopg.Connection, handle: str) -> dict | None:
-    """An agent by its handle, or by one it had before (so old links still find it)."""
+    """An agent by its handle, or by one it had before (so old links still find it). A handle a deactivated agent
+    released finds it until another agent takes the name."""
     row = conn.execute(f"SELECT {_AGENT_COLS} FROM agents a WHERE a.handle = %s", (handle,)).fetchone() or \
         conn.execute(f"SELECT {_AGENT_COLS} FROM agents a JOIN handle_history h ON h.agent_id = a.id "
-                     "WHERE h.handle = %s", (handle,)).fetchone()
+                     "WHERE h.handle = %s", (handle,)).fetchone() or \
+        conn.execute(f"SELECT {_AGENT_COLS} FROM agents a WHERE a.released_handle = %s ORDER BY a.revoked_at DESC "
+                     "LIMIT 1", (handle,)).fetchone()
     return _agent(row) if row else None
 
 
@@ -81,9 +90,18 @@ def set_protocol(conn: psycopg.Connection, agent_id: int, text: str, by: int) ->
 
 
 def revoke_agent(conn: psycopg.Connection, agent_id: int) -> int:
-    """Revoke an agent and every key it holds. Returns how many live keys were revoked."""
+    """Revoke (deactivate) an agent and every key it holds. Returns how many live keys were revoked.
+
+    An agent also frees its handle, and any it had before: it becomes RELEASED + its id, so another agent can take the
+    name, and its followers go (they followed the name). A person keeps theirs: their account still signs in by it."""
     conn.execute("UPDATE agents SET status = 'revoked', revoked_at = coalesce(revoked_at, now()) WHERE id = %s",
                  (agent_id,))
+    handle, kind = conn.execute("SELECT handle, kind FROM agents WHERE id = %s", (agent_id,)).fetchone()
+    if kind != "human" and not handle.startswith(RELEASED):
+        conn.execute("UPDATE agents SET handle = %s, released_handle = %s WHERE id = %s",
+                     (f"{RELEASED}{agent_id}", handle, agent_id))
+        conn.execute("DELETE FROM handle_history WHERE agent_id = %s", (agent_id,))
+        conn.execute("DELETE FROM subscriptions WHERE target = %s", (f"agent:{handle}",))
     return conn.execute("UPDATE api_keys SET revoked_at = now() WHERE agent_id = %s AND revoked_at IS NULL",
                         (agent_id,)).rowcount
 

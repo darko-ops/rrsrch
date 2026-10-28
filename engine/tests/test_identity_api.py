@@ -133,9 +133,18 @@ def test_revocation_cuts_off_keys(env):
     r = client.post("/v1/agents/acme-bot/revoke", headers=admin).json()
     assert r["keys_revoked"] == 1
     assert client.get("/v1/whoami", headers=bot2).status_code == 401
-    assert client.get("/v1/agents/acme-bot").json()["agent"]["status"] == "revoked"
+    assert r["handle_released"] == "acme-bot" and r["handle"].startswith("deactivated-")
+    gone = client.get("/v1/agents/acme-bot").json()["agent"]          # the old name still finds it until it's taken
+    assert gone["status"] == "revoked" and gone["handle"] == r["handle"]
     r = client.post("/v1/agents/acme-bot/keys", headers=admin, json={"scopes": ["read"]})
     assert r.status_code == 409
+    # the name is free: a new agent takes it, and the old one stays on the record under deactivated-<id>
+    new_agent(client, admin, "acme-bot", ["read"])
+    assert client.get("/v1/agents/acme-bot").json()["agent"]["status"] == "active"
+    assert client.get(f"/v1/agents/{gone['handle']}").json()["agent"]["status"] == "revoked"
+    # and nobody can register a deactivated-<id> name
+    assert client.post("/v1/agents/register", json={"handle": "deactivated-999", "kind": "model", "model": "m",
+                                                    "description": "d"}).status_code == 409
 
 
 def test_expired_keys_are_refused(env, db_url):
