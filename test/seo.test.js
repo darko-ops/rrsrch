@@ -16,7 +16,10 @@ const CLAIM = {
   },
 };
 const FEEDBACK = { ok: true, formal: { reviews: [{ reviewer: 'ada', verdict: 'accept', created_at: '2026-10-14T00:00:00Z' }], challenges: [] } };
-const SOURCE = { ok: true, id: 'MED:11869080', doi: '10.1016/j.joca.2002.0001', title: 'Human autologous MSC transplantation', journal: 'Osteoarthritis Cartilage', pub_year: 2002 };
+// the engine's real shape: /v1/sources/<id> is {ok, source}
+const SOURCE = { ok: true, source: { id: 'MED:11869080', kind: 'paper', doi: '10.1016/j.joca.2002.0001', title: 'Human autologous MSC transplantation', journal: 'Osteoarthritis Cartilage', pub_year: 2002 } };
+const URL_SOURCE = { ok: true, source: { id: 'URL:18765dd9591466dceb7b4f29', kind: 'url', doi: null, title: 'Term Premium on a 10 Year Zero Coupon Bond | FRED',
+  url: 'https://fred.stlouisfed.org/series/THREEFYTP10', provenance: 'fetched' } };
 const QUESTION = { ok: true, post: { id: 5, kind: 'question', title: 'Do gains last past 24 months?', body: 'Asking about <b>long</b> follow-up.', topics: ['knee-oa'], evidence: [], status: 'open', moderation: 'visible', created_at: '2026-10-14T00:00:00Z' },
   author: { handle: 'ada', kind: 'human' }, comments: [{ id: 11, author: 'bot', author_kind: 'model', kind: 'answer', body: 'One trial reports 4 years.', moderation: 'visible', created_at: '2026-10-14T01:00:00Z', parent_id: null }] };
 
@@ -27,6 +30,7 @@ function fakeEngine(url) {
   const p = new URL(url).pathname + new URL(url).search;
   if (p === '/v1/claims/3') return CLAIM;
   if (p === '/v1/claims/3/feedback') return FEEDBACK;
+  if (p.startsWith('/v1/sources/URL')) return URL_SOURCE;
   if (p.startsWith('/v1/sources/')) return SOURCE;
   if (p === '/v1/posts/5') return QUESTION;
   if (p === '/v1/topics/cybersecurity') return { ok: true, topic: { slug: 'cybersecurity', title: 'Cybersecurity', description: 'Vulnerabilities & patches',
@@ -181,4 +185,17 @@ test('over 50,000 URLs the sitemap becomes an index of chunks', async () => {
     const chunk = await get('/sitemaps/claims-0.xml');
     assert.match(chunk.body, /<loc>https:\/\/rrsrch\.com\/claims\/1<\/loc>/);
   } finally { feedCounts = { claims: 2, questions: 1, posts: 0, agents: 1, topics: 1 }; }
+});
+
+test('a fetched web page links to where it was fetched from, never to Europe PMC', async () => {
+  QUESTION.post.evidence.push({ source_id: 'URL:18765dd9591466dceb7b4f29', source_title: 'Term Premium | FRED', excerpt: 'Term Premium on a 10 Year Zero Coupon Bond',
+    source_url: 'https://fred.stlouisfed.org/series/THREEFYTP10' });
+  try {
+    const r = await get('/questions/5');
+    assert.doesNotMatch(r.body, /europepmc\.org\/article\/URL/);
+    assert.match(r.body, /<a href="https:\/\/fred\.stlouisfed\.org\/series\/THREEFYTP10">fred\.stlouisfed\.org<\/a>/);
+    const [doc] = ld(r.body);
+    const cites = doc.mainEntity.citation;
+    assert.deepEqual(cites.map((c) => [c['@type'], c.url]), [['WebPage', 'https://fred.stlouisfed.org/series/THREEFYTP10']]);
+  } finally { QUESTION.post.evidence.pop(); }
 });

@@ -148,14 +148,21 @@ const crumbs = (...parts) => `<nav><a class="brand" href="/">RRSRCH</a> › <a h
 
 // --- shared pieces --------------------------------------------------------------------------------------------------
 
-function sourceLink(id, src) {
+// A paper links to its DOI or Europe PMC; a fetched page links to where it was fetched from. Only MED/PMC/PPR ids
+// are Europe PMC records: a URL: or UPLOAD: id there is a dead link to the wrong publisher.
+function sourceLink(id, src, ev) {
   if (src?.doi) return `https://doi.org/${src.doi}`;
-  const m = /^([A-Z]+):(.+)$/.exec(id || '');
+  const url = src?.url || ev?.source_url;
+  if (url && /^https?:\/\//i.test(url)) return url;
+  const m = /^(MED|PMC|PPR):(.+)$/.exec(id || '');
   return m ? `https://europepmc.org/article/${m[1]}/${encodeURIComponent(m[2])}` : null;
 }
 
-function scholarly(id, title, src) {
-  const url = sourceLink(id, src);
+function scholarly(id, title, src, ev) {
+  const url = sourceLink(id, src, ev);
+  if (src?.kind === 'url' || /^(URL|UPLOAD):/.test(id || '')) {
+    return { '@type': 'WebPage', name: src?.title || title || id, url: url || undefined };
+  }
   const ids = [];
   if (src?.doi) ids.push({ '@type': 'PropertyValue', propertyID: 'DOI', value: src.doi });
   if (src?.pmid) ids.push({ '@type': 'PropertyValue', propertyID: 'PMID', value: String(src.pmid) });
@@ -176,7 +183,7 @@ function scholarly(id, title, src) {
 async function sources(get, ids) {
   const uniq = [...new Set(ids.filter(Boolean))].slice(0, 12);
   const got = await Promise.all(uniq.map((id) => get(`/v1/sources/${encodeURIComponent(id)}`)));
-  return Object.fromEntries(uniq.map((id, i) => [id, got[i].data || null]));
+  return Object.fromEntries(uniq.map((id, i) => [id, got[i].data?.source || got[i].data || null]));  // /v1/sources/<id> is {ok, source}
 }
 
 // Commit evidence (kind git_ref): the same link spelling as rrsrch-react/src/CommitEvidence.js
@@ -205,15 +212,21 @@ function commitHtml(e) {
     <figcaption>${e.relation ? `${escapeHtml(e.relation)} · ` : ''}commit evidence</figcaption></figure>`;
 }
 
+// A paper shows its id (MED:123); a web page shows the site it is on, since URL:<hash> means nothing to a reader.
+function linkLabel(id, link) {
+  if (/^(MED|PMC|PPR):/.test(id || '')) return id;
+  try { return new URL(link).hostname.replace(/^www\./, ''); } catch { return id; }
+}
+
 function evidenceHtml(items, srcs) {
   return items.map((e) => {
     if (isCommit(e)) return commitHtml(e);
     const src = srcs[e.source_id];
-    const link = sourceLink(e.source_id, src);
+    const link = sourceLink(e.source_id, src, e);
     const where = [src?.journal, src?.pub_year].filter(Boolean).map(escapeHtml).join(', ');
     const ids = [
       src?.doi && `DOI <a href="https://doi.org/${escapeHtml(src.doi)}">${escapeHtml(src.doi)}</a>`,
-      link && !src?.doi && `<a href="${escapeHtml(link)}">${escapeHtml(e.source_id)}</a>`,
+      link && !src?.doi && `<a href="${escapeHtml(link)}">${escapeHtml(linkLabel(e.source_id, link))}</a>`,
     ].filter(Boolean).join(' · ');
     return `<figure><blockquote${link ? ` cite="${escapeHtml(link)}"` : ''}>${escapeHtml(e.excerpt)}</blockquote>
       <figcaption>${e.relation ? `${escapeHtml(e.relation)} · ` : ''}<cite>${escapeHtml(src?.title || e.source_title || e.source_id)}</cite>${where ? `, ${where}` : ''}${ids ? ` · ${ids}` : ''}</figcaption></figure>`;
@@ -254,7 +267,7 @@ async function claimPage(get, id) {
     : `<p class="muted">${empty}</p>`);
 
   // documents are ScholarlyArticle citations; commits are linked in the page, not cited as articles
-  const citations = (claim.evidence || []).filter((e) => !isCommit(e)).map((e) => scholarly(e.source_id, e.source_title, srcs[e.source_id]));
+  const citations = (claim.evidence || []).filter((e) => !isCommit(e)).map((e) => scholarly(e.source_id, e.source_title, srcs[e.source_id], e));
   const graph = [{
     '@type': 'Claim', '@id': `${url}#claim`, url, text: claim.proposition, name: clip(claim.proposition, 110),
     dateCreated: iso(claim.created_at), author: personOrAgent(claim.contributor), citation: citations,
@@ -309,7 +322,7 @@ async function postPage(get, id, asQuestion) {
   const url = `${SITE}/${isQuestion ? 'questions' : 'posts'}/${post.id}`;
   const comments = (r.data.comments || []).filter((m) => m.body && (!m.moderation || m.moderation === 'visible'));
   const srcs = await sources(get, (post.evidence || []).map((e) => e.source_id));
-  const citations = (post.evidence || []).map((e) => scholarly(e.source_id, e.source_title, srcs[e.source_id]));
+  const citations = (post.evidence || []).map((e) => scholarly(e.source_id, e.source_title, srcs[e.source_id], e));
   const author = r.data.author || { handle: post.author, kind: post.author_kind };
   const msgLd = (m) => ({
     text: m.body, dateCreated: iso(m.created_at), url: `${url}#m-${m.id}`, author: personOrAgent(m.author, m.author_kind),
