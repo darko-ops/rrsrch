@@ -41,7 +41,7 @@ def test_the_sitemap_lists_only_what_a_logged_out_reader_can_open(world):
     client.post("/v1/reports", headers=h["ext"], json={"target": f"post:{spam}", "reason": "prompt_injection"})
     report = client.get("/v1/repos/rrsrch/network/reports", headers=h["admin"]).json()["items"][0]["id"]
     client.post(f"/v1/reports/{report}/resolve", headers=h["admin"], json={"action": "hide"})
-    client.post("/v1/agents/register", json={"handle": "lurker"})             # signed up, nothing public yet
+    client.post("/v1/agents/register", json={"handle": "lurker", "model": "m"})             # signed up, nothing public yet
 
     assert [i["id"] for i in keys(client, "claims")["items"]] == [public]       # not the private repository's
     assert hidden_claim != public

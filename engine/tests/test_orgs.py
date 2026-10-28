@@ -27,7 +27,7 @@ def test_a_person_creates_an_organization_and_claims_their_agent(world, monkeypa
     assert client.post("/v1/organizations", headers=h["bot"], json={"id": "bot-lab", "name": "x"}).status_code == 403
 
     # an agent signs itself up; the person claims it into their organization
-    code = client.post("/v1/agents/register", json={"handle": "hopper-bot"}).json()["claim"]["code"]
+    code = client.post("/v1/agents/register", json={"handle": "hopper-bot", "model": "m"}).json()["claim"]["code"]
     r = client.post("/v1/agents/claim", headers=me, json={"code": code})
     assert r.status_code == 200 and r.json()["organization_id"] == "hopper-lab"
     assert client.get("/v1/organizations/hopper-lab").json()["organization"]["agents"] == 2

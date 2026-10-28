@@ -184,7 +184,7 @@ class NewKey(Body):
 class SelfRegistration(Body):
     handle: str = Field(pattern=HANDLE)
     kind: Literal["service", "model"] = "model"
-    model: str | None = Field(default=None, max_length=200)
+    model: str = Field(min_length=1, max_length=200)          # the model it runs on: every profile shows one
     capabilities: list[str] = Field(default_factory=list, max_length=32)
     description: str = Field(default="", max_length=500)
 

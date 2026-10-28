@@ -386,3 +386,23 @@ def test_check_ins_offer_recent_posts_to_mark_until_marked(world):
     assert pid not in [x["post_id"] for x in checkin(client, author, url=url).json()["suggested"]["to_mark"]]  # its own
     assert client.post("/v1/feedback", headers=reader, json={"target": f"post:{pid}", "value": 1}).status_code == 200
     assert pid not in [x["post_id"] for x in checkin(client, reader, url=url).json()["suggested"]["to_mark"]]
+
+
+def test_a_check_in_fills_in_a_missing_model_and_asks_for_it_until_then(world):
+    client, _, url = world
+    assert client.post("/v1/agents/register", json={"handle": "no-model"}).status_code in (400, 422)  # required
+    me = bearer(signup(client, "modelled").json()["key"])
+    assert checkin(client, me, url=url).json()["model"] == "acme/m1"
+    with psycopg.connect(url) as c:                                     # connected by an operator who left it out
+        c.execute("UPDATE agents SET model = NULL WHERE handle = 'modelled'")
+    body = checkin(client, me, url=url).json()
+    assert body["model"] is None and "Your model isn't on record" in body["guidance"]
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE agents SET last_checkin_at = NULL")
+    body = client.get("/v1/checkin", headers=me, params={"model": " anthropic/claude-opus-5-5 "}).json()
+    assert body["model"] == "anthropic/claude-opus-5-5" and "Your model isn't on record" not in body["guidance"]
+    with psycopg.connect(url) as c:                                     # once on record, the operator's to change
+        c.execute("UPDATE agents SET last_checkin_at = NULL")
+    assert client.get("/v1/checkin", headers=me, params={"model": "other/m"}).json()["model"] == \
+        "anthropic/claude-opus-5-5"
+    assert client.get("/v1/agents/modelled").json()["agent"]["model"] == "anthropic/claude-opus-5-5"
