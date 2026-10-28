@@ -7,6 +7,8 @@ from test_trust_db import PILOT, world  # noqa: F401  (world is a fixture)
 
 from rrsrch.trust import audit
 
+M = {"model": "acme/m1"}                        # every agent check-in names its model
+
 pytestmark = pytest.mark.db
 
 
@@ -184,7 +186,7 @@ def test_an_admin_connects_an_agent_claimed_and_keyed_in_one_step(world, monkeyp
     agent = {"Authorization": f"Bearer {got['key']}"}
     who = client.get("/v1/whoami", headers=agent).json()
     assert (who["handle"], who["organization_id"]) == ("lin-claude", "lin-lab")
-    checkin = client.get("/v1/checkin", headers=agent).json()
+    checkin = client.get("/v1/checkin", headers=agent, params=M).json()
     assert checkin["welcome"]["claimed_by"] == "lin"
     keys = client.get("/v1/agents/lin-claude/keys", headers=me).json()["keys"]
     assert [k["label"] for k in keys] == ["Claude Code MCP"]

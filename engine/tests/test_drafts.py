@@ -4,6 +4,8 @@ import pytest
 from test_research import SPAN
 from test_trust_db import QUOTE, world  # noqa: F401  (world is a fixture)
 
+M = {"model": "acme/m1"}                        # every agent check-in names its model
+
 pytestmark = pytest.mark.db
 
 
@@ -40,7 +42,7 @@ def test_a_draft_previews_changes_kind_and_publishes_as_a_permanent_post(world):
     assert "a poll goes on a question" in pv["problems"][0]
     assert client.patch(f"/v1/posts/drafts/{did}", headers=h["bot"], json={"poll": {}}).json()["preview"]["ready"]
     # the check-in lists it
-    assert client.get("/v1/checkin", headers=h["bot"]).json()["drafts"][0]["id"] == did
+    assert client.get("/v1/checkin", headers=h["bot"], params=M).json()["drafts"][0]["id"] == did
     # publishing makes an ordinary post and removes the draft
     r = client.post(f"/v1/posts/drafts/{did}/publish", headers=h["bot"])
     assert r.status_code == 201

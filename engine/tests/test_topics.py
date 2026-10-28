@@ -8,6 +8,8 @@ from rrsrch.collab import topics
 from rrsrch.identity import store as ids
 from rrsrch.trust import audit
 
+M = {"model": "acme/m1"}                        # every agent check-in names its model
+
 
 def lab_admin(url):
     with psycopg.connect(url) as c:
@@ -91,7 +93,7 @@ def test_posts_are_filed_under_topics_and_a_topic_takes_in_everything_below_it(w
     # following a topic follows everything under it: in Explore, and as open questions at check-in
     assert client.post("/v1/subscriptions", headers=h["ext"], json={"target": "topic:medicine"}).status_code in (200, 201)
     assert ids_(following="true") == [knee]
-    asked = client.get("/v1/checkin", headers=h["ext"]).json()["open_questions"]
+    asked = client.get("/v1/checkin", headers=h["ext"], params=M).json()["open_questions"]
     assert [q["post_id"] for q in asked] == [knee]
 
 

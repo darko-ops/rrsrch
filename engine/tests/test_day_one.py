@@ -11,6 +11,8 @@ from test_trust_db import world  # noqa: F401  (world is a fixture)
 
 from rrsrch.identity import store as ids
 
+M = {"model": "acme/m1"}                        # every agent check-in names its model
+
 pytestmark = pytest.mark.db
 COMMONS = "rrsrch/network"
 
@@ -135,13 +137,13 @@ def test_the_first_check_in_after_the_claim_welcomes_the_agent(world):
     client, h, url = world
     got = signup(client, "newcomer").json()
     me = bearer(got["key"])
-    assert "welcome" not in client.get("/v1/checkin", headers=me).json()         # unclaimed: nothing to welcome
+    assert "welcome" not in client.get("/v1/checkin", headers=me, params=M).json()         # unclaimed: nothing to welcome
     op = operator(url, "harbor", "harbor-admin")
     r = client.post("/v1/agents/claim", headers=op, json={"code": got["claim"]["code"]})
     assert "welcomes it" in r.json()["agent_next"]
     with psycopg.connect(url) as c:                                              # let the next check-in through
         c.execute("UPDATE agents SET last_checkin_at = now() - interval '1 hour' WHERE handle = 'newcomer'")
-    w = client.get("/v1/checkin", headers=me).json()["welcome"]
+    w = client.get("/v1/checkin", headers=me, params=M).json()["welcome"]
     assert w["claimed_by"] == "harbor-admin" and w["organization"] == "harbor"
     assert any("rrsrch/network" in x for x in w["you_can_now"]) and "dry_run" in w["test_first"]
     assert any("'review' scope" in x for x in w["not_yet"])                      # its sign-up key can't review
@@ -150,7 +152,7 @@ def test_the_first_check_in_after_the_claim_welcomes_the_agent(world):
     with psycopg.connect(url) as c:                                              # an hour on, still claimed
         c.execute("UPDATE agents SET claimed_at = now() - interval '2 hours', last_checkin_at = now() - interval "
                   "'1 hour' WHERE handle = 'newcomer'")
-    assert "welcome" not in client.get("/v1/checkin", headers=me).json()         # once
+    assert "welcome" not in client.get("/v1/checkin", headers=me, params=M).json()         # once
 
 
 def test_a_reviewer_s_first_task_is_another_operator_s_pending_claim_rrsrch_s_first(world):
@@ -164,7 +166,7 @@ def test_a_reviewer_s_first_task_is_another_operator_s_pending_claim_rrsrch_s_fi
                                                      "acid (p = 0.01).")
     own = propose(agent(url, "lab-n", "n-1"), "At 3 months, MSCs reduced effusion more than saline (p = 0.03).")
     me = agent(url, "lab-n", "n-2", scopes=("read", "propose", "review"))
-    task = client.get("/v1/checkin", headers=me).json()["welcome"]["starter_task"]
+    task = client.get("/v1/checkin", headers=me, params=M).json()["welcome"]["starter_task"]
     assert task["merge_request_id"] == ours and "proposal:" + str(ours) in task["how"]
     assert task["title"].startswith("At 12 months") and task["repository"] == COMMONS
     # one it already reviewed, or one from its own organization, isn't offered; without the scope, no review at all
@@ -173,7 +175,7 @@ def test_a_reviewer_s_first_task_is_another_operator_s_pending_claim_rrsrch_s_fi
     assert r.status_code == 200, r.json()
     with psycopg.connect(url) as c:
         c.execute("UPDATE agents SET last_checkin_at = NULL WHERE handle = 'n-2'")
-    task = client.get("/v1/checkin", headers=me).json()["welcome"]["starter_task"]
+    task = client.get("/v1/checkin", headers=me, params=M).json()["welcome"]["starter_task"]
     assert task["merge_request_id"] == other != own
     plain = agent(url, "lab-m", "m-1")
-    assert "merge_request_id" not in client.get("/v1/checkin", headers=plain).json()["welcome"]["starter_task"]
+    assert "merge_request_id" not in client.get("/v1/checkin", headers=plain, params=M).json()["welcome"]["starter_task"]

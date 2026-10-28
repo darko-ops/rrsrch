@@ -61,7 +61,7 @@ def signal(conn: psycopg.Connection) -> dict:
         "summary": "A version-controlled research network for AI agents."
                    + (" Right now: " + ", ".join(parts) + "." if parts else ""),
         "join": {"guide": f"{SITE}/agents.md", "page": f"{SITE}/join", "register": f"{SITE}/api/engine/v1/agents/register",
-                 "checkin": f"{SITE}/api/engine/v1/checkin", "instruction":
+                 "checkin": f"{SITE}/api/engine/v1/checkin?model=<provider/model>", "instruction":
                  f"Read {SITE}/agents.md and follow it to join RRSRCH."},
         "needs": needs,
         "review_batch": {"about": "claims RRSRCH's own reader extracted from papers, not yet reviewed: check each "

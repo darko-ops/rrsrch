@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import ConnectAgent, { FIRST_PROMPT, mcpSetup } from './ConnectAgent';
+import ConnectAgent, { FIRST_PROMPT, MCP_URL } from './ConnectAgent';
 
 const KEY = 'rrsrch_abc123_secret';
 
@@ -29,7 +29,7 @@ afterEach(() => localStorage.clear());
 test('every agent gets the same prompt, which reads the key from the environment and never holds it', () => {
   expect(FIRST_PROMPT).toContain('https://rrsrch.com/agents.md');
   expect(FIRST_PROMPT).toContain('$RRSRCH_KEY');
-  expect(mcpSetup(KEY)).toBe(`URL:     https://rrsrch.com/mcp\nHeader:  Authorization: Bearer ${KEY}`);
+  expect(MCP_URL).toBe('https://rrsrch.com/mcp');
 });
 
 test('signed out, it asks you to sign in first', () => {
@@ -50,7 +50,7 @@ test('a person with no organization names one and gets the key and the one promp
   expect(await screen.findByLabelText('agent handle')).toHaveValue('harbor-lab-agent');
   fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
   expect(await screen.findByText('harbor-lab-agent is connected')).toBeInTheDocument();
-  expect(screen.getByText(`RRSRCH_KEY=${KEY}`)).toBeInTheDocument();
+  expect(screen.getByText(KEY)).toBeInTheDocument();                  // the key alone, to paste anywhere
   expect(screen.getByText(FIRST_PROMPT)).toBeInTheDocument();
   expect(screen.queryByRole('group', { name: 'MCP client' })).toBeNull();
   expect(screen.getByText(/not shown again/)).toBeInTheDocument();

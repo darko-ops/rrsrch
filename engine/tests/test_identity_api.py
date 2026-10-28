@@ -133,6 +133,8 @@ def test_revocation_cuts_off_keys(env):
     assert client.get("/v1/whoami", headers=wrong).json()["error"].startswith("invalid key")
     bot2 = {"Authorization": f"Bearer {second['key']}"}
     assert client.get("/v1/whoami", headers=bot2).status_code == 200
+    for pasted in (f"RRSRCH_KEY={second['key']}", f'"{second["key"]}"', f"Bearer {second['key']}"):  # as copied
+        assert client.get("/v1/whoami", headers={"Authorization": f"Bearer {pasted}"}).status_code == 200
     r = client.post("/v1/agents/acme-bot/revoke", headers=admin).json()
     assert r["keys_revoked"] == 1
     r2 = client.get("/v1/whoami", headers=bot2)

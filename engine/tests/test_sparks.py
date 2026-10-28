@@ -9,6 +9,8 @@ from test_trust_db import world  # noqa: F401  (world is a fixture)
 
 from rrsrch.collab import standing
 
+M = {"model": "acme/m1"}                        # every agent check-in names its model
+
 
 def sparks(client, handle):
     return client.get(f"/v1/agents/{handle}/sparks").json()
@@ -91,7 +93,7 @@ def test_check_ins_suggest_work_across_the_network(world):
     q = post(client, h["bot"], kind="question", title="Nobody has answered this")
     answered = post(client, h["bot"], kind="question", title="Already answered")
     client.post("/v1/comments", headers=h["ext"], json={"target": f"post:{answered}", "body": "Here."})
-    got = client.get("/v1/checkin", headers=lab).json()
+    got = client.get("/v1/checkin", headers=lab, params=M).json()
     sug = got["suggested"]
     assert [x["post_id"] for x in sug["questions"]] == [q]                       # unanswered only, any topic
     assert [g["gauge"] for g in sug["gauges"]][:3] == ["humanity-confidence", "ai-safety", "scientific-progress"]
@@ -103,7 +105,7 @@ def test_check_ins_suggest_work_across_the_network(world):
     vote(client, lab, 60)
     with psycopg.connect(url) as c:                    # check-ins are paced: let this one through
         c.execute("UPDATE agents SET last_checkin_at = now() - interval '1 hour' WHERE handle = 'lab-1'")
-    again = client.get("/v1/checkin", headers=lab).json()["suggested"]["gauges"]
+    again = client.get("/v1/checkin", headers=lab, params=M).json()["suggested"]["gauges"]
     assert "humanity-confidence" not in [g["gauge"] for g in again]              # answered this week
 
 
@@ -114,7 +116,7 @@ def test_check_ins_suggest_gauges_agents_proposed_too(world):
         "title": "Clean energy", "topic": "climate",
         "question": "How confident are you that clean energy will outgrow fossil fuels this decade?"})
     assert got.status_code == 201, got.text
-    gauges = client.get("/v1/checkin", headers=lab).json()["suggested"]["gauges"]
+    gauges = client.get("/v1/checkin", headers=lab, params=M).json()["suggested"]["gauges"]
     assert [(g["gauge"], g["core"]) for g in gauges][-1] == (got.json()["gauge"]["gauge"], False)
 
 
@@ -170,7 +172,7 @@ def test_check_ins_offer_proposals_only_from_other_operators(world):
     from test_knowledge_api import content
     body = {"content": content() | {"repository": PILOT}}
     mr = client.post(f"/v1/repos/{PILOT}/claims", headers=h["bot"], json=body).json()["merge_request_id"]
-    offered = lambda who: [x["merge_request_id"] for x in client.get("/v1/checkin", headers=who).json()   # noqa: E731
+    offered = lambda who: [x["merge_request_id"] for x in client.get("/v1/checkin", headers=who, params=M).json()   # noqa: E731
                            ["suggested"]["proposals_to_review"]]
     assert offered(h["ext"]) == [mr]                     # another operator's review counts
     assert offered(h["admin"]) == []                     # its own operator's wouldn't

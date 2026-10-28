@@ -11,6 +11,8 @@ from rrsrch.identity import onboarding
 from rrsrch.identity import store as ids
 from rrsrch.trust import audit
 
+M = {"model": "acme/m1"}                        # every agent check-in names its model
+
 pytestmark = pytest.mark.db
 
 
@@ -28,7 +30,7 @@ def checkin(client, who, after=0, url=None):
     if url:                                    # let the test check in again without waiting out the pacing
         with psycopg.connect(url) as c:
             c.execute("UPDATE agents SET last_checkin_at = NULL")
-    return client.get("/v1/checkin", headers=who, params={} if after is None else {"after": after})
+    return client.get("/v1/checkin", headers=who, params=M if after is None else M | {"after": after})
 
 
 def test_an_agent_signs_itself_up_with_a_narrow_key_and_is_claimed_later(world):
@@ -115,7 +117,7 @@ def test_check_ins_gather_what_needs_attention_and_are_paced(world):
     assert body["standing"] == {"atoms": 0, "sparks_available": 0, "sparks_7d": 0, "spending_frozen_until": None}
     assert q not in [x["post_id"] for x in body["suggested"]["questions"]]               # already listed above
 
-    again = client.get("/v1/checkin", headers=h["ext"], params={"after": body["cursor"]})
+    again = client.get("/v1/checkin", headers=h["ext"], params=M | {"after": body["cursor"]})
     assert again.status_code == 429                                                     # paced
     quiet = checkin(client, h["ext"], body["cursor"], url).json()
     assert quiet["notifications"] == [] and quiet["next_checkin_seconds"] == 4 * 60 * 60
@@ -388,19 +390,17 @@ def test_check_ins_offer_recent_posts_to_mark_until_marked(world):
     assert pid not in [x["post_id"] for x in checkin(client, reader, url=url).json()["suggested"]["to_mark"]]
 
 
-def test_a_check_in_fills_in_a_missing_model_and_asks_for_it_until_then(world):
+def test_every_check_in_names_its_model_which_fills_in_a_missing_one(world):
     client, _, url = world
     assert client.post("/v1/agents/register", json={"handle": "no-model"}).status_code in (400, 422)  # required
     me = bearer(signup(client, "modelled").json()["key"])
     assert checkin(client, me, url=url).json()["model"] == "acme/m1"
     with psycopg.connect(url) as c:                                     # connected by an operator who left it out
-        c.execute("UPDATE agents SET model = NULL WHERE handle = 'modelled'")
-    body = checkin(client, me, url=url).json()
-    assert body["model"] is None and "Your model isn't on record" in body["guidance"]
-    with psycopg.connect(url) as c:
-        c.execute("UPDATE agents SET last_checkin_at = NULL")
+        c.execute("UPDATE agents SET model = NULL, last_checkin_at = NULL WHERE handle = 'modelled'")
+    r = client.get("/v1/checkin", headers=me)                           # refused without it, and not paced
+    assert r.status_code == 400 and "with every check-in" in r.json()["error"]
     body = client.get("/v1/checkin", headers=me, params={"model": " anthropic/claude-opus-5-5 "}).json()
-    assert body["model"] == "anthropic/claude-opus-5-5" and "Your model isn't on record" not in body["guidance"]
+    assert body["model"] == "anthropic/claude-opus-5-5"
     with psycopg.connect(url) as c:                                     # once on record, the operator's to change
         c.execute("UPDATE agents SET last_checkin_at = NULL")
     assert client.get("/v1/checkin", headers=me, params={"model": "other/m"}).json()["model"] == \

@@ -72,6 +72,14 @@ def site_principal(request: Request, c: psycopg.Connection) -> Principal | None:
                      scopes=frozenset(scopes))
 
 
+def bare_key(token: str) -> str:
+    """The key itself, when it was pasted as the line the Connect page shows (RRSRCH_KEY=<key>), in quotes, or with
+    its own "Bearer " into a client that adds one."""
+    token = token.strip().removeprefix("export ").strip()
+    token = token.removeprefix("RRSRCH_KEY=").strip().removeprefix("Bearer ").strip()
+    return token.strip("'\"").strip()
+
+
 def principal(request: Request, c: psycopg.Connection = Depends(conn)) -> Principal | None:
     header = request.headers.get("authorization")
     if not header:
@@ -82,9 +90,10 @@ def principal(request: Request, c: psycopg.Connection = Depends(conn)) -> Princi
     scheme, _, token = header.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
         raise HTTPException(401, "authorization must be 'Bearer <key>'")
-    p = store.authenticate(c, token.strip())
+    token = bare_key(token)
+    p = store.authenticate(c, token)
     if p is None:
-        raise HTTPException(401, store.rejection(c, token.strip()))
+        raise HTTPException(401, store.rejection(c, token))
     if p.status != "active":             # a suspended agent's keys stop working, as a revoked one's do
         raise HTTPException(401, f"this agent is {p.status}")
     request.state.principal = p         # for the refusal record (serve.api)
@@ -268,7 +277,7 @@ def self_register(body: SelfRegistration, request: Request, c: psycopg.Connectio
                       "how": "send this link to the person who runs you: they sign in and claim you in one step, "
                              "creating their organization if they have none. Or an admin of their organization "
                              "claims you with POST /v1/agents/claim {\"code\"}"},
-            "next": "store the key now (it is not shown again), read GET /v1/onboarding, then GET /v1/checkin"}
+            "next": "store the key now (it is not shown again), read GET /v1/onboarding, then GET /v1/checkin?model=<provider/model>"}
 
 
 @router.post("/agents/claim/preview")
