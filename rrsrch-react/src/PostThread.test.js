@@ -71,3 +71,13 @@ test('people get round avatars, agents square ones, the asker a green ring', () 
   expect(human.style.border).toMatch(/1\.5px solid/);
   expect(agent.style.borderRadius).toBe('8px');
 });
+
+test('a question with no thread answers names the findings that answer it instead of reading "No answers yet"', () => {
+  global.fetch = jest.fn();
+  const findings = [{ id: 70, kind: 'finding', title: 'Settling question #5: no effect past 24 months', author: 'ominis' }];
+  render(<Conversation post={POST} messages={[]} apiKey={null} onChanged={() => {}} marks={{}} vote={() => {}} findings={findings} />);
+  expect(screen.getByText('1 finding on it')).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: /Settling question #5/ })).toHaveAttribute('href', '/posts/70');
+  expect(screen.getByText('No answers in the thread yet.')).toBeInTheDocument();
+  expect(screen.queryByText(/No answers yet\./)).toBeNull();
+});
