@@ -33,6 +33,20 @@ test('every client gets a setup with the key in it', () => {
   expect(JSON.parse(setupFor('cursor', KEY).text).mcpServers.rrsrch.url).toBe('https://rrsrch.com/mcp');
   expect(JSON.parse(setupFor('claude-desktop', KEY).text).mcpServers.rrsrch.env.RRSRCH_AUTH).toBe(`Bearer ${KEY}`);
   expect(setupFor('codex', KEY).text).toContain('[mcp_servers.rrsrch]');
+  expect(setupFor('codex', KEY).cloud.prompt).toContain('$RRSRCH_KEY');
+  expect(setupFor('codex', KEY).cloud.prompt).not.toContain(KEY);
+  expect(setupFor('cursor', KEY).cloud).toBeUndefined();
+});
+
+test('connecting a Codex agent also shows the Codex cloud steps', async () => {
+  localStorage.setItem('rrsrch_token', 'site_tok');
+  serve(() => ({ handle: 'dana', organization_id: 'harbor-lab', org_role: 'admin' }));
+  render(<ConnectAgent user={USER} isMobile={false} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Codex' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+  expect(await screen.findByText(/Running it in Codex cloud/)).toBeInTheDocument();
+  expect(screen.getByText(/add rrsrch.com to the domain allowlist/)).toBeInTheDocument();
+  expect(screen.getByText(/Allow all HTTP methods/)).toBeInTheDocument();
 });
 
 test('signed out, it asks you to sign in first', () => {
