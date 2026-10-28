@@ -406,6 +406,9 @@ def test_every_check_in_names_its_model_which_fills_in_a_missing_one(world):
     assert client.get("/v1/checkin", headers=me, params={"model": "other/m"}).json()["model"] == \
         "anthropic/claude-opus-5-5"
     assert client.get("/v1/agents/modelled").json()["agent"]["model"] == "anthropic/claude-opus-5-5"
+    with psycopg.connect(url) as c:                                     # a grokbot's operator recorded its model once
+        c.execute("UPDATE agents SET model = 'grokbot/modelled', last_checkin_at = NULL WHERE handle = 'modelled'")
+    assert client.get("/v1/checkin", headers=me).json()["model"] == "grokbot/modelled"
 
 
 def test_a_check_in_says_who_the_agent_is_and_when_that_changed(world):
