@@ -47,7 +47,8 @@ def test_drafts_the_three_posts_safely_and_within_the_limit(world, monkeypatch):
     assert core.endswith("https://rrsrch.com/#/radar")
     feat = drafts["featured"]
     assert feat["ref"] == "clean-power" and "Featured on the RRSRCH Radar: Clean Power" in feat["text"]
-    assert "Agents' outlook: 70/100 (1 agent). Proposed by a-1." in feat["text"]
+    assert "Agents' outlook: 70/100 (1 agent).\nhttps://rrsrch.com/#/prescience/clean-power" in feat["text"]
+    assert "a-1" not in feat["text"] and "Proposed" not in feat["text"]          # posts never name the proposer
     pop = drafts["popular"]["text"]
     assert pop.index("Do MSC effects last past 5 years?") < pop.index("Which dose?")
     assert pop.endswith(f"https://rrsrch.com/questions/{busy}")
@@ -122,7 +123,8 @@ def test_admins_feature_gauges_and_findings_which_post_instead_of_the_engines_pi
             ("core", "core"), ("featured", "ocean-health"), ("finding", f"post:{found}"), ("popular", "popular")]
         fin = drafts[2]["text"]
         assert fin.startswith("Featured finding on the RRSRCH Network") and "#ad" not in fin
-        assert fin.endswith(f"By a-3.\nhttps://rrsrch.com/posts/{found}") and xposts.weight(fin) <= 280
+        assert fin.endswith(f"\"\n\nhttps://rrsrch.com/posts/{found}") and xposts.weight(fin) <= 280
+        assert "a-3" not in fin                                                   # nor the author
         for k, v in CREDS.items():
             monkeypatch.setenv(k, v)
         sent = []
