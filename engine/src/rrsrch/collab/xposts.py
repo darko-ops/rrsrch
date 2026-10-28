@@ -161,15 +161,14 @@ def popular_posts(conn: psycopg.Connection, since: datetime, limit: int = POPULA
     return [dict(zip(("id", "kind", "title", "replies", "orgs"), r)) for r in rows]
 
 
-def compose_popular(posts: list[dict]) -> str | None:
+def compose_popular(posts: list[dict]) -> tuple[str, list[str]] | None:
+    """A thread with every title whole: the first post names the most discussed, each reply the next, each with its
+    link. A title is at most 200 characters, so every post fits."""
     if not posts:
         return None
-    head, link = "Most discussed on the RRSRCH Network today:", f"{site()}/{_path(posts[0])}"
-    stats = [f" ({p['replies']} repl{'ies' if p['replies'] != 1 else 'y'})" for p in posts]
-    fixed = weight("\n\n".join([head, "\n".join(f"{n}. {s}" for n, s in enumerate(stats, 1)), link]))
-    cap = max((LIMIT - fixed) // len(posts), 20)
-    lines = [f"{n}. {inert(p['title'], cap)}{s}" for n, (p, s) in enumerate(zip(posts, stats), 1)]
-    return "\n\n".join([head, "\n".join(lines), link])
+    head = "Most discussed on the RRSRCH Network today:"
+    first = "\n\n".join([head, f"1. {inert(posts[0]['title'], LIMIT)}", f"{site()}/{_path(posts[0])}"])
+    return first, [f"{n}. {inert(p['title'], LIMIT)}\n\n{site()}/{_path(p)}" for n, p in enumerate(posts[1:], 2)]
 
 
 _FEATURED_FINDINGS_SQL = """
@@ -220,10 +219,11 @@ def compose(conn: psycopg.Connection, now: datetime | None = None) -> list[dict]
         out.append({"kind": "featured", "ref": g["gauge"], "text": compose_featured(g)})
     if (f := featured_finding(conn, now - WINDOW)):
         out.append({"kind": "finding", "ref": f"post:{f['id']}", "text": compose_finding(f)})
-    if (t := compose_popular(popular_posts(conn, now - WINDOW))):
-        out.append({"kind": "popular", "ref": "popular", "text": t})
+    if (thread := compose_popular(popular_posts(conn, now - WINDOW))):
+        out.append({"kind": "popular", "ref": "popular", "text": thread[0], "replies": thread[1]})
     for o in out:
-        assert weight(o["text"]) <= LIMIT, (o["kind"], weight(o["text"]))
+        for t in [o["text"], *o.get("replies", [])]:
+            assert weight(t) <= LIMIT, (o["kind"], weight(t))
     return out
 
 
@@ -254,8 +254,9 @@ def oauth_header(method: str, url: str, creds: dict, nonce: str | None = None, t
 
 def run(conn: psycopg.Connection, *, dry_run: bool = False, now: datetime | None = None,
         post: Callable[..., httpx.Response] | None = None) -> dict:
-    """Post today's posts that haven't gone out yet. Returns {"day", "posted", "skipped", "failed", "drafts"}; never
-    the credentials."""
+    """Post today's posts that haven't gone out yet, each with its replies as a thread. Returns {"day", "posted",
+    "skipped", "failed", "drafts"}; never the credentials. A post that went out isn't posted again even if a reply
+    failed."""
     now = now or datetime.now(timezone.utc)
     day = day_of(now)
     sent = {r[0] for r in conn.execute("SELECT kind FROM x_posts WHERE week = %s", (day,))}
@@ -266,20 +267,33 @@ def run(conn: psycopg.Connection, *, dry_run: bool = False, now: datetime | None
         out["note"] = "dry run" if dry_run else "RRSRCH_X_* are not set; nothing posted"
         return out
     post = post or (lambda url, **kw: httpx.post(url, timeout=30, **kw))
-    for d in drafts:
+
+    def send(body: dict) -> tuple[str | None, str | None]:
+        """The new post's id, or why it failed."""
         try:
-            r = post(ENDPOINT, json={"text": d["text"]},
-                     headers={"Authorization": oauth_header("POST", ENDPOINT, creds), "Content-Type": "application/json"})
-            ok = r.status_code in (200, 201)
-            tid = (r.json().get("data") or {}).get("id") if ok else None
+            r = post(ENDPOINT, json=body, headers={"Authorization": oauth_header("POST", ENDPOINT, creds),
+                                                   "Content-Type": "application/json"})
+            tid = (r.json().get("data") or {}).get("id") if r.status_code in (200, 201) else None
+            return tid, None if tid else f"HTTP {r.status_code}: {r.text[:200]}"
         except (httpx.HTTPError, ValueError) as e:
-            ok, tid, r = False, None, e
-        if not ok or not tid:
-            out["failed"].append({"kind": d["kind"],
-                                  "error": f"HTTP {r.status_code}: {r.text[:200]}" if isinstance(r, httpx.Response) else str(r)[:200]})
+            return None, str(e)[:200]
+
+    for d in drafts:
+        tid, err = send({"text": d["text"]})
+        if not tid:
+            out["failed"].append({"kind": d["kind"], "error": err})
             continue
         conn.execute("INSERT INTO x_posts (week, kind, ref, tweet_id, text) VALUES (%s, %s, %s, %s, %s)",
                      (day, d["kind"], d["ref"], tid, d["text"]))
         conn.commit()
-        out["posted"].append({"kind": d["kind"], "tweet_id": tid})
+        posted = {"kind": d["kind"], "tweet_id": tid}
+        last = tid
+        for n, reply in enumerate(d.get("replies", []), 1):
+            rid, err = send({"text": reply, "reply": {"in_reply_to_tweet_id": last}})
+            if not rid:
+                out["failed"].append({"kind": f"{d['kind']} reply {n}", "error": err})
+                break
+            posted.setdefault("replies", []).append(rid)
+            last = rid
+        out["posted"].append(posted)
     return out

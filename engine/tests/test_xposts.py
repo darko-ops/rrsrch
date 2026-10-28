@@ -49,13 +49,24 @@ def test_drafts_the_three_posts_safely_and_within_the_limit(world, monkeypatch):
     assert feat["ref"] == "clean-power" and "Featured on the RRSRCH Radar: Clean Power" in feat["text"]
     assert "Agents' outlook: 70/100 (1 agent).\nhttps://rrsrch.com/#/prescience/clean-power" in feat["text"]
     assert "a-1" not in feat["text"] and "Proposed" not in feat["text"]          # posts never name the proposer
-    pop = drafts["popular"]["text"]
-    assert pop.index("Do MSC effects last past 5 years?") < pop.index("Which dose?")
-    assert pop.endswith(f"https://rrsrch.com/questions/{busy}")
+    pop, replies = drafts["popular"]["text"], drafts["popular"]["replies"]     # a thread: the rest reply in turn
+    assert "1. Do MSC effects last past 5 years?" in pop and pop.endswith(f"https://rrsrch.com/questions/{busy}")
+    assert len(replies) == 1 and replies[0].startswith("2. Which dose?") and "https://rrsrch.com/questions/" in replies[0]
+    assert "…" not in pop + replies[0] and "repl" not in pop + replies[0]      # whole titles, no reply counts
     for d in drafts.values():
-        body = d["text"].replace("https://rrsrch.com/", "")
-        assert "@" not in body and "#buy" not in body and "http" not in body and "spam" not in body, d
-        assert xposts.weight(d["text"]) <= 280
+        for t in [d["text"], *d.get("replies", [])]:
+            body = t.replace("https://rrsrch.com/", "")
+            assert "@" not in body and "#buy" not in body and "http" not in body and "spam" not in body, d
+            assert xposts.weight(t) <= 280
+
+
+def test_most_discussed_is_a_thread_of_whole_titles():
+    long = [{"id": i, "kind": "question", "title": "Which equipment bottlenecks limit leading-edge chips? " * 3 + str(i)}
+            for i in range(3)]
+    first, replies = xposts.compose_popular(long)
+    assert long[0]["title"] in first and [long[1]["title"] in replies[0], long[2]["title"] in replies[1]] == [True, True]
+    assert all(xposts.weight(t) <= 280 and "…" not in t for t in [first, *replies])
+    assert replies[1].startswith("3. ") and replies[1].endswith("/questions/2")
 
 
 def test_nothing_to_say_means_no_post(world):
@@ -71,6 +82,9 @@ def test_posts_each_kind_once_a_day_and_retries_what_failed(world, monkeypatch):
 
     def fake(endpoint, json, headers):
         assert endpoint == xposts.ENDPOINT and headers["Authorization"].startswith("OAuth ")
+        if "reply" in json:                                                     # the thread, each to the one before
+            sent.append(f"reply to {json['reply']['in_reply_to_tweet_id']}")
+            return httpx.Response(201, json={"data": {"id": str(len(sent))}})
         kind = next(k for k in ("Featured", "discussed", "Radar") if k in json["text"])
         if kind == "discussed" and "popular" in fail:
             return httpx.Response(503, text="over capacity")
@@ -88,10 +102,11 @@ def test_posts_each_kind_once_a_day_and_retries_what_failed(world, monkeypatch):
         fail.clear()
         again = xposts.run(c, now=now + timedelta(hours=1), post=fake)
         assert [p["kind"] for p in again["posted"]] == ["popular"] and again["skipped"] == ["core", "featured"]
+        assert sent[-2:] == ["discussed", f"reply to {len(sent) - 1}"] and again["posted"][0]["replies"] == [str(len(sent))]
         assert xposts.run(c, now=now + timedelta(hours=2), post=fake)["drafts"] == []
         nxt = xposts.compose(c, now + timedelta(days=1))           # a featured gauge rests for a week,
         assert [d["ref"] for d in nxt if d["kind"] == "featured"] == ["clean-power"]   # unless it's the only one
-    assert sent == ["Radar", "Featured", "discussed"]
+    assert sent == ["Radar", "Featured", "discussed", "reply to 3"]
 
 
 def feature(client, who, path, on=True):
