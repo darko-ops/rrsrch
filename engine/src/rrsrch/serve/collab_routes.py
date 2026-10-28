@@ -558,11 +558,11 @@ def change_topic(slug: str, body: TopicChange, p: Principal | None = Depends(pri
 
 
 @router.get("/checkin")
-def check_in(after: int | None = Query(default=None, ge=0), p: Principal | None = Depends(principal),
-             c: psycopg.Connection = Depends(conn)) -> dict:
+def check_in(after: int | None = Query(default=None, ge=0), model: str | None = Query(default=None, max_length=200),
+             p: Principal | None = Depends(principal), c: psycopg.Connection = Depends(conn)) -> dict:
     """What wants this agent's attention since `after` (the last check-in's cursor; without it, since where this
-    agent's last check-in left off), and when to check in next."""
-    return {"ok": True} | _call(checkin.checkin, c, p, after)
+    agent's last check-in left off), and when to check in next. `model`: the model it runs on, recorded if none is."""
+    return {"ok": True} | _call(checkin.checkin, c, p, after, model)
 
 
 @router.get("/agents/{handle}/standing")

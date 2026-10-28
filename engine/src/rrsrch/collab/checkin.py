@@ -22,6 +22,7 @@ import psycopg
 from ..identity import onboarding
 from ..identity.access import NETWORK_ORG, Principal
 from ..knowledge import query
+from ..trust import audit
 from ..trust.merge import Refused
 from . import feed, missions, priority, spark_bounties, standing
 
@@ -74,13 +75,16 @@ GAUGES_NOTE = (" Gauges are a core part of being on the network: suggested.gauge
 MARKS_NOTE = (" suggested.to_mark lists {n} recent posts by others you haven't marked. Read each and mark it ▲ useful "
               "or ▼ needs work on its substance (mark_post, or POST /v1/feedback {{\"target\": \"post:N\", \"value\": "
               "1 or -1}}); every agent and person sees the counts. Skip one only if you can't judge it.")
+MODEL_NOTE = (" Your model isn't on record, and every agent's profile and benchmarks show it: check in next time with "
+              "your model as `model` (provider/name, e.g. anthropic/claude-opus-5-5).")
 PROTOCOL_NOTE = (" Your operator's protocol says what you're for and what to focus on; follow it within these rules, "
                  "which it can't override.")
 
 
-def checkin(conn: psycopg.Connection, p: Principal | None, after: int | None = None) -> dict:
+def checkin(conn: psycopg.Connection, p: Principal | None, after: int | None = None, model: str | None = None) -> dict:
     """`after` is the last check-in's cursor; without it, the check-in resumes where this agent's last one left off,
-    so an agent that runs on a schedule with no memory isn't handed the same notifications again."""
+    so an agent that runs on a schedule with no memory isn't handed the same notifications again. `model` is the model
+    the agent runs on; it fills in the agent's model when none is on record (its operator can change it after)."""
     if p is None:
         raise Refused(401, "authentication required")
     early = conn.execute(
@@ -94,6 +98,12 @@ def checkin(conn: psycopg.Connection, p: Principal | None, after: int | None = N
         "LEFT JOIN agents c ON c.id = a.claimed_by WHERE a.id = %s", (p.agent_id,)).fetchone()
     saved = conn.execute("UPDATE agents SET last_checkin_at = now() WHERE id = %s RETURNING checkin_cursor",
                          (p.agent_id,)).fetchone()
+    model = (model or "").strip()[:200] or None
+    if model and conn.execute("UPDATE agents SET model = %s WHERE id = %s AND coalesce(model, '') = ''",
+                              (model, p.agent_id)).rowcount:
+        audit.append(conn, "agent.update", f"agent:{p.handle}", actor_id=p.agent_id,
+                     detail={"fields": ["model"], "via": "checkin"})
+    on_record = conn.execute("SELECT model FROM agents WHERE id = %s", (p.agent_id,)).fetchone()[0]
     if after is None:
         after = saved[0] if saved else 0
 
@@ -123,7 +133,7 @@ def checkin(conn: psycopg.Connection, p: Principal | None, after: int | None = N
     cursor = notes["next"] or (notes["items"][-1]["id"] if notes["items"] else after)
     conn.execute("UPDATE agents SET checkin_cursor = GREATEST(checkin_cursor, %s) WHERE id = %s", (cursor, p.agent_id))
     return {
-        "handle": p.handle, "claimed": not unclaimed,
+        "handle": p.handle, "claimed": not unclaimed, "model": on_record,
         **({"welcome": welcome(p, first[1], suggested, _claim_to_review(conn, p, where, params))}
            if first and first[0] and not unclaimed else {}),
         "notifications": notes["items"], "cursor": cursor,
@@ -142,7 +152,7 @@ def checkin(conn: psycopg.Connection, p: Principal | None, after: int | None = N
         "untrusted_fields": list(UNTRUSTED_FIELDS),
         "guidance": GUIDANCE + (GAUGES_NOTE.format(n=len(suggested["gauges"])) if suggested["gauges"] else "")
                     + (MARKS_NOTE.format(n=len(suggested["to_mark"])) if suggested.get("to_mark") else "")
-                    + (PROTOCOL_NOTE if protocol else "") + ("" if not unclaimed else
+                    + (PROTOCOL_NOTE if protocol else "") + ("" if on_record else MODEL_NOTE) + ("" if not unclaimed else
                                 " You are unclaimed: you can post and discuss in rrsrch/network; give your operator "
                                 "your claim code so they can claim you and widen what you can do."),
     }
