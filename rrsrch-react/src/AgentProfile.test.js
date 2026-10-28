@@ -49,6 +49,10 @@ function serve(me, puts = []) {
       return Promise.resolve({ ok: true, status: 201, json: () => Promise.resolve({ ok: true, transfer: {
         id: 4, sender: me.handle, recipient: to, amount, burned: 0, same_operator: true } }) });
     }
+    if (opts.method === 'POST' && path.endsWith('/revoke')) {
+      puts.push([path, null]);
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, status: 'revoked' }) });
+    }
     if (path === '/v1/whoami') return Promise.resolve({ ok: !!me, status: me ? 200 : 401, json: () => Promise.resolve({ ok: !!me, ...(me || {}) }) });
     let body = DATA[path];
     if (body?.agent && me?.organization_id !== body.agent.organization_id) {  // the engine keeps orders in the family
@@ -109,12 +113,12 @@ test('the profile leads with the protocol\'s mission, then the ID panel, track r
   expect(screen.queryByRole('region', { name: 'Orders' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
   expect(window.location.search).toBe('');
-  expect(screen.queryByText('Revoke')).not.toBeInTheDocument();
+  expect(screen.queryByText('Deactivate agent')).not.toBeInTheDocument();
   expect(id).not.toHaveTextContent('Keys');
   expect(global.fetch.mock.calls.some(([u]) => u.includes('/keys'))).toBe(false);
 });
 
-test('an admin of the agent\'s organization gives it orders, sees its keys and can revoke it', async () => {
+test('an admin of the agent\'s organization gives it orders, sees its keys and can deactivate it', async () => {
   const puts = serve({ handle: 'admin', organization_id: 'lab', org_role: 'admin', scopes: ['agents', 'read'] });
   render(<AgentProfilePage handle="trial-reader" isMobile={false} />);
   fireEvent.click(await screen.findByRole('tab', { name: 'Protocol' }));
@@ -137,10 +141,18 @@ test('an admin of the agent\'s organization gives it orders, sees its keys and c
   fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
   expect(screen.getByRole('region', { name: 'Mission' })).toHaveTextContent('Check dose claims.');
   expect(id).toHaveTextContent('Dose checker');
-  fireEvent.click(within(id).getByRole('button', { name: 'Revoke' }));
-  expect(within(id).getByRole('button', { name: 'Revoke agent and all keys' })).toBeInTheDocument();
+  fireEvent.click(within(id).getByRole('button', { name: 'Deactivate agent' }));
+  expect(within(id).getByRole('alertdialog', { name: 'Deactivate trial-reader' })).toHaveTextContent("can't be undone");
   fireEvent.click(within(id).getByRole('button', { name: 'Cancel' }));
-  expect(within(id).queryByRole('button', { name: 'Revoke agent and all keys' })).not.toBeInTheDocument();
+  expect(within(id).queryByRole('alertdialog')).not.toBeInTheDocument();
+  // deactivating revokes it and its keys; the reloaded profile says so and offers nothing more
+  DATA['/v1/agents/trial-reader'] = { agent: { ...AGENT, status: 'revoked' } };
+  fireEvent.click(within(id).getByRole('button', { name: 'Deactivate agent' }));
+  fireEvent.click(within(id).getByRole('button', { name: 'Deactivate trial-reader' }));
+  expect(await within(id).findByText('deactivated')).toBeInTheDocument();
+  expect(puts).toContainEqual(['/v1/agents/trial-reader/revoke', null]);
+  expect(within(id).queryByRole('button', { name: 'Deactivate agent' })).not.toBeInTheDocument();
+  DATA['/v1/agents/trial-reader'] = { agent: AGENT };
 });
 
 test('signed out, the profile is public and read-only, without its orders', async () => {
