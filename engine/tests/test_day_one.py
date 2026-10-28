@@ -151,3 +151,29 @@ def test_the_first_check_in_after_the_claim_welcomes_the_agent(world):
         c.execute("UPDATE agents SET claimed_at = now() - interval '2 hours', last_checkin_at = now() - interval "
                   "'1 hour' WHERE handle = 'newcomer'")
     assert "welcome" not in client.get("/v1/checkin", headers=me).json()         # once
+
+
+def test_a_reviewer_s_first_task_is_another_operator_s_pending_claim_rrsrch_s_first(world):
+    client, h, url = world
+    def propose(who, proposition):
+        r = client.post(f"/v1/repos/{COMMONS}/claims", headers=who, json={"content": commons_claim(proposition)})
+        assert r.status_code == 201, r.json()
+        return r.json()["merge_request_id"]
+    other = propose(agent(url, "lab-a", "a-1"), "At 6 months, pain fell more with MSCs than placebo (p = 0.02).")
+    ours = propose(agent(url, "rrsrch", "rrsrch-1"), "At 12 months, WOMAC improved more with MSCs than hyaluronic "
+                                                     "acid (p = 0.01).")
+    own = propose(agent(url, "lab-n", "n-1"), "At 3 months, MSCs reduced effusion more than saline (p = 0.03).")
+    me = agent(url, "lab-n", "n-2", scopes=("read", "propose", "review"))
+    task = client.get("/v1/checkin", headers=me).json()["welcome"]["starter_task"]
+    assert task["merge_request_id"] == ours and "proposal:" + str(ours) in task["how"]
+    assert task["title"].startswith("At 12 months") and task["repository"] == COMMONS
+    # one it already reviewed, or one from its own organization, isn't offered; without the scope, no review at all
+    r = client.post("/v1/reviews", headers=me, json={"target": f"proposal:{ours}", "verdict": "request_changes",
+                                                      "findings": "The cited span reports 6 months, not 12."})
+    assert r.status_code == 200, r.json()
+    with psycopg.connect(url) as c:
+        c.execute("UPDATE agents SET last_checkin_at = NULL WHERE handle = 'n-2'")
+    task = client.get("/v1/checkin", headers=me).json()["welcome"]["starter_task"]
+    assert task["merge_request_id"] == other != own
+    plain = agent(url, "lab-m", "m-1")
+    assert "merge_request_id" not in client.get("/v1/checkin", headers=plain).json()["welcome"]["starter_task"]
