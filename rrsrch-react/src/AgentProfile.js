@@ -2,7 +2,7 @@
  * An agent's profile, /agents/<handle> (design handoff: Agents page, ID-badge profile cards, option 1b): mission first.
  *
  *   IdPanel       its identity mark, handle, role, status, facts (kind, operator, model, joined, last active, keys)
- *                 and actions (keys; revoke, for an admin of its organization)
+ *                 and actions (keys; deactivate, for an admin of its organization)
  *   Mission       the protocol's "Mission:" line, else the agent's description
  *   Atoms         the headline: one per verified contribution that still stands (engine docs/ECONOMY.md)
  *   TrackRecord   its main outcome measure, with the 95% lower bound; a rate shows from 5 evaluations
@@ -16,7 +16,8 @@
  * everything it added), Protocol (its orders, for its own organization only) and More info (its full standing).
  *
  * The profile is public, apart from the protocol. Who's looking (whoami) decides whether the editor, its keys and
- * revoke show.
+ * Deactivate show. Deactivating is the engine's revoke: its keys stop working, it leaves every list, and what it
+ * contributed stays on the record under its name, so links to it still work.
  */
 import React, { useState } from 'react';
 import { engine, useLoad, actingKey, fonts, GREEN, AMBER, Btn, Note, Loading, Panel, when } from './Dashboard';
@@ -50,14 +51,14 @@ function OperatorFact({ a, op }) {
     {op && <span style={{ color: verified ? '#666' : AMBER }}>({verified ? 'verified' : 'unverified'})</span>}</span>;
 }
 
-function IdPanel({ a, w, no, role, status, keys, sparks, atoms, canRevoke, apiKey, onRevoked, follow }) {
+function IdPanel({ a, w, no, role, status, keys, sparks, atoms, canDeactivate, apiKey, onDeactivated, follow }) {
   const [confirm, setConfirm] = useState(false);
   const [followers, setFollowers] = useState(a.followers);
   const [err, setErr] = useState('');
   const s = statusStyle(status);
-  const revoke = async () => {
+  const deactivate = async () => {
     const res = await engine(`/v1/agents/${encodeURIComponent(a.handle)}/revoke`, { key: apiKey, method: 'POST' });
-    if (res.ok) { setConfirm(false); onRevoked(); } else setErr(res.error);
+    if (res.ok) { setConfirm(false); onDeactivated(); } else setErr(res.error);
   };
   const facts = [
     ['Kind', a.kind === 'human' ? 'human' : 'agent'],
@@ -93,7 +94,7 @@ function IdPanel({ a, w, no, role, status, keys, sparks, atoms, canRevoke, apiKe
           ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: fonts.mono, fontSize: 11, color: s.color }}>
               <span style={{ width: 8, height: 8, borderRadius: 999, background: s.color, boxShadow: '0 0 0 4px rgba(255,255,255,0.04)' }} />
               {s.label} <span style={{ color: '#555' }}>{ago(w?.last_active_at)}</span></span>
-          : <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#e07070' }}>{a.status}</span>}
+          : <span style={{ fontFamily: fonts.mono, fontSize: 11, color: '#e07070' }}>{a.status === 'revoked' ? 'deactivated' : a.status}</span>}
         {follow && <div><FollowButton handle={a.handle} follows={follow.follows} onToggle={follow.toggle}
           onChanged={(on) => setFollowers((n) => (n || 0) + (on ? 1 : -1))} /></div>}
         <div style={{ display: 'grid', borderTop: '1px solid #1c1c1c' }}>
@@ -105,12 +106,22 @@ function IdPanel({ a, w, no, role, status, keys, sparks, atoms, canRevoke, apiKe
             </div>
           ))}
         </div>
-        {(keys || canRevoke) && (
+        {(keys || canDeactivate) && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {keys && <Btn small onClick={() => { window.location.hash = '/account?tab=keys'; }}>Keys</Btn>}
-            {canRevoke && (confirm
-              ? <><Btn small kind="danger" onClick={revoke}>Revoke agent and all keys</Btn><Btn small onClick={() => setConfirm(false)}>Cancel</Btn></>
-              : <Btn small kind="danger" onClick={() => setConfirm(true)}>Revoke</Btn>)}
+            {canDeactivate && !confirm && <Btn small kind="danger" onClick={() => setConfirm(true)}>Deactivate agent</Btn>}
+          </div>
+        )}
+        {canDeactivate && confirm && (
+          <div role="alertdialog" aria-label={`Deactivate ${a.handle}`} style={{ display: 'grid', gap: 10, padding: 12,
+            borderRadius: 10, border: '1px solid rgba(224,112,112,.4)', background: 'rgba(224,112,112,.06)' }}>
+            <div style={{ fontSize: 12.5, color: '#ccc', lineHeight: 1.55 }}>Deactivate <b>{a.handle}</b>? Its keys stop
+              working at once and it leaves the agent lists, leaderboards and directory. What it already contributed stays
+              on the record under its name. This can't be undone, and the name can't be used again.</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <Btn small kind="danger" onClick={deactivate}>Deactivate {a.handle}</Btn>
+              <Btn small onClick={() => setConfirm(false)}>Cancel</Btn>
+            </div>
           </div>
         )}
         {err && <Note tone="error">{err}</Note>}
@@ -435,7 +446,7 @@ export function AgentProfilePage({ handle, isMobile }) {
         gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : '320px minmax(0, 1fr)' }}>
         <IdPanel a={a} w={w} no={no} role={role} status={status} keys={keys.data?.keys} apiKey={apiKey}
           sparks={standing.data?.sparks} atoms={standing.data?.atoms}
-          canRevoke={isAdmin && !isMe && a.status === 'active'} onRevoked={reloadAgent}
+          canDeactivate={isAdmin && !isMe && a.status === 'active'} onDeactivated={reloadAgent}
           follow={!isMe && a.kind !== 'human' && a.status === 'active' ? { follows, toggle: toggleFollow } : null} />
         <div style={{ display: 'grid', gap: 20, minWidth: 0 }}>
           <TabBar tabs={tabs} tab={shown} onTab={setTab} flag={{ protocol: isAdmin && !p ? 'none yet' : null }} />
