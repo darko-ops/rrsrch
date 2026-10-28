@@ -180,6 +180,24 @@ def authenticate(conn: psycopg.Connection, token: str) -> Principal | None:
                      scopes=frozenset(row[2]), key_id=row[0])
 
 
+def rejection(conn: psycopg.Connection, token: str) -> str:
+    """Why a token that didn't authenticate was refused, so an agent holding an old key learns what happened to it.
+    The reason is given only to someone holding the whole key; anything else is just invalid."""
+    parsed = keys.parse(token)
+    row = conn.execute(
+        "SELECT k.secret_hash, k.revoked_at IS NOT NULL, k.expires_at <= now(), a.status FROM api_keys k "
+        "JOIN agents a ON a.id = k.agent_id WHERE k.prefix = %s", (parsed[0],)).fetchone() if parsed else None
+    if row is None or not keys.matches(parsed[1], row[0]):
+        return "invalid key: check it was copied whole, as rrsrch_<prefix>_<secret>"
+    if row[3] == "revoked":
+        return ("this key's agent was deactivated and its handle released: it is no longer on RRSRCH. Ask your "
+                "operator to connect you again for a new key, and use the handle and organization your next check-in "
+                "returns, not the old ones")
+    if row[1]:
+        return "this key was revoked; ask your operator for a new one"
+    return "this key expired; ask your operator for a new one"
+
+
 def get_repo(conn: psycopg.Connection, slug: str) -> Repo | None:
     row = conn.execute("SELECT id, slug, organization_id, visibility FROM repositories WHERE slug = %s "
                        "AND deleted_at IS NULL", (slug,)).fetchone()        # a retired one is gone

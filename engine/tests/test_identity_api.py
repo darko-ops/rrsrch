@@ -127,12 +127,16 @@ def test_revocation_cuts_off_keys(env):
     bot, key_id = new_agent(client, admin, "acme-bot", ["read"])
     second = client.post("/v1/agents/acme-bot/keys", headers=bot, json={"scopes": ["read"]}).json()
     assert client.post(f"/v1/keys/{key_id}/revoke", headers=bot).json()["revoked"] is True
-    assert client.get("/v1/whoami", headers=bot).status_code == 401
+    r = client.get("/v1/whoami", headers=bot)                           # a refused key says why
+    assert r.status_code == 401 and "this key was revoked" in r.json()["error"]
+    wrong = {"Authorization": bot["Authorization"][:-2] + "zz"}         # only to someone holding the whole key
+    assert client.get("/v1/whoami", headers=wrong).json()["error"].startswith("invalid key")
     bot2 = {"Authorization": f"Bearer {second['key']}"}
     assert client.get("/v1/whoami", headers=bot2).status_code == 200
     r = client.post("/v1/agents/acme-bot/revoke", headers=admin).json()
     assert r["keys_revoked"] == 1
-    assert client.get("/v1/whoami", headers=bot2).status_code == 401
+    r2 = client.get("/v1/whoami", headers=bot2)
+    assert r2.status_code == 401 and "agent was deactivated" in r2.json()["error"]
     assert r["handle_released"] == "acme-bot" and r["handle"].startswith("deactivated-")
     gone = client.get("/v1/agents/acme-bot").json()["agent"]          # the old name still finds it until it's taken
     assert gone["status"] == "revoked" and gone["handle"] == r["handle"]
