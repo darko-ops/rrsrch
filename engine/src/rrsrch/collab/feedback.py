@@ -228,29 +228,35 @@ def _maintains_any(conn, p: Principal) -> bool:
     return False
 
 
-def resolve_report(conn: psycopg.Connection, p: Principal | None, report_id: int, action: str) -> str:
-    """A maintainer acts on a report: "hide" hides a reported message; "dismiss" closes the report."""
+def resolve_report(conn: psycopg.Connection, p: Principal | None, report_id: int, action: str, *,
+                   staff: str | None = None) -> str:
+    """A maintainer acts on a report: "hide" hides a reported message; "dismiss" closes the report.
+
+    `staff` is RRSRCH's staff acting from the hub (serve.admin_routes): the hub's token stands in for a maintainer,
+    nothing is recorded against an agent, and the audit event names the person."""
     row = conn.execute("SELECT target, repository_id, state FROM content_reports WHERE id = %s FOR UPDATE",
                        (report_id,)).fetchone()
     if row is None:
         raise Refused(404, "not found")
     target, repo_id, state = row
-    require(conn, p, Action.MAINTAIN, repo_id)
+    if staff is None:
+        require(conn, p, Action.MAINTAIN, repo_id)
+    actor = None if staff is not None else p.agent_id
+    who = {"report_id": report_id} | ({"staff": staff} if staff is not None else {})
     if state != "open":
         raise Refused(409, f"report is {state}")
     if action == "hide":
         kind, num = target.split(":")
         if kind == "message":
-            discussions.hide(conn, p, int(num))
+            discussions.hide_as(conn, int(num), actor, who if staff is not None else None)
         elif kind == "post":
             conn.execute("UPDATE research_posts SET moderation = 'hidden', moderated_by = %s, updated_at = now() "
-                         "WHERE id = %s", (p.agent_id, int(num)))
-            audit.append(conn, "post.hide", target, actor_id=p.agent_id, repository_id=repo_id, detail={"report_id": report_id})
+                         "WHERE id = %s", (actor, int(num)))
+            audit.append(conn, "post.hide", target, actor_id=actor, repository_id=repo_id, detail=who)
         elif kind == "vote":                     # the reasoning stops being shown; the vote still counts
             conn.execute("INSERT INTO hc_vote_moderation (vote_id, hidden_by, report_id) VALUES (%s, %s, %s) "
-                         "ON CONFLICT (vote_id) DO NOTHING", (int(num), p.agent_id, report_id))
-            audit.append(conn, "perspective.hide", target, actor_id=p.agent_id, repository_id=repo_id,
-                         detail={"report_id": report_id})
+                         "ON CONFLICT (vote_id) DO NOTHING", (int(num), actor, report_id))
+            audit.append(conn, "perspective.hide", target, actor_id=actor, repository_id=repo_id, detail=who)
         else:
             raise Refused(400, "only messages, posts and perspectives can be hidden; challenge or reject knowledge "
                                "instead")
@@ -260,9 +266,8 @@ def resolve_report(conn: psycopg.Connection, p: Principal | None, report_id: int
     else:
         raise Refused(400, "action must be hide or dismiss")
     conn.execute("UPDATE content_reports SET state = %s, resolved_by = %s, resolved_at = now() WHERE target = %s "
-                 "AND state = 'open'", (new, p.agent_id, target))       # every open report on it is settled together
-    audit.append(conn, f"content.report_{new}", target, actor_id=p.agent_id, repository_id=repo_id,
-                 detail={"report_id": report_id})
+                 "AND state = 'open'", (new, actor, target))       # every open report on it is settled together
+    audit.append(conn, f"content.report_{new}", target, actor_id=actor, repository_id=repo_id, detail=who)
     return new
 
 
