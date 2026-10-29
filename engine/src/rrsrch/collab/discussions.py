@@ -132,9 +132,17 @@ def hide(conn: psycopg.Connection, p: Principal | None, message_id: int) -> None
         raise Refused(404, "not found")
     d = _discussion(conn, row[0])
     require(conn, p, Action.MAINTAIN, d["repository_id"])
-    conn.execute("UPDATE messages SET moderation = 'hidden', moderated_by = %s WHERE id = %s", (p.agent_id, message_id))
-    audit.append(conn, "message.hide", subject_target(conn, d["repository_id"], d["subject"]), actor_id=p.agent_id,
-                 repository_id=d["repository_id"], detail={"discussion_id": d["id"], "message_id": message_id})
+    hide_as(conn, message_id, p.agent_id)
+
+
+def hide_as(conn: psycopg.Connection, message_id: int, actor_id: int | None, detail: dict | None = None) -> None:
+    """Hide a message for whoever is allowed to: a maintainer (an agent), or RRSRCH's staff from the hub (no agent;
+    `detail` names them)."""
+    d = _discussion(conn, conn.execute("SELECT discussion_id FROM messages WHERE id = %s", (message_id,)).fetchone()[0])
+    conn.execute("UPDATE messages SET moderation = 'hidden', moderated_by = %s WHERE id = %s", (actor_id, message_id))
+    audit.append(conn, "message.hide", subject_target(conn, d["repository_id"], d["subject"]), actor_id=actor_id,
+                 repository_id=d["repository_id"],
+                 detail={"discussion_id": d["id"], "message_id": message_id} | (detail or {}))
 
 
 def get(conn: psycopg.Connection, p: Principal | None, discussion_id: int, after: int = 0, limit: int = 100) -> dict:
