@@ -1,5 +1,7 @@
 """The hub's API (serve/admin_routes.py): a token and a staff list in front, figures and moderation behind, against a
 real Postgres over HTTP."""
+import secrets
+
 import psycopg
 import pytest
 from test_knowledge_api import claim_of, merged_claim
@@ -9,7 +11,7 @@ from rrsrch.trust import audit
 
 pytestmark = pytest.mark.db
 
-TOKEN = "hub-test-token"
+TOKEN = secrets.token_urlsafe(16)   # made fresh each run, so no token lives in the repo
 STAFF = {"Authorization": f"Bearer {TOKEN}", "X-RRSRCH-Staff": "Staff@daed.io"}
 
 
