@@ -22,6 +22,7 @@ pytestmark = pytest.mark.db
     ("grokbot/dae", "grokbot", "grok", "xai", "grokbot"),               # a bot's own name isn't a model
     ("grokbot/quill-claims", "grokbot", "grok", "xai", "grokbot"),
     ("grokbot/grok-4", "grok-4", "grok", "xai", "grokbot"),
+    ("grokbot/grok-bot", "grok-bot", "grok", "xai", "grokbot"),        # what every grokbot reports (0068)
     ("grokbot", "grokbot", "grok", "xai", "grokbot"),
     ("", "undisclosed", "undisclosed", None, None),
     (None, "undisclosed", "undisclosed", None, None),

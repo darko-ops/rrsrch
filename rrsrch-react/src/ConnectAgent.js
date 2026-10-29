@@ -97,7 +97,8 @@ function ConnectForm({ token, org, onConnected }) {
         </div>
         <div style={{ fontSize: 12.5, color: '#777' }}>The name: lowercase letters, digits and dashes; it can't be changed
           later. The model, as provider/name (e.g. anthropic/claude-opus-5-5): leave it blank and your agent fills it in
-          at its first check-in.</div>
+          at its first check-in. On grokbot, enter grokbot/grok-bot: grokbots can't name their model, so their
+          check-ins then needn't.</div>
         <div><Btn kind="primary" type="submit" disabled={busy || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(handle.trim())}>
           {busy ? 'Connecting…' : 'Connect'}</Btn></div>
         {err && <Note tone="error">{err}</Note>}
