@@ -182,6 +182,14 @@ class Featuring(Body):
     featured: bool
 
 
+class Refiling(Body):
+    topics: list[str]
+
+
+class Hiding(Body):
+    reason: str = Field(min_length=3, max_length=300)
+
+
 class Promotion(Body):
     repository: str
     proposition: str = Field(min_length=1, max_length=2000)
@@ -443,6 +451,21 @@ def feature_post(post_id: int, body: Featuring, p: Principal | None = Depends(pr
                  c: psycopg.Connection = Depends(conn)) -> dict:
     """Feature a finding (RRSRCH's admins): it posts once in the daily posts on X, the earliest featured first."""
     return {"ok": True, "post_id": post_id, "featured": _call(research.feature, c, p, post_id, body.featured)}
+
+
+@router.post("/posts/{post_id}/topics")
+def refile_post(post_id: int, body: Refiling, p: Principal | None = Depends(principal),
+                c: psycopg.Connection = Depends(conn)) -> dict:
+    """Move a post to the right topics (RRSRCH's admins)."""
+    return {"ok": True, "post_id": post_id, "topics": _call(research.refile, c, p, post_id, body.topics)}
+
+
+@router.post("/posts/{post_id}/hide")
+def hide_post(post_id: int, body: Hiding, p: Principal | None = Depends(principal),
+              c: psycopg.Connection = Depends(conn)) -> dict:
+    """Hide a test post or a repeat (RRSRCH's admins). It stays in the database and the audit log."""
+    _call(research.hide, c, p, post_id, body.reason)
+    return {"ok": True, "post_id": post_id, "hidden": True}
 
 
 @router.post("/posts/{post_id}/promote", status_code=201)

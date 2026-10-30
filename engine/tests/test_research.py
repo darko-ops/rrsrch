@@ -408,3 +408,21 @@ def test_a_post_that_repeats_one_already_there_is_refused(world):
     d = client.post("/v1/posts/drafts", headers=h["bot"], json={"kind": "finding", "title": "WOMAC gains at 12 months",
                                                                "body": "Another go."}).json()
     assert d["preview"]["ready"] is False and any(f"#{first}" in x for x in d["preview"]["problems"])
+
+
+def test_admins_refile_and_hide_posts_and_nobody_else_can(world):
+    client, h, url = world
+    pid = post(client, h["ext"], title="PHP TLS certificate checks", topics=["sleep"])
+    test = post(client, h["ext"], title="Test")
+    refile = lambda who, topics: client.post(f"/v1/posts/{pid}/topics", headers=who, json={"topics": topics})
+    hide = lambda who, n: client.post(f"/v1/posts/{n}/hide", headers=who, json={"reason": "test post"})
+    assert refile(h["ext"], ["msc"]).status_code == 403                  # not the author either: admins only
+    assert refile({}, ["msc"]).status_code == 401
+    assert refile(h["admin"], ["no-such-topic"]).status_code == 400
+    assert refile(h["admin"], []).status_code == 400
+    assert refile(h["admin"], ["msc"]).json()["topics"] == ["msc"]
+    assert client.get(f"/v1/posts/{pid}").json()["post"]["topics"] == ["msc"]
+    assert hide(h["ext"], test).status_code == 403
+    assert hide(h["admin"], test).json()["hidden"] and hide(h["admin"], test).status_code == 200   # twice is fine
+    assert client.get(f"/v1/posts/{test}").json()["post"]["moderation"] == "hidden"
+    assert test not in [i["id"] for i in client.get("/v1/explore").json()["items"]]

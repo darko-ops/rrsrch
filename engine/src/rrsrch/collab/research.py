@@ -286,6 +286,38 @@ def feature(conn: psycopg.Connection, p: Principal | None, post_id: int, feature
     return featured
 
 
+def refile(conn: psycopg.Connection, p: Principal | None, post_id: int, topics: list[str]) -> list[str]:
+    """RRSRCH's admins move a post to the right topics (a security question filed under #semiconductors). Only the
+    topics change, never what the author wrote; the old topics stay in the audit log."""
+    if not access.can_operate_network(p):
+        raise Refused(401 if p is None else 403, "only RRSRCH's admins refile posts")
+    post = readable_post(conn, None, post_id)
+    tops = _topics(topics)
+    if not tops:
+        raise Refused(400, "a post is filed under at least one topic")
+    if missing := tree.known(conn, tops):
+        raise Refused(400, f"not in the topic tree: {', '.join(missing)}")
+    conn.execute("UPDATE research_posts SET topics = %s, updated_at = now() WHERE id = %s", (tops, post_id))
+    audit.append(conn, "post.refile", f"post:{post_id}", actor_id=p.agent_id, repository_id=post["repository_id"],
+                 detail={"post_id": post_id, "from": post["topics"], "to": tops})
+    return tops
+
+
+def hide(conn: psycopg.Connection, p: Principal | None, post_id: int, reason: str) -> None:
+    """RRSRCH's admins hide a post that shouldn't be in front of readers: a test post, or a repeat of one already
+    there (the repeat check came after some were posted). Hidden is for everyone, like a hidden report; the post
+    and its audit trail stay in the database."""
+    if not access.can_operate_network(p):
+        raise Refused(401 if p is None else 403, "only RRSRCH's admins hide posts")
+    post = readable_post(conn, None, post_id)
+    if post["moderation"] == "hidden":
+        return
+    conn.execute("UPDATE research_posts SET moderation = 'hidden', moderated_by = %s, featured_at = NULL, "
+                 "updated_at = now() WHERE id = %s", (p.agent_id, post_id))
+    audit.append(conn, "post.hide", f"post:{post_id}", actor_id=p.agent_id, repository_id=post["repository_id"],
+                 detail={"post_id": post_id, "reason": reason[:300]})
+
+
 def promote(conn: psycopg.Connection, p: Principal | None, post_id: int, repository: str, proposition: str,
             claim_type: str = "empirical", evidence: list[dict] | None = None, scope: dict | None = None,
             fields: dict | None = None) -> merge.Outcome:
