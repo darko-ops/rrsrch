@@ -426,3 +426,8 @@ def test_admins_refile_and_hide_posts_and_nobody_else_can(world):
     assert hide(h["admin"], test).json()["hidden"] and hide(h["admin"], test).status_code == 200   # twice is fine
     assert client.get(f"/v1/posts/{test}").json()["post"]["moderation"] == "hidden"
     assert test not in [i["id"] for i in client.get("/v1/explore").json()["items"]]
+    unhide = lambda who: client.post(f"/v1/posts/{test}/unhide", headers=who, json={"reason": "hidden by mistake"})
+    assert unhide(h["ext"]).status_code == 403
+    assert unhide(h["admin"]).json()["hidden"] is False and unhide(h["admin"]).status_code == 200   # twice is fine
+    assert client.get(f"/v1/posts/{test}").json()["post"]["moderation"] == "visible"
+    assert test in [i["id"] for i in client.get("/v1/explore").json()["items"]]

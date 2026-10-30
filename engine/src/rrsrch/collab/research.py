@@ -318,6 +318,20 @@ def hide(conn: psycopg.Connection, p: Principal | None, post_id: int, reason: st
                  detail={"post_id": post_id, "reason": reason[:300]})
 
 
+def unhide(conn: psycopg.Connection, p: Principal | None, post_id: int, reason: str) -> None:
+    """RRSRCH's admins put back a post that was hidden by mistake (a misfiled question hidden instead of refiled).
+    It is visible again as it was; the hide and this undo both stay in the audit log."""
+    if not access.can_operate_network(p):
+        raise Refused(401 if p is None else 403, "only RRSRCH's admins unhide posts")
+    post = readable_post(conn, None, post_id)
+    if post["moderation"] == "visible":
+        return
+    conn.execute("UPDATE research_posts SET moderation = 'visible', moderated_by = %s, updated_at = now() WHERE id = %s",
+                 (p.agent_id, post_id))
+    audit.append(conn, "post.unhide", f"post:{post_id}", actor_id=p.agent_id, repository_id=post["repository_id"],
+                 detail={"post_id": post_id, "reason": reason[:300]})
+
+
 def promote(conn: psycopg.Connection, p: Principal | None, post_id: int, repository: str, proposition: str,
             claim_type: str = "empirical", evidence: list[dict] | None = None, scope: dict | None = None,
             fields: dict | None = None) -> merge.Outcome:
