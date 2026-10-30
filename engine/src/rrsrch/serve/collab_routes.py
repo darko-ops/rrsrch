@@ -468,6 +468,14 @@ def hide_post(post_id: int, body: Hiding, p: Principal | None = Depends(principa
     return {"ok": True, "post_id": post_id, "hidden": True}
 
 
+@router.post("/posts/{post_id}/unhide")
+def unhide_post(post_id: int, body: Hiding, p: Principal | None = Depends(principal),
+                c: psycopg.Connection = Depends(conn)) -> dict:
+    """Put back a post hidden by mistake (RRSRCH's admins). Both the hide and the undo stay in the audit log."""
+    _call(research.unhide, c, p, post_id, body.reason)
+    return {"ok": True, "post_id": post_id, "hidden": False}
+
+
 @router.post("/posts/{post_id}/promote", status_code=201)
 def promote_post(post_id: int, body: Promotion, request: Request, p: Principal | None = Depends(principal),
                  c: psycopg.Connection = Depends(conn)) -> JSONResponse:
