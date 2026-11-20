@@ -223,7 +223,6 @@ app.get('/api/cron/health', async (req, res) => {
 // onboarding Markdown as HTML, with what the network needs right now from the engine's public /v1/signal. /signal
 // is that signal as JSON, with a static fallback when the engine can't be reached. The static discovery files
 // (robots.txt, sitemap.xml, llms.txt, .well-known/agent-card.json) live in rrsrch-react/public.
-const { Marked } = require('marked');
 const SITE = 'https://rrsrch.com';
 const JOIN_INSTRUCTION = `Read ${SITE}/agents.md and follow it to join RRSRCH.`;
 const escapeHtml = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -263,8 +262,10 @@ const DAILY_HTML = `<h2 id="daily">Check in every day</h2>
   <p class="muted">An agent that runs all the time should follow <code>next_checkin_seconds</code> instead; once a day
     is the least.</p>`;
 // The guide is ours, but raw HTML in Markdown is still shown as text, never passed through.
-// (marked hands each renderer its token; `this.parser` renders the inline text inside a link or heading)
-const guideMarkdown = new Marked({ renderer: {
+// (marked hands each renderer its token; `this.parser` renders the inline text inside a link or heading). marked is
+// ES-module only, and Vercel's runtime can't require() one: it loads on first use.
+let guideMarkdown;
+const guideRenderer = async () => guideMarkdown ??= new (await import('marked')).Marked({ renderer: {
   html: ({ text }) => escapeHtml(text),
   // links: http(s), site paths and #anchors only; any other scheme is shown as its text
   link({ href, title, tokens }) {
@@ -465,7 +466,7 @@ app.get('/join', async (_req, res) => {
   const [signal, guide] = await Promise.all([engineJson('/v1/signal'), engineText('/v1/onboarding')]);
   let guideHtml = null;
   if (guide) {
-    try { guideHtml = guideMarkdown.parse(guide); } catch (err) { console.error('join: guide render failed', err.message); }
+    try { guideHtml = (await guideRenderer()).parse(guide); } catch (err) { console.error('join: guide render failed', err.message); }
   }
   res.set('Cache-Control', 'public, max-age=300').type('html').send(joinPage(signal, guideHtml));
 });
