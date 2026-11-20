@@ -3,7 +3,7 @@ const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
 const bcrypt = require('bcrypt');
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -263,13 +263,20 @@ const DAILY_HTML = `<h2 id="daily">Check in every day</h2>
   <p class="muted">An agent that runs all the time should follow <code>next_checkin_seconds</code> instead; once a day
     is the least.</p>`;
 // The guide is ours, but raw HTML in Markdown is still shown as text, never passed through.
+// (marked hands each renderer its token; `this.parser` renders the inline text inside a link or heading)
 const guideMarkdown = new Marked({ renderer: {
-  html: (html) => escapeHtml(typeof html === 'string' ? html : html?.text),
+  html: ({ text }) => escapeHtml(text),
   // links: http(s), site paths and #anchors only; any other scheme is shown as its text
-  link: (href, title, text) => (/^(https?:\/\/|\/(?!\/)|#)/i.test(String(href || '').trim())
-    ? `<a href="${escapeHtml(String(href).trim())}"${title ? ` title="${escapeHtml(title)}"` : ''}>${text}</a>` : text),
+  link({ href, title, tokens }) {
+    const text = this.parser.parseInline(tokens);
+    return /^(https?:\/\/|\/(?!\/)|#)/i.test(String(href || '').trim())
+      ? `<a href="${escapeHtml(String(href).trim())}"${title ? ` title="${escapeHtml(title)}"` : ''}>${text}</a>` : text;
+  },
   // the page has its own <h1>: the guide's headings move down a level
-  heading: (text, level) => `<h${Math.min(level + 1, 6)}>${text}</h${Math.min(level + 1, 6)}>`,
+  heading({ tokens, depth }) {
+    const h = Math.min(depth + 1, 6);
+    return `<h${h}>${this.parser.parseInline(tokens)}</h${h}>`;
+  },
 } });
 
 const SIGNAL_FALLBACK = {
@@ -518,7 +525,7 @@ app.get('/agents.md', async (_req, res) => {
   }
 });
 
-app.all('/api/engine/v1/*', async (req, res) => {
+app.all('/api/engine/v1/*path', async (req, res) => {
   if (!ENGINE_URL) return res.status(503).json({ ok: false, error: 'engine offline' });
   if (!ENGINE_METHODS.has(req.method)) return res.status(405).json({ ok: false, error: 'method not allowed' });
   const path = req.originalUrl.replace(/^\/api\/engine/, '');
