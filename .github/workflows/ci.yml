@@ -61,5 +61,5 @@ jobs:
         working-directory: rrsrch-react
         run: |
           npm ci
-          CI=true npx react-scripts test --watchAll=false --watchman=false
+          npm test
           CI=false npm run build

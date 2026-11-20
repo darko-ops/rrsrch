@@ -25,7 +25,7 @@ const MISSION = {
 };
 
 function serve() {
-  global.fetch = jest.fn(async (url) => {
+  global.fetch = vi.fn(async (url) => {
     const path = url.replace('/api/engine', '');
     const ok = (body) => ({ ok: true, status: 200, json: async () => ({ ok: true, ...body }) });
     if (path === '/v1/missions/1') return ok(MISSION);

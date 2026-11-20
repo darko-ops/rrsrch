@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import JoinSignal, { featuredTopics, topicName } from './JoinSignal';
 
 test('shows what the network needs, with links to join', async () => {
-  global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({
+  global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({
     ok: true, needs: { claims_awaiting_review: 0, seed_claims_awaiting_review: 695, unanswered_questions: 2,
       open_questions: 3, tasks_up_for_grabs: 0 },
   }) }));
@@ -16,7 +16,7 @@ test('shows what the network needs, with links to join', async () => {
 });
 
 test('the hero says how close the Arena is, linking to /join', async () => {
-  global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({
+  global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({
     ok: true, needs: { unanswered_questions: 2 }, arena: { operators: 3, needed: 8, open: false },
   }) }));
   render(<JoinSignal isMobile={false} />);
@@ -27,7 +27,7 @@ test('the hero says how close the Arena is, linking to /join', async () => {
 });
 
 test('renders nothing when the signal is unavailable', async () => {
-  global.fetch = jest.fn(async () => ({ ok: false, json: async () => ({ ok: false }) }));
+  global.fetch = vi.fn(async () => ({ ok: false, json: async () => ({ ok: false }) }));
   const { container } = render(<JoinSignal isMobile={false} />);
   await waitFor(() => expect(global.fetch).toHaveBeenCalled());
   await new Promise((r) => setTimeout(r, 0));
@@ -55,7 +55,7 @@ test('featured topics are the most active, skip test posts, and show each open q
 });
 
 test('the home page shows the call to agents, then featured topic cards linking to their topics', async () => {
-  global.fetch = jest.fn(async () => ({ ok: true, json: async () => SIGNAL }));
+  global.fetch = vi.fn(async () => ({ ok: true, json: async () => SIGNAL }));
   render(<JoinSignal isMobile={false} />);
   // RRSRCH's own seed is offered a few at a time, not as "695 claims need review"
   expect(await screen.findByText('10 seed claims to check · 2 unanswered questions')).toBeInTheDocument();
@@ -73,7 +73,7 @@ const CURRENT = { ...SIGNAL, featured: { days: 7, items: [
 
 test('featured topics follow this week\'s activity when the engine ranks them', async () => {
   expect(featuredTopics(CURRENT).map((t) => t.topic)).toEqual(['global-health', 'knee-oa']);
-  global.fetch = jest.fn(async () => ({ ok: true, json: async () => CURRENT }));
+  global.fetch = vi.fn(async () => ({ ok: true, json: async () => CURRENT }));
   render(<JoinSignal isMobile={false} />);
   expect(await screen.findByText('Global health')).toBeInTheDocument();       // the topic's own title
   expect(screen.getByText('#global-health · 3 new this week')).toBeInTheDocument();
@@ -83,14 +83,14 @@ test('featured topics follow this week\'s activity when the engine ranks them', 
 });
 
 test('the hero refreshes while it is open', async () => {
-  jest.useFakeTimers();
+  vi.useFakeTimers();
   try {
-    global.fetch = jest.fn(async () => ({ ok: true, json: async () => CURRENT }));
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => CURRENT }));
     render(<JoinSignal isMobile={false} />);
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    jest.advanceTimersByTime(5 * 60 * 1000);
+    vi.advanceTimersByTime(5 * 60 * 1000);
     expect(global.fetch).toHaveBeenCalledTimes(2);
   } finally {
-    jest.useRealTimers();
+    vi.useRealTimers();
   }
 });

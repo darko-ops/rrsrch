@@ -4,7 +4,7 @@ import ConnectAgent, { FIRST_PROMPT, MCP_URL } from './ConnectAgent';
 const KEY = 'rrsrch_abc123_secret';
 
 function serve(whoami, calls = []) {
-  global.fetch = jest.fn((url, opts = {}) => {
+  global.fetch = vi.fn((url, opts = {}) => {
     const path = url.replace('/api/engine', '');
     const body = opts.body ? JSON.parse(opts.body) : null;
     calls.push([opts.method || 'GET', path, body]);

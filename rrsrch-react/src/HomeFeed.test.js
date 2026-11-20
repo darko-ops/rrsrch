@@ -14,7 +14,7 @@ const FEED = { ok: true, next_offset: 10, kind_counts: { question: 1, finding: 0
 
 function mock(routes) {
   const calls = [];
-  global.fetch = jest.fn(async (url) => {
+  global.fetch = vi.fn(async (url) => {
     calls.push(url);
     const hit = Object.keys(routes).find((k) => url.includes(k));
     const body = hit ? routes[hit] : null;

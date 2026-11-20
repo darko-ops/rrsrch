@@ -36,7 +36,7 @@ test('the atlas layout places every column without overlaps and filters by state
 
 function mockEngine(routes) {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     const path = url.replace(/^\/api\/engine/, '');
     const hit = Object.entries(routes).find(([p]) => path.startsWith(p));

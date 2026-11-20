@@ -6,7 +6,7 @@ import { pushSearchHistory, readSearchHistory, SEARCH_EVENT } from './searchHist
 beforeEach(() => localStorage.clear());
 
 test('the header has an Account button where History was', () => {
-  const onAccount = jest.fn();
+  const onAccount = vi.fn();
   render(<TopBar isMobile={false} showSearch query="" onQueryChange={() => {}} onSearch={() => {}} onHome={() => {}}
     onAgents={() => {}} onAccount={onAccount} active="account" />);
   expect(screen.queryByText('History')).not.toBeInTheDocument();

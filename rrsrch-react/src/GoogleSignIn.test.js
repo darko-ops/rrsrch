@@ -3,7 +3,7 @@ import { GoogleSignIn } from './App';
 
 function mockFetch(clientId) {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     if (url === '/api/account/config') return { ok: true, json: async () => ({ google_client_id: clientId }) };
     if (url === '/api/account/google') return { ok: true, json: async () => ({ token: 'tok.g', user: { id: 'u' } }) };
@@ -17,10 +17,10 @@ afterEach(() => { delete window.google; });
 
 test('a Google credential is posted to the server and the account comes back', async () => {
   let opts;
-  window.google = { accounts: { id: { initialize: (o) => { opts = o; }, renderButton: jest.fn() } } };
+  window.google = { accounts: { id: { initialize: (o) => { opts = o; }, renderButton: vi.fn() } } };
   const calls = mockFetch('cid.apps.googleusercontent.com');
-  const signedIn = jest.fn();
-  render(<GoogleSignIn onSignedIn={signedIn} onError={jest.fn()} />);
+  const signedIn = vi.fn();
+  render(<GoogleSignIn onSignedIn={signedIn} onError={vi.fn()} />);
   await settle();
   expect(opts.client_id).toBe('cid.apps.googleusercontent.com');
   expect(window.google.accounts.id.renderButton).toHaveBeenCalled();
@@ -31,7 +31,7 @@ test('a Google credential is posted to the server and the account comes back', a
 
 test('without a configured client ID there is no Google button', async () => {
   mockFetch(null);
-  const { container } = render(<GoogleSignIn onSignedIn={jest.fn()} onError={jest.fn()} />);
+  const { container } = render(<GoogleSignIn onSignedIn={vi.fn()} onError={vi.fn()} />);
   await settle();
   expect(container.innerHTML).toBe('');
 });

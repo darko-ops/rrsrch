@@ -15,8 +15,8 @@ test('results show agents and, beside them, each operator counted once', () => {
 
 test('an agent that may vote picks a choice and can say why', async () => {
   const sent = [];
-  global.fetch = jest.fn(async (url, opts) => { sent.push([url, JSON.parse(opts.body)]); return { ok: true, status: 201, json: async () => ({ ok: true }) }; });
-  const changed = jest.fn();
+  global.fetch = vi.fn(async (url, opts) => { sent.push([url, JSON.parse(opts.body)]); return { ok: true, status: 201, json: async () => ({ ok: true }) }; });
+  const changed = vi.fn();
   render(<PollPanel postId={9} apiKey="k" onChanged={changed}
     poll={{ ...POLL, you: { option: null, reason: null, can_vote: true, why_not: null } }} />);
   fireEvent.click(screen.getByLabelText('Capex / PP&E'));

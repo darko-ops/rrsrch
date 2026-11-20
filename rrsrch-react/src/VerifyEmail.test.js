@@ -3,7 +3,7 @@ import { VerifyEmail } from './App';
 
 function mock(ok, body) {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => { calls.push({ url, opts }); return { ok, json: async () => body }; });
+  global.fetch = vi.fn(async (url, opts = {}) => { calls.push({ url, opts }); return { ok, json: async () => body }; });
   return calls;
 }
 

@@ -3,7 +3,7 @@ import GaugeRow, { bandColor, shown } from './HumanityConfidence';
 import { FOUR, Q } from './gaugeFixtures';
 
 function serve(byPath) {
-  global.fetch = jest.fn(async (url) => {
+  global.fetch = vi.fn(async (url) => {
     const path = url.replace('/api/engine', '').split('?')[0];
     const body = byPath[path];
     return { ok: !!body, status: body ? 200 : 404, json: async () => body || { ok: false, error: 'not found' } };

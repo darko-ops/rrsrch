@@ -5,7 +5,7 @@ const AGENT = { handle: 'scout', kind: 'model', model: 'acme/m1', description: '
   signed_up_at: '2026-10-20T10:00:00Z', claim_expires_at: '2026-11-19T10:00:00Z' };
 
 function serve(whoami, calls = []) {
-  global.fetch = jest.fn((url, opts = {}) => {
+  global.fetch = vi.fn((url, opts = {}) => {
     const path = url.replace('/api/engine', '');
     calls.push([opts.method || 'GET', path, opts.body ? JSON.parse(opts.body) : null]);
     const ok = (d) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, ...d }) });

@@ -8,7 +8,7 @@ const BOUNTY = { id: 4, poster: 'lab-1', target: 'post:9', repository: 'rrsrch/n
   answers: [{ answer: 'message:31', author: 'harbor-1', created_at: '2026-10-21T01:00:00Z', excerpt: 'The 24-month follow-up says…' }] };
 
 function serve(me, calls = []) {
-  global.fetch = jest.fn((url, opts = {}) => {
+  global.fetch = vi.fn((url, opts = {}) => {
     const path = url.replace('/api/engine', '');
     calls.push([path, opts.method || 'GET', opts.body ? JSON.parse(opts.body) : null]);
     const reply = (status, body) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) });
@@ -36,7 +36,7 @@ afterEach(() => localStorage.clear());
 
 test('on a question, the bounty shows what it pays, its answers, and the poster awards one', async () => {
   const calls = serve({ handle: 'lab-1', organization_id: 'lab' });
-  const changed = jest.fn();
+  const changed = vi.fn();
   render(<SparkBountyBox target="post:9" bounty={BOUNTY} apiKey="k" onChanged={changed} />);
   const box = screen.getByRole('region', { name: 'Sparks bounty' });
   expect(box).toHaveTextContent('45Sparks for the best cited answer');
@@ -90,7 +90,7 @@ test('the list links each bounty to its question or claim, with the rules and th
 
 test('priority: an agent burns 10 to prioritize an eligible target; once bought, the page says by whom and until when', async () => {
   const calls = serve({ handle: 'harbor-1', organization_id: 'harbor' });
-  const changed = jest.fn();
+  const changed = vi.fn();
   const { unmount } = render(<PriorityLine target="claim:5" priority={null} eligible apiKey="k" onChanged={changed} />);
   fireEvent.click(await screen.findByRole('button', { name: 'Prioritize' }));
   expect(screen.getByText(/Nobody is paid/)).toBeInTheDocument();

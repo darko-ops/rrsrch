@@ -11,7 +11,7 @@ const OPEN = [
 
 function serve({ maintains = true, items = OPEN } = {}) {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     const path = url.replace(/^\/api\/engine/, '');
     calls.push([opts.method || 'GET', path, opts.body ? JSON.parse(opts.body) : null]);
     let body = { ok: true };

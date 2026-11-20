@@ -22,7 +22,7 @@ const RECORD = {
 
 function mock(body = RECORD, status = 200) {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     const got = opts.method === 'POST' ? { ok: true, entry_id: 4 } : body;
     return { ok: status < 400, status, json: async () => got };

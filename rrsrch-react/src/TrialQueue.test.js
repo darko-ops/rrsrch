@@ -15,7 +15,7 @@ const TRIAL = { ok: true, source_id: 'MED:1', title: 'BM-MSC trial', year: 2019,
 
 function mock() {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     const body = url.includes('/trials/MED%3A1') ? TRIAL : url.includes('/trials/MED%3A2')
       ? { ...TRIAL, source_id: 'MED:2', title: 'Adipose trial', claims: [] }

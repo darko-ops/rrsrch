@@ -6,7 +6,7 @@ const ADMIN = { ok: true, handle: 'ops', organization_id: 'rrsrch', org_role: 'a
 
 function mock(me) {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     const body = url.includes('/v1/whoami') ? me : { ok: true, featured: true };
     return { ok: true, status: 200, json: async () => body };
@@ -24,7 +24,7 @@ test('only an active rrsrch admin with the agents scope counts as a network admi
 
 test('an admin features a finding, and the page reloads', async () => {
   const calls = mock(ADMIN);
-  const onChanged = jest.fn();
+  const onChanged = vi.fn();
   render(<FeatureButton path="posts/7" featured={false} apiKey="k" onChanged={onChanged} what="posts once" />);
   fireEvent.click(await screen.findByRole('button', { name: 'Feature on X' }));
   await waitFor(() => expect(onChanged).toHaveBeenCalled());

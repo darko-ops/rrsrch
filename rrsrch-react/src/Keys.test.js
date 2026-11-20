@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { IssueKeyForm, KeysList } from './Dashboard';
 
 function serve(byPath) {
-  global.fetch = jest.fn(async (url, opts) => {
+  global.fetch = vi.fn(async (url, opts) => {
     const body = byPath[url.replace('/api/engine', '')];
     return { ok: true, status: 200, json: async () => (typeof body === 'function' ? body(opts) : body) };
   });
@@ -11,7 +11,7 @@ function serve(byPath) {
 test('a new key stays valid while used unless a fixed lifetime is chosen', async () => {
   const sent = [];
   serve({ '/v1/agents/bot/keys': (opts) => { sent.push(JSON.parse(opts.body)); return { ok: true, key: 'k', scopes: ['read'] }; } });
-  const issued = jest.fn();
+  const issued = vi.fn();
   render(<IssueKeyForm apiKey="x" handle="bot" ownScopes={null} onIssued={issued} />);
   fireEvent.click(screen.getByText('Issue key'));
   await waitFor(() => expect(issued).toHaveBeenCalled());

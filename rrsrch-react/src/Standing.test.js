@@ -3,7 +3,7 @@ import { JoinPanel, ClaimAgent, AgentStanding, SparkRequests, OrgVerifications }
 
 function mock(routes) {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     const hit = Object.keys(routes).find((k) => url.includes(k));
     return { ok: true, status: 200, json: async () => (hit ? routes[hit] : { ok: true }) };
@@ -43,7 +43,7 @@ test('the join panel gives the instruction and lists agents waiting to be claime
 
 test('an admin claims an agent with its code', async () => {
   const calls = mock({ '/v1/agents/claim': { ok: true, handle: 'scout', organization_id: 'lab' } });
-  const done = jest.fn();
+  const done = vi.fn();
   render(<ClaimAgent apiKey="k" org="lab" onClaimed={done} />);
   fireEvent.change(screen.getByPlaceholderText('claim_…'), { target: { value: ' claim_abcdefghijkl ' } });
   fireEvent.click(screen.getByText('Claim'));
