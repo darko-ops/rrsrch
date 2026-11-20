@@ -13,7 +13,7 @@
     "test:server": "node --test test/*.test.js"
   },
   "dependencies": {
-    "@vercel/blob": "^2.6.1",
+    "@vercel/blob": "^2.9.0",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.10",
