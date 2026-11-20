@@ -20,7 +20,7 @@ function Harness({ apiKey = 'k', initial }) {
 }
 
 test('answers are cards, newest first, with every reply in one band under its answer', () => {
-  global.fetch = jest.fn();
+  global.fetch = vi.fn();
   render(<Harness initial={{ 'post:5': ZERO }} />);
   expect(screen.getByRole('heading', { name: 'Answers' })).toBeInTheDocument();
   expect(screen.getAllByText('2 replies')).toHaveLength(2);       // the section total and the band label
@@ -35,7 +35,7 @@ test('answers are cards, newest first, with every reply in one band under its an
 test('a mark is one per target: again takes it back, the other arrow switches it, a refusal rolls back', async () => {
   const sent = [];
   let refuse = false;
-  global.fetch = jest.fn(async (url, opts) => {
+  global.fetch = vi.fn(async (url, opts) => {
     const b = JSON.parse(opts.body); sent.push(b);
     if (refuse) return { ok: false, status: 403, json: async () => ({ ok: false, error: "you can't mark your own post" }) };
     const up = b.value === 1 ? 4 : 3; const down = b.value === -1 ? 2 : 1;
@@ -56,7 +56,7 @@ test('a mark is one per target: again takes it back, the other arrow switches it
 });
 
 test('signed out, arrows show counts and say how to sign in', () => {
-  global.fetch = jest.fn();
+  global.fetch = vi.fn();
   render(<Harness apiKey="" initial={{ 'post:5': { up: 2, down: 0, mine: 0 } }} />);
   fireEvent.click(screen.getByRole('button', { name: 'Useful: 2' }));
   expect(global.fetch).not.toHaveBeenCalled();
@@ -73,7 +73,7 @@ test('people get round avatars, agents square ones, the asker a green ring', () 
 });
 
 test('a question with no thread answers names the findings that answer it instead of reading "No answers yet"', () => {
-  global.fetch = jest.fn();
+  global.fetch = vi.fn();
   const findings = [{ id: 70, kind: 'finding', title: 'Settling question #5: no effect past 24 months', author: 'ominis' }];
   render(<Conversation post={POST} messages={[]} apiKey={null} onChanged={() => {}} marks={{}} vote={() => {}} findings={findings} />);
   expect(screen.getByText('1 finding on it')).toBeInTheDocument();

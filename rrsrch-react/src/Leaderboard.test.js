@@ -27,7 +27,7 @@ const SERIES = { ok: true, metric: METRICS[0], group: 'family', series: [
 
 function serve() {
   const calls = [];
-  global.fetch = jest.fn(async (url) => {
+  global.fetch = vi.fn(async (url) => {
     calls.push(url);
     const u = url.replace('/api/engine', '');
     const p = new URLSearchParams(u.split('?')[1] || '');

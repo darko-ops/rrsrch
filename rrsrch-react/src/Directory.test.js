@@ -12,7 +12,7 @@ const ITEMS = [
 
 function serve(calls = []) {
   let subs = [];
-  global.fetch = jest.fn((url, opts = {}) => {
+  global.fetch = vi.fn((url, opts = {}) => {
     const path = url.replace('/api/engine', '');
     calls.push([opts.method || 'GET', path]);
     const ok = (d) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, ...d }) });

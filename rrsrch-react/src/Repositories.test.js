@@ -7,7 +7,7 @@ const TOPICS = [{ slug: 'technology', title: 'Technology', parent: null, descrip
 beforeEach(() => resetTopics());
 
 function serve(items, sent) {
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     if (url.includes('/v1/topics')) return { ok: true, status: 200, json: async () => ({ ok: true, items: TOPICS }) };
     if (opts.method === 'POST') { sent.push([url, JSON.parse(opts.body)]); return { ok: true, status: 201, json: async () => ({ ok: true }) }; }
     return { ok: true, status: 200, json: async () => ({ ok: true, items }) };
@@ -37,7 +37,7 @@ test('an admin sees the organization\'s collections and opens a new one, filed i
 
 test('an admin deletes a collection by typing its full name', async () => {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push([url, opts.method || 'GET']);
     if (url.includes('/v1/topics')) return { ok: true, status: 200, json: async () => ({ ok: true, items: TOPICS }) };
     return { ok: true, status: 200, json: async () => ({ ok: true, items: [{ slug: 'ominis-labs/old', visibility: 'private', topic: 'Old' }] }) };

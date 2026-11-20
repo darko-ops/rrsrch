@@ -25,7 +25,7 @@ This monorepo holds both halves of the product:
 ```bash
 npm install
 cd rrsrch-react && npm install && cd ..
-# API (default :3001) + CRA proxy
+# API (default :3001); the Vite dev server proxies /api to it
 PORT=3001 node server.js
 # in another terminal:
 cd rrsrch-react && npm start

@@ -3,7 +3,7 @@ import MembersPanel from './Members';
 
 function mock(routes) {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     const hit = Object.keys(routes).find((k) => url.includes(k) && (!routes[k].method || routes[k].method === (opts.method || 'GET')));
     const r = hit ? routes[hit] : { status: 200, body: { ok: true } };

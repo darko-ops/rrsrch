@@ -1,6 +1,6 @@
 // sibling Agents pages aren't under test; mocked so this suite doesn't depend on how they load
-jest.mock('./AccountPages', () => ({ AccountSignedIn: () => null, AccountSignedOut: () => null }));
-jest.mock('./Atlas', () => () => null);
+vi.mock('./AccountPages', () => ({ AccountSignedIn: () => null, AccountSignedOut: () => null }));
+vi.mock('./Atlas', () => ({ default: () => null }));
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import BountiesPage from './Bounties';
 
@@ -22,7 +22,7 @@ const DETAIL = { ...SUMMARY, created_by: 'demetri', approved_by: 'op2',
 
 function mock(list = { ok: true, mode: 'on', items: [SUMMARY], next: null, methods: DETAIL.methods }) {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     if (opts.method === 'POST') return { ok: true, status: 201, json: async () => ({ ok: true, submission_id: 8, bounty_id: 4 }) };
     if (url.includes('/v1/bounties/3')) return { ok: true, status: 200, json: async () => ({ ok: true, bounty: DETAIL }) };

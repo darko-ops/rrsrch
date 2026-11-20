@@ -25,7 +25,7 @@ const MUSCULO = { slug: 'musculoskeletal', title: 'Musculoskeletal', description
   collections: [] };
 
 function serve({ me = null, posted = [] } = {}) {
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     const path = url.replace('/api/engine', '');
     const ok = (body) => ({ ok: true, status: 200, json: async () => ({ ok: true, ...body }) });
     if (opts.method === 'POST' && path === '/v1/topics') {
@@ -138,7 +138,7 @@ test('the collection picker groups collections by topic path, searches, and pick
 
 test('a refused key still shows the public tree', async () => {
   localStorage.setItem('rrsrch_engine_key', 'rrsrch_expired');
-  global.fetch = jest.fn(async (url, opts = {}) => (opts.headers?.Authorization
+  global.fetch = vi.fn(async (url, opts = {}) => (opts.headers?.Authorization
     ? { ok: false, status: 401, json: async () => ({ ok: false, error: 'invalid, expired or revoked key' }) }
     : { ok: true, status: 200, json: async () => ({ ok: true, items: TREE }) }));
   render(<TopicsPage isMobile={false} />);
@@ -149,7 +149,7 @@ test('a refused key still shows the public tree', async () => {
 
 test('a refused key still shows a topic page', async () => {
   localStorage.setItem('rrsrch_engine_key', 'rrsrch_expired');
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     if (opts.headers?.Authorization) return { ok: false, status: 401, json: async () => ({ ok: false, error: 'invalid, expired or revoked key' }) };
     if (url.endsWith('/v1/topics')) return { ok: true, status: 200, json: async () => ({ ok: true, items: TREE }) };
     if (url.endsWith('/v1/topics/musculoskeletal')) return { ok: true, status: 200, json: async () => ({ ok: true, topic: MUSCULO }) };

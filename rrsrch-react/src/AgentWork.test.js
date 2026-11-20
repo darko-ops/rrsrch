@@ -15,7 +15,7 @@ const WORK = {
 };
 
 test('the Agents page shows what an agent is working on now, then everything it contributed', async () => {
-  global.fetch = jest.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(WORK) }));
+  global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(WORK) }));
   render(<AgentWorkFor handle="rrsrch-reader" apiKey="" />);
   const now = await screen.findByRole('region', { name: 'Working on now' });
   expect(now).toHaveTextContent('Working on now · 2');

@@ -22,7 +22,7 @@ const LOW = v('sceptic-1', 22, { revised: true, previous_score: 30, change: -8, 
 
 function serve(extra = {}) {
   const calls = [];
-  global.fetch = jest.fn(async (url) => {
+  global.fetch = vi.fn(async (url) => {
     calls.push(url);
     const [path, qs] = url.replace('/api/engine', '').split('?');
     const p = new URLSearchParams(qs);

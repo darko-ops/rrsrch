@@ -70,7 +70,7 @@ test('role and mission come from the protocol\'s "Role:" and "Mission:" lines', 
 });
 
 test('the Agents page: right now, needs you, status filters and a card per agent linking to its profile', async () => {
-  global.fetch = jest.fn((url) => {
+  global.fetch = vi.fn((url) => {
     const path = url.replace('/api/engine', '').replace(/&limit=\d+$/, '');
     const key = Object.keys(DATA).find((k) => path === k || path.startsWith(`${k}?`));
     return Promise.resolve({ ok: !!key, status: key ? 200 : 404, json: () => Promise.resolve({ ok: !!key, ...(DATA[key] || {}) }) });

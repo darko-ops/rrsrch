@@ -2,11 +2,11 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AccountSignedOut, AccountSignedIn, PasswordUpgrade, ResetPassword } from './AccountPages';
 import { signOut } from './signOut';
 
-jest.mock('./signOut', () => ({ ...jest.requireActual('./signOut'), signOut: jest.fn() }));
+vi.mock('./signOut', async (importOriginal) => ({ ...(await importOriginal()), signOut: vi.fn() }));
 
 function mock(routes) {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     const key = Object.keys(routes).find((k) => {
       const [method, path] = k.includes(' ') ? k.split(' ') : [null, k];
@@ -25,8 +25,8 @@ afterEach(() => localStorage.clear());
 
 test('signing in posts the credentials and stores the account token', async () => {
   const calls = mock({ '/api/account/login': { body: { token: 'tok.1', user: USER } }, '/api/account/config': { body: {} } });
-  const signedIn = jest.fn();
-  render(<AccountSignedOut isMobile={false} onSignedIn={signedIn} onKey={jest.fn()} />);
+  const signedIn = vi.fn();
+  render(<AccountSignedOut isMobile={false} onSignedIn={signedIn} onKey={vi.fn()} />);
   expect(screen.getByText('Sign in to work on the network')).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@x.test' } });
   fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'whatever' } });
@@ -38,7 +38,7 @@ test('signing in posts the credentials and stores the account token', async () =
 
 test('creating an account shows the password rules and waits until they pass', async () => {
   mock({ '/api/account/config': { body: {} } });
-  render(<AccountSignedOut isMobile={false} onSignedIn={jest.fn()} onKey={jest.fn()} />);
+  render(<AccountSignedOut isMobile={false} onSignedIn={vi.fn()} onKey={vi.fn()} />);
   fireEvent.click(screen.getByRole('tab', { name: 'Create account' }));
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ada' } });
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@x.test' } });
@@ -51,8 +51,8 @@ test('creating an account shows the password rules and waits until they pass', a
 
 test('connecting an agent key checks it with the engine and keeps it in this browser', async () => {
   const calls = mock({ '/v1/whoami': { body: { ok: true, handle: 'scout' } }, '/api/account/config': { body: {} } });
-  const onKey = jest.fn();
-  render(<AccountSignedOut isMobile={false} onSignedIn={jest.fn()} onKey={onKey} />);
+  const onKey = vi.fn();
+  render(<AccountSignedOut isMobile={false} onSignedIn={vi.fn()} onKey={onKey} />);
   expect(screen.getByText('Read https://rrsrch.com/agents.md and follow it to join RRSRCH.')).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('agent key'), { target: { value: ' rrsrch_abc ' } });
   fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
@@ -63,7 +63,7 @@ test('connecting an agent key checks it with the engine and keeps it in this bro
 
 test('a rejected key is not stored', async () => {
   mock({ '/v1/whoami': { ok: false, status: 401, body: { ok: false, error: 'invalid key' } }, '/api/account/config': { body: {} } });
-  render(<AccountSignedOut isMobile={false} onSignedIn={jest.fn()} onKey={jest.fn()} />);
+  render(<AccountSignedOut isMobile={false} onSignedIn={vi.fn()} onKey={vi.fn()} />);
   fireEvent.change(screen.getByLabelText('agent key'), { target: { value: 'rrsrch_bad' } });
   fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
   expect(await screen.findByText(/not accepted/)).toBeInTheDocument();
@@ -80,9 +80,9 @@ test('signed in: the identity card shows standing, and Save updates the name and
     'GET /v1/agents/ada-lovelace': { body: { ok: true, agent: { description: 'Old.' } } },
     'PATCH /api/account/me': { body: { ok: true, user: { ...USER, name: 'Ada L.' } } },
   });
-  const onUserChange = jest.fn();
-  render(<AccountSignedIn user={USER} me={ME} apiKey="tok.1" isMobile={false} onSignedOut={jest.fn()}
-    onKeyChange={jest.fn()} onUserChange={onUserChange} />);
+  const onUserChange = vi.fn();
+  render(<AccountSignedIn user={USER} me={ME} apiKey="tok.1" isMobile={false} onSignedOut={vi.fn()}
+    onKeyChange={vi.fn()} onUserChange={onUserChange} />);
   expect(await screen.findByText('2 of 2')).toBeInTheDocument();
   expect(screen.getByText('3 of 5')).toBeInTheDocument();
   expect(screen.getByText('60')).toBeInTheDocument();
@@ -103,8 +103,8 @@ test('signed in: the identity card shows standing, and Save updates the name and
 test('changing the password sends the current and new one and keeps the fresh token', async () => {
   localStorage.setItem('rrsrch_token', 'tok.1');
   const calls = mock({ '/api/account/password': { body: { ok: true, token: 'tok.2', user: USER } }, '/api/account/config': { body: {} } });
-  render(<AccountSignedIn user={USER} me={null} apiKey="tok.1" isMobile={false} onSignedOut={jest.fn()}
-    onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
+  render(<AccountSignedIn user={USER} me={null} apiKey="tok.1" isMobile={false} onSignedOut={vi.fn()}
+    onKeyChange={vi.fn()} onUserChange={vi.fn()} />);
   fireEvent.click(screen.getByRole('tab', { name: 'Sign-in & security' }));
   fireEvent.click(screen.getByRole('button', { name: 'Change password' }));
   fireEvent.change(screen.getByPlaceholderText('Current password'), { target: { value: 'old-one' } });
@@ -120,9 +120,9 @@ test('deleting the account asks for the current password and sends it; a wrong o
   localStorage.setItem('rrsrch_token', 'tok.1');
   const calls = mock({ 'DELETE /api/account/me': { ok: false, status: 401,
     body: { error: 'Enter your current password to delete the account.' } }, '/api/account/config': { body: {} } });
-  const onSignedOut = jest.fn();
+  const onSignedOut = vi.fn();
   render(<AccountSignedIn user={USER} me={null} apiKey="tok.1" isMobile={false} onSignedOut={onSignedOut}
-    onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
+    onKeyChange={vi.fn()} onUserChange={vi.fn()} />);
   fireEvent.click(screen.getByRole('tab', { name: 'Sign-in & security' }));
   fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
   expect(screen.getByRole('button', { name: 'Delete my account' })).toBeDisabled();
@@ -143,10 +143,10 @@ test('Google-only accounts have no password row; Disconnect forgets the agent ke
   localStorage.setItem('rrsrch_token', 'tok.1');
   localStorage.setItem('rrsrch_engine_key', 'rrsrch_k');
   mock({ '/api/account/config': { body: {} } });
-  const onKeyChange = jest.fn();
+  const onKeyChange = vi.fn();
   render(<AccountSignedIn user={{ ...USER, google: true, has_password: false }} me={{ ...ME, handle: 'scout',
-    organization_id: 'rrsrch', org_role: 'admin' }} apiKey="rrsrch_k" isMobile={false} onSignedOut={jest.fn()}
-    onKeyChange={onKeyChange} onUserChange={jest.fn()} />);
+    organization_id: 'rrsrch', org_role: 'admin' }} apiKey="rrsrch_k" isMobile={false} onSignedOut={vi.fn()}
+    onKeyChange={onKeyChange} onUserChange={vi.fn()} />);
   fireEvent.click(screen.getByRole('tab', { name: 'Sign-in & security' }));
   expect(screen.queryByText('Email and password')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Connected' })).toBeDisabled();
@@ -158,8 +158,8 @@ test('Google-only accounts have no password row; Disconnect forgets the agent ke
 
 test('Account keeps account details, keys and search history; notifications are gone', async () => {
   mock({});
-  render(<AccountSignedIn user={USER} me={null} apiKey="" isMobile={false} onSignedOut={jest.fn()}
-    onKeyChange={jest.fn()} onUserChange={jest.fn()} initialTab="keys" />);
+  render(<AccountSignedIn user={USER} me={null} apiKey="" isMobile={false} onSignedOut={vi.fn()}
+    onKeyChange={vi.fn()} onUserChange={vi.fn()} initialTab="keys" />);
   expect(screen.getAllByRole('tab').map((t) => t.textContent))
     .toEqual(['Profile', 'Organization', 'Sign-in & security', 'Keys', 'Search history']);
   expect(screen.getByRole('tab', { name: 'Keys' })).toHaveAttribute('aria-selected', 'true');   // #/account?tab=keys
@@ -176,8 +176,8 @@ test('an organization admin signed in on the site issues keys to its agents from
       { handle: 'dae-chief-of-staff', status: 'active', kind: 'model' }, { handle: 'pat', status: 'active', kind: 'human' }] } },
     '/keys': { body: { ok: true, keys: [] } },
   });
-  render(<AccountSignedIn user={USER} me={null} apiKey="" isMobile onSignedOut={jest.fn()}
-    onKeyChange={jest.fn()} onUserChange={jest.fn()} initialTab="keys" />);
+  render(<AccountSignedIn user={USER} me={null} apiKey="" isMobile onSignedOut={vi.fn()}
+    onKeyChange={vi.fn()} onUserChange={vi.fn()} initialTab="keys" />);
   const agents = await screen.findByText("Your agents' keys (ominis-labs)");
   const own = screen.getByText('Your own key (ominis-2)');
   // the agents come first, so the first "Issue key" a person reaches is an agent's, not their own
@@ -198,8 +198,8 @@ test('an agent acting with its own key sees its keys first', async () => {
       { handle: 'ominis-2', status: 'active', kind: 'human' }, { handle: 'ominis', status: 'active', kind: 'model' }] } },
     '/keys': { body: { ok: true, keys: [] } },
   });
-  render(<AccountSignedIn user={USER} me={null} apiKey="" isMobile onSignedOut={jest.fn()}
-    onKeyChange={jest.fn()} onUserChange={jest.fn()} initialTab="keys" />);
+  render(<AccountSignedIn user={USER} me={null} apiKey="" isMobile onSignedOut={vi.fn()}
+    onKeyChange={vi.fn()} onUserChange={vi.fn()} initialTab="keys" />);
   expect(await screen.findByText('Issue a key for ominis')).toBeInTheDocument();
   expect(screen.queryByText(/Your own key/)).not.toBeInTheDocument();
   await settle();
@@ -208,7 +208,7 @@ test('an agent acting with its own key sees its keys first', async () => {
 test('an unverified account sees the confirm banner', () => {
   mock({});
   render(<AccountSignedIn user={{ ...USER, email_verified: false }} me={null} apiKey="" isMobile={false}
-    onSignedOut={jest.fn()} onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
+    onSignedOut={vi.fn()} onKeyChange={vi.fn()} onUserChange={vi.fn()} />);
   expect(screen.getByText(/to post, answer and comment/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Resend the link' })).toBeInTheDocument();
 });
@@ -220,7 +220,7 @@ describe('organization tab', () => {
     localStorage.setItem('rrsrch_engine_key', 'rrsrch_agentkey');
     let created = false;
     const calls = [];
-    global.fetch = jest.fn(async (url, opts = {}) => {
+    global.fetch = vi.fn(async (url, opts = {}) => {
       calls.push({ url, opts });
       if (url.includes('/v1/organizations') && opts.method === 'POST') { created = true; return { ok: true, status: 201, json: async () => ({ ok: true, organization: { id: 'hopper-lab' } }) }; }
       if (url.includes('/v1/whoami')) return { ok: true, status: 200, json: async () => (created ? { ok: true, handle: 'grace', organization_id: 'hopper-lab', org_role: 'admin', scopes: ['agents'] } : { ok: true, handle: 'grace', organization_id: 'people', org_role: 'member', scopes: ['read'] }) };
@@ -248,8 +248,8 @@ describe('organization tab', () => {
 });
 
 test('an account whose password fails today\'s rules sets a new one before anything else', () => {
-  const onSignedOut = jest.fn();
-  render(<PasswordUpgrade user={{ ...USER, password_upgrade_required: true }} onDone={jest.fn()} onSignedOut={onSignedOut} />);
+  const onSignedOut = vi.fn();
+  render(<PasswordUpgrade user={{ ...USER, password_upgrade_required: true }} onDone={vi.fn()} onSignedOut={onSignedOut} />);
   expect(screen.getByText('Set a new password')).toBeInTheDocument();
   expect(screen.getByText(/has appeared in a data breach/)).toBeInTheDocument();
   expect(screen.getByText(/14 to 72 characters/)).toBeInTheDocument();
@@ -267,9 +267,9 @@ test('a person picks a new handle: checked as typed, sent with their sign-in, an
       handle_change: { allowed: false, next_at: '2026-10-30T12:00:00Z', previous: ['ada-lovelace'] } } },
     '/v1/agents/': { body: { ok: true, agent: { description: '' } } },
   });
-  const onMeChange = jest.fn();
-  render(<AccountSignedIn user={USER} me={ME} apiKey="tok.1" isMobile={false} onSignedOut={jest.fn()}
-    onKeyChange={jest.fn()} onUserChange={jest.fn()} onMeChange={onMeChange} />);
+  const onMeChange = vi.fn();
+  render(<AccountSignedIn user={USER} me={ME} apiKey="tok.1" isMobile={false} onSignedOut={vi.fn()}
+    onKeyChange={vi.fn()} onUserChange={vi.fn()} onMeChange={onMeChange} />);
   const field = screen.getByRole('textbox', { name: 'Handle' });
   await waitFor(() => expect(field).toHaveValue('ada-lovelace'));
   fireEvent.change(field, { target: { value: 'a-' } });
@@ -297,9 +297,9 @@ test('the handle that changes is the one shown: a person\'s own key renames them
     '/v1/agents/': { body: { ok: true, agent: { description: '' } } },
   });
   const human = { ...ME, handle: 'demetri', organization_id: 'rrsrch', key_id: 9 };
-  const onMeChange = jest.fn();
+  const onMeChange = vi.fn();
   const { unmount } = render(<AccountSignedIn user={USER} me={human} apiKey="tok.2" isMobile={false}
-    onSignedOut={jest.fn()} onKeyChange={jest.fn()} onUserChange={jest.fn()} onMeChange={onMeChange} />);
+    onSignedOut={vi.fn()} onKeyChange={vi.fn()} onUserChange={vi.fn()} onMeChange={onMeChange} />);
   const field = screen.getByRole('textbox', { name: 'Handle' });
   await waitFor(() => expect(field).toHaveValue('demetri'));
   fireEvent.change(field, { target: { value: 'dhodges' } });
@@ -312,7 +312,7 @@ test('the handle that changes is the one shown: a person\'s own key renames them
   mock({ 'GET /v1/whoami': { body: { ok: true, ...ME, handle: 'milo', organization_id: 'rrsrch', key_id: 3,
     handle_change: null } }, '/v1/agents/': { body: { ok: true, agent: { description: '' } } } });
   render(<AccountSignedIn user={USER} me={{ ...ME, handle: 'milo' }} apiKey="tok.3" isMobile={false}
-    onSignedOut={jest.fn()} onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
+    onSignedOut={vi.fn()} onKeyChange={vi.fn()} onUserChange={vi.fn()} />);
   expect(await screen.findByText('An agent keeps the handle it signed up with.')).toBeInTheDocument();
   expect(screen.getByRole('textbox', { name: 'Handle' })).toBeDisabled();
 });
@@ -321,8 +321,8 @@ test('acting with only an agent key, Sign out signs out of the whole app', async
   localStorage.setItem('rrsrch_engine_key', 'tok.5');
   mock({});
   render(<AccountSignedIn user={null} me={{ ...ME, handle: 'meech', organization_id: 'rrsrch', org_role: 'admin',
-    scopes: ['read', 'administer'] }} apiKey="tok.5" isMobile={false} onSignedOut={jest.fn()}
-    onKeyChange={jest.fn()} onUserChange={jest.fn()} />);
+    scopes: ['read', 'administer'] }} apiKey="tok.5" isMobile={false} onSignedOut={vi.fn()}
+    onKeyChange={vi.fn()} onUserChange={vi.fn()} />);
   expect(screen.getByText('Acting as meech')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Disconnect' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
@@ -332,7 +332,7 @@ test('acting with only an agent key, Sign out signs out of the whole app', async
 test('a forgotten password: the sign-in form asks for the email and sends a reset link', async () => {
   const calls = mock({ '/api/account/password/forgot': { body: { ok: true, note: 'If an account uses that email, a link is on its way.' } },
     '/api/account/config': { body: {} } });
-  render(<AccountSignedOut isMobile={false} onSignedIn={jest.fn()} onKey={jest.fn()} />);
+  render(<AccountSignedOut isMobile={false} onSignedIn={vi.fn()} onKey={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: 'Forgot password?' }));
   expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@x.test' } });

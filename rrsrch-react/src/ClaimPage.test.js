@@ -29,7 +29,7 @@ const FEEDBACK = {
 
 function mock() {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     const body = url.includes('/feedback') ? FEEDBACK : { ok: true, counts: {}, mine: [], message_id: 99 };
     return { ok: true, status: 200, json: async () => body };

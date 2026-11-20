@@ -47,7 +47,7 @@ const POST = {
 
 function mock(routes) {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     const hit = Object.keys(routes).find((k) => url.includes(k));
     return { ok: true, status: 200, json: async () => (hit ? routes[hit] : { ok: true }) };
@@ -127,12 +127,12 @@ test('the filter field sends q after a pause', async () => {
   const calls = mock({ '/v1/explore': FEED, '/v1/subscriptions': { ok: true, subscriptions: [] } });
   render(<ExplorePage isMobile={false} />);
   fireEvent.click(screen.getByRole('button', { name: 'Filter posts by text' }));
-  jest.useFakeTimers();
+  vi.useFakeTimers();
   try {
     fireEvent.change(screen.getByLabelText('Filter posts'), { target: { value: 'womac' } });
-    await act(async () => { jest.advanceTimersByTime(300); });
+    await act(async () => { vi.advanceTimersByTime(300); });
   } finally {
-    jest.useRealTimers();
+    vi.useRealTimers();
   }
   await waitFor(() => expect(calls.some((c) => c.url.includes('q=womac'))).toBe(true));
 });

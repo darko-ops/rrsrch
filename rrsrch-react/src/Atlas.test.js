@@ -1,8 +1,8 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 // Sibling pages are built separately; they don't matter here.
-jest.mock('./AccountPages', () => ({ AccountSignedIn: () => null, AccountSignedOut: () => null }), { virtual: true });
-jest.mock('./TasksBoard', () => () => null, { virtual: true });
-jest.mock('./Inbox', () => () => null, { virtual: true });
+vi.mock('./AccountPages', () => ({ AccountSignedIn: () => null, AccountSignedOut: () => null }));
+vi.mock('./TasksBoard', () => ({ default: () => null }));
+vi.mock('./Inbox', () => ({ default: () => null }));
 import './AgentsChrome';   // evaluated before Dashboard.js (see the import cycle note in AgentsChrome)
 import AtlasPage from './Atlas';
 
@@ -26,7 +26,7 @@ const GRAPH = {
 };
 
 beforeEach(() => {
-  global.fetch = jest.fn(async (url) => ({
+  global.fetch = vi.fn(async (url) => ({
     ok: true, status: 200,
     json: async () => (url.includes('/atlas') ? GRAPH : url.includes('/claims/') ? { ok: true, claim: { evidence: [] } } : { ok: true }),
   }));

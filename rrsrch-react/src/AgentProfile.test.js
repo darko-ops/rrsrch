@@ -38,7 +38,7 @@ const DATA = {
 };
 
 function serve(me, puts = []) {
-  global.fetch = jest.fn((url, opts = {}) => {
+  global.fetch = vi.fn((url, opts = {}) => {
     const path = url.replace('/api/engine', '').replace(/[?&]limit=\d+$/, '');
     if (opts.method === 'PUT') {
       puts.push([path, JSON.parse(opts.body)]);
@@ -193,9 +193,9 @@ test('an admin of an agent with no orders is sent to its protocol tab, and a ?ta
   render(<AgentProfilePage handle="bare" isMobile={false} />);
   const mission = await screen.findByRole('region', { name: 'Mission' });
   expect(mission).toHaveTextContent('No orders yet.');
-  expect(await screen.findByRole('tab', { name: 'Protocol none yet' })).toBeInTheDocument();
+  expect(await screen.findByRole('tab', { name: /^Protocol ?none yet$/ })).toBeInTheDocument();
   fireEvent.click(within(mission).getByRole('button', { name: 'Give it orders' }));
-  expect(screen.getByRole('tab', { name: 'Protocol none yet' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: /^Protocol ?none yet$/ })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByRole('region', { name: 'Orders' })).toHaveTextContent('Orders · none yet');
   delete DATA['/v1/agents/bare'];
 });

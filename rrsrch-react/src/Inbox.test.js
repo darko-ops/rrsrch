@@ -1,6 +1,6 @@
 // sibling Agents pages aren't under test; mocked so this suite doesn't depend on how they load
-jest.mock('./AccountPages', () => ({ AccountSignedIn: () => null, AccountSignedOut: () => null }));
-jest.mock('./Atlas', () => () => null);
+vi.mock('./AccountPages', () => ({ AccountSignedIn: () => null, AccountSignedOut: () => null }));
+vi.mock('./Atlas', () => ({ default: () => null }));
 import { render, screen, fireEvent } from '@testing-library/react';
 import InboxPage, { pageFor } from './Inbox';
 
@@ -22,7 +22,7 @@ const COMMENTS = { ok: true, messages: [{ id: 11, author: 'bot', body: '@scout w
 
 function mock() {
   const calls = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     calls.push({ url, opts });
     const body = url.includes('/v1/inbox?') ? INBOX : url.includes('/v1/merge-requests/7') && opts.method !== 'POST' ? MR
       : url.includes('/v1/comments?') ? COMMENTS : { ok: true };
@@ -34,7 +34,7 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 
 test('shows unread count, and opening an item marks it read', async () => {
   const calls = mock();
-  const onUnread = jest.fn();
+  const onUnread = vi.fn();
   render(<InboxPage apiKey="k" me={{ handle: 'scout' }} isMobile={false} onUnreadChange={onUnread} />);
   expect(await screen.findByText('3 unread')).toBeInTheDocument();
   fireEvent.click(screen.getByText('post publish'));
@@ -94,7 +94,7 @@ test('a loop says who looped your post and opens the new one', async () => {
   const loop = { id: 'event:30', type: 'loop', at: '2026-10-15T09:00:00Z', read: false, title: 'Dose barely matters',
     meta: 'dose-skeptic', repository: 'rrsrch/network', target: 'post:9',
     detail: { post_id: 9, kind: 'finding', title: 'Dose barely matters', loops: [5], looped_authors: ['scout'] } };
-  global.fetch = jest.fn(async (url) => ({ ok: true, status: 200,
+  global.fetch = vi.fn(async (url) => ({ ok: true, status: 200,
     json: async () => (url.includes('/v1/inbox?') ? { ok: true, unread: 1, items: [loop] } : { ok: true }) }));
   render(<InboxPage apiKey="k" me={{ handle: 'scout' }} isMobile={false} />);
   expect(await screen.findByText('Loop')).toBeInTheDocument();
@@ -111,7 +111,7 @@ test('signed out it asks you to sign in', () => {
 });
 
 test('a site account the engine does not know yet gets an explanation, not an error', async () => {
-  global.fetch = jest.fn(async () => ({ ok: false, status: 401, json: async () => ({ ok: false, error: 'authentication required' }) }));
+  global.fetch = vi.fn(async () => ({ ok: false, status: 401, json: async () => ({ ok: false, error: 'authentication required' }) }));
   render(<InboxPage apiKey="site.token" me={null} isMobile={false} onUnreadChange={() => {}} />);
   expect(await screen.findByText(/Your inbox starts once you've confirmed your email/)).toBeInTheDocument();
 });

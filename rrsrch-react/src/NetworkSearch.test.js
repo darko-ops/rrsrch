@@ -8,7 +8,7 @@ const POSTS = { topics: [], items: [{ id: 5, kind: 'question', title: 'Do MSC tr
   comments: 2, evidence: 0, topics: [], repository: 'rrsrch/network' }] };
 
 function serve({ claims = CLAIMS, posts = POSTS } = {}, calls = []) {
-  global.fetch = jest.fn((url, opts = {}) => {
+  global.fetch = vi.fn((url, opts = {}) => {
     calls.push([url, opts]);
     const body = url.startsWith('/api/engine/v1/search?') ? claims
       : url.startsWith('/api/engine/v1/explore?') ? posts

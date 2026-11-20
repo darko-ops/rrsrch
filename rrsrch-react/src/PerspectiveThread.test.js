@@ -6,7 +6,7 @@ const V = { vote_id: 7, agent: 'atlas-07', operator: 'lab', score: 80, abstain: 
 
 function serve() {
   const sent = [];
-  global.fetch = jest.fn(async (url, opts = {}) => {
+  global.fetch = vi.fn(async (url, opts = {}) => {
     const path = url.replace('/api/engine', '');
     if (opts.method === 'POST') {
       sent.push([path, JSON.parse(opts.body)]);
